@@ -1,9 +1,10 @@
 import ctypes
+import math
 import tempfile
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from tkinter.font import Font
 
 from astroplan import download_IERS_A
@@ -19,11 +20,17 @@ from astroclocks.astronomy import (
     resolve_solar_system_coordinates,
 )
 from astroclocks.settings import (
+    AppSettings,
+    DEFAULT_ALADIN_FOV_DEG,
+    DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
+    DEFAULT_SITE_NAME,
+    format_latitude_display,
     format_longitude_display,
-    load_longitude,
-    save_longitude,
+    load_app_settings,
+    save_app_settings,
 )
+from astroclocks.sites import LOCATION_PRESETS, preset_label
 from astroclocks.utils import is_float, resource_path
 
 
@@ -75,12 +82,16 @@ class AstroClocksApp:
         self.accent = "#4cc9f0"
         self.success = "#7bd88f"
         self.button_bg = "#22303a"
-        self.longitude = load_longitude()
+        self.settings = load_app_settings()
+        self.site_name = self.settings.site_name
+        self.latitude = self.settings.latitude
+        self.longitude = self.settings.longitude
+        self.aladin_fov_deg = self.settings.aladin_fov_deg
         self.coord_font_size = 24
+        self.aladin_button = None
         self.sky_canvas = None
         self.sky_status = None
         self.bright_stars_jnow = convert_star_catalog_j2000_to_jnow(BRIGHT_STARS_J2000)
-        self.sky_hour_span = 6.0
         self.sky_geometry = None
         self.sky_star_points = []
         self.sky_hover_position = None
@@ -92,13 +103,13 @@ class AstroClocksApp:
         self._configure_styles()
         self._configure_root()
         self._create_frames()
-        self._create_longitude_widgets()
+        self._create_site_widgets()
         self._create_search_widgets()
         self._create_time_widgets()
         self._create_coordinate_widgets()
         self._create_hour_angle_widgets()
         self._create_sky_widgets()
-        self.update_longitude_label()
+        self.update_site_labels()
         self.update_value()
 
         self.root.bind("<Return>", lambda event: self.search_coordinates())
@@ -234,7 +245,7 @@ class AstroClocksApp:
 
         subtitle = tk.Label(
             header,
-            text="Temps civil, temps sideral, coordonnees JNow et carte equatoriale temps reel",
+            text="Temps civil, temps sideral, coordonnees JNow et horizon local temps reel",
             foreground=self.muted,
             background=self.gbg,
             font=Font(family="Segoe UI", size=11),
@@ -242,8 +253,28 @@ class AstroClocksApp:
         )
         subtitle.grid(column=0, row=1, sticky="w", pady=(0, 4))
 
+        header_actions = tk.Frame(header, bg=self.gbg)
+        header_actions.grid(column=1, row=0, rowspan=2, sticky="e")
+
+        settings_button = tk.Button(
+            header_actions,
+            text="Parametres",
+            foreground=self.text,
+            background=self.button_bg,
+            activeforeground=self.ebg,
+            activebackground=self.fg,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+            padx=14,
+            pady=5,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            command=self.open_settings_dialog,
+        )
+        settings_button.grid(column=0, row=0, padx=(0, 8), sticky="e")
+
         fullscreen_button = tk.Button(
-            header,
+            header_actions,
             text="Plein Ecran (F11)",
             foreground=self.ebg,
             background=self.accent,
@@ -257,7 +288,7 @@ class AstroClocksApp:
             cursor="hand2",
             command=self._toggle_fullscreen,
         )
-        fullscreen_button.grid(column=1, row=0, rowspan=2, sticky="e")
+        fullscreen_button.grid(column=1, row=0, sticky="e")
 
     def _build_labelframe(self, title, column, row, padx=10, pady=10, relief="raised", bd=None, rowspan=1):
         shell = tk.Frame(
@@ -305,9 +336,9 @@ class AstroClocksApp:
     def _create_frames(self):
         self._create_header()
         timezone = format_timezone_label()
-        self.lf_long = self._build_labelframe("Longitude", 0, 1)
+        self.lf_long = self._build_labelframe("Site d'observation", 0, 1)
         self.lf_search = self._build_labelframe("Find coordinates of an object", 1, 1)
-        self.lf_sky = self._build_labelframe("Live sky map", 2, 1, rowspan=5, bd=6)
+        self.lf_sky = self._build_labelframe("Horizon local", 2, 1, rowspan=5, bd=6)
         self.lf_local = self._build_labelframe(f"Local Time ({timezone})", 0, 2)
         self.lf_utc = self._build_labelframe("UTC", 1, 2)
         self.lf_alpha = self._build_labelframe("Alpha JNow (h m s)", 0, 3)
@@ -334,39 +365,60 @@ class AstroClocksApp:
             frame.grid_columnconfigure(0, weight=1)
             frame.grid_rowconfigure(0, weight=1)
 
-    def _create_longitude_widgets(self):
-        self.long_entry = tk.Entry(
+    def _create_site_widgets(self):
+        self.site_name_label = tk.Label(
             self.lf_long,
-            width=30,
-            bg=self.ebg,
-            fg=self.text,
-            font=Font(family="Segoe UI", size=13),
-            insertbackground=self.fg,
-            relief="flat",
-            highlightbackground=self.card_edge,
-            highlightcolor=self.accent,
-            highlightthickness=1,
+            font=Font(family="Segoe UI", size=13, weight="bold"),
+            background=self.ebg,
+            foreground=self.text,
+            anchor="w",
+            padx=10,
+            pady=6,
         )
-        self.long_entry.grid(column=0, row=0, ipady=7, padx=8, pady=8, sticky="ew")
+        self.site_name_label.grid(column=0, row=0, columnspan=2, padx=8, pady=(8, 4), sticky="ew")
 
-        self._build_button(self.lf_long, "Set", self.set_longitude).grid(
-            column=1, row=0, padx=8, pady=8, sticky="ew"
+        self.latlabel = tk.Label(
+            self.lf_long,
+            font=Font(family="Segoe UI", size=12),
+            background=self.ebg,
+            foreground=self.fg,
+            anchor="w",
+            padx=10,
+            pady=5,
         )
+        self.latlabel.grid(column=0, row=1, columnspan=2, padx=8, pady=4, sticky="ew")
 
         self.longlabel = tk.Label(
             self.lf_long,
-            font=Font(family="Segoe UI", size=18, weight="bold"),
+            font=Font(family="Segoe UI", size=12),
             background=self.ebg,
             foreground=self.fg,
+            anchor="w",
             padx=10,
-            pady=8,
+            pady=5,
         )
-        self.longlabel.grid(column=0, row=1, padx=8, pady=8, sticky="ew")
+        self.longlabel.grid(column=0, row=2, columnspan=2, padx=8, pady=4, sticky="ew")
 
-        self._build_button(self.lf_long, "Reset", self.set_longitude_default).grid(
-            column=1, row=1, padx=8, pady=8, sticky="ew"
+        self.fov_label = tk.Label(
+            self.lf_long,
+            font=Font(family="Segoe UI", size=12),
+            background=self.ebg,
+            foreground=self.muted,
+            anchor="w",
+            padx=10,
+            pady=5,
+        )
+        self.fov_label.grid(column=0, row=3, columnspan=2, padx=8, pady=4, sticky="ew")
+
+        self._build_button(self.lf_long, "Parametres", self.open_settings_dialog).grid(
+            column=0, row=4, padx=8, pady=8, sticky="ew"
+        )
+
+        self._build_button(self.lf_long, "Meudon T1m", self.set_default_site).grid(
+            column=1, row=4, padx=8, pady=8, sticky="ew"
         )
         self.lf_long.grid_columnconfigure(0, weight=1)
+        self.lf_long.grid_columnconfigure(1, weight=1)
 
     def _create_search_widgets(self):
         self.search_entry = tk.Entry(
@@ -387,7 +439,12 @@ class AstroClocksApp:
             column=1, row=1, padx=8, pady=8, sticky="ew"
         )
 
-        self._build_button(self.lf_search, "Aladin 0.5°", self.show_sky_view).grid(
+        self.aladin_button = self._build_button(
+            self.lf_search,
+            f"Aladin {self.aladin_fov_deg:.2f}\N{DEGREE SIGN}",
+            self.show_sky_view,
+        )
+        self.aladin_button.grid(
             column=1, row=0, padx=8, pady=8, sticky="ew"
         )
 
@@ -594,9 +651,6 @@ class AstroClocksApp:
         self.sky_canvas.bind("<Motion>", self._on_sky_motion)
         self.sky_canvas.bind("<Leave>", self._on_sky_leave)
         self.sky_canvas.bind("<Button-1>", self._on_sky_click)
-        self.sky_canvas.bind("<MouseWheel>", self._on_sky_mousewheel)
-        self.sky_canvas.bind("<Button-4>", lambda _event: self._zoom_sky_map(0.8))
-        self.sky_canvas.bind("<Button-5>", lambda _event: self._zoom_sky_map(1.25))
 
         self.sky_status = tk.Label(
             self.lf_sky,
@@ -632,39 +686,66 @@ class AstroClocksApp:
     def _normalize_hour_angle(self, hours):
         return ((hours + 12) % 24) - 12
 
-    def _project_sky_point(self, center_x, center_y, radius, hour_angle, declination):
-        x = center_x + (hour_angle / self.sky_hour_span) * radius
-        y = center_y - (declination / 90) * radius
-        distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-        if distance > radius:
+    def _equatorial_to_horizontal(self, ra_hours, declination, lst_hours):
+        hour_angle = self._normalize_hour_angle(lst_hours - ra_hours)
+        hour_angle_rad = math.radians(hour_angle * 15)
+        dec_rad = math.radians(declination)
+        lat_rad = math.radians(self.latitude)
+
+        sin_altitude = (
+            math.sin(dec_rad) * math.sin(lat_rad)
+            + math.cos(dec_rad) * math.cos(lat_rad) * math.cos(hour_angle_rad)
+        )
+        altitude_rad = math.asin(max(-1.0, min(1.0, sin_altitude)))
+        cos_altitude = max(1e-12, math.cos(altitude_rad))
+
+        sin_azimuth = -math.sin(hour_angle_rad) * math.cos(dec_rad) / cos_altitude
+        cos_azimuth = (
+            math.sin(dec_rad) - math.sin(altitude_rad) * math.sin(lat_rad)
+        ) / (cos_altitude * max(1e-12, math.cos(lat_rad)))
+        azimuth = math.degrees(math.atan2(sin_azimuth, cos_azimuth)) % 360
+
+        return math.degrees(altitude_rad), azimuth, hour_angle
+
+    def _horizontal_to_equatorial(self, altitude, azimuth, lst_hours):
+        altitude_rad = math.radians(altitude)
+        azimuth_rad = math.radians(azimuth)
+        lat_rad = math.radians(self.latitude)
+
+        sin_declination = (
+            math.sin(altitude_rad) * math.sin(lat_rad)
+            + math.cos(altitude_rad) * math.cos(lat_rad) * math.cos(azimuth_rad)
+        )
+        declination_rad = math.asin(max(-1.0, min(1.0, sin_declination)))
+        cos_declination = max(1e-12, math.cos(declination_rad))
+
+        sin_hour_angle = -math.sin(azimuth_rad) * math.cos(altitude_rad) / cos_declination
+        cos_hour_angle = (
+            math.sin(altitude_rad) - math.sin(lat_rad) * math.sin(declination_rad)
+        ) / (max(1e-12, math.cos(lat_rad)) * cos_declination)
+        hour_angle_hours = math.degrees(math.atan2(sin_hour_angle, cos_hour_angle)) / 15
+        hour_angle_hours = self._normalize_hour_angle(hour_angle_hours)
+        ra_hours = (lst_hours - hour_angle_hours) % 24
+
+        return ra_hours, math.degrees(declination_rad), hour_angle_hours
+
+    def _project_horizontal_point(self, center_x, center_y, radius, altitude, azimuth):
+        if altitude < 0:
             return None
+
+        sky_radius = ((90 - altitude) / 90) * radius
+        azimuth_rad = math.radians(azimuth)
+        x = center_x + sky_radius * math.sin(azimuth_rad)
+        y = center_y - sky_radius * math.cos(azimuth_rad)
         return x, y
 
-    def _project_target(self, center_x, center_y, radius, hour_angle, declination):
-        plotted_hour_angle = max(-self.sky_hour_span, min(self.sky_hour_span, hour_angle))
-        plotted_declination = max(-90, min(90, declination))
-        x = center_x + (plotted_hour_angle / self.sky_hour_span) * radius
-        y = center_y - (plotted_declination / 90) * radius
-
-        dx = x - center_x
-        dy = y - center_y
-        distance = (dx**2 + dy**2) ** 0.5
-        visible = abs(hour_angle) <= self.sky_hour_span and distance <= radius
-        if distance > radius:
-            scale = radius / distance
-            x = center_x + dx * scale
-            y = center_y + dy * scale
-        return x, y, visible
-
-    def _circle_half_span(self, radius, offset):
-        return max(0.0, radius**2 - offset**2) ** 0.5
-
-    def _format_hour_angle_label(self, value):
-        if abs(value) < 0.005:
-            value = 0
-        if float(value).is_integer():
-            return f"{int(value):+d}h"
-        return f"{value:+.1f}h"
+    def _project_target(self, center_x, center_y, radius, altitude, azimuth):
+        plotted_altitude = max(0, min(90, altitude))
+        sky_radius = ((90 - plotted_altitude) / 90) * radius
+        azimuth_rad = math.radians(azimuth)
+        x = center_x + sky_radius * math.sin(azimuth_rad)
+        y = center_y - sky_radius * math.cos(azimuth_rad)
+        return x, y, altitude >= 0
 
     def _draw_sky_grid(self, canvas, center_x, center_y, radius):
         canvas.create_oval(
@@ -678,61 +759,55 @@ class AstroClocksApp:
         )
 
         grid_color = "#1d3341"
-        for declination in (-60, -30, 0, 30, 60):
-            y = center_y - (declination / 90) * radius
-            span = self._circle_half_span(radius, y - center_y)
-            canvas.create_line(
-                center_x - span,
-                y,
-                center_x + span,
-                y,
-                fill=grid_color,
+        for altitude in (30, 60):
+            ring_radius = ((90 - altitude) / 90) * radius
+            canvas.create_oval(
+                center_x - ring_radius,
+                center_y - ring_radius,
+                center_x + ring_radius,
+                center_y + ring_radius,
+                outline=grid_color,
                 dash=(4, 5),
             )
             canvas.create_text(
-                center_x + span - 6,
-                y - 8,
-                text=f"{declination:+d}\N{DEGREE SIGN}",
+                center_x + ring_radius - 6,
+                center_y - 8,
+                text=f"{altitude}\N{DEGREE SIGN}",
                 fill=self.muted,
                 font=Font(family="Segoe UI", size=8),
                 anchor="e",
             )
 
-        for hour_angle in (
-            -self.sky_hour_span,
-            -self.sky_hour_span / 2,
-            0,
-            self.sky_hour_span / 2,
-            self.sky_hour_span,
-        ):
-            x = center_x + (hour_angle / self.sky_hour_span) * radius
-            span = self._circle_half_span(radius, x - center_x)
-            color = self.accent if hour_angle == 0 else grid_color
-            width = 2 if hour_angle == 0 else 1
-            line_options = {"fill": color, "width": width}
-            if hour_angle != 0:
+        for azimuth, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
+            azimuth_rad = math.radians(azimuth)
+            x = center_x + radius * math.sin(azimuth_rad)
+            y = center_y - radius * math.cos(azimuth_rad)
+            line_options = {"fill": self.accent if azimuth == 0 else grid_color}
+            if azimuth != 0:
                 line_options["dash"] = (4, 5)
-            canvas.create_line(x, center_y - span, x, center_y + span, **line_options)
+            canvas.create_line(center_x, center_y, x, y, **line_options)
+            label_x = center_x + (radius + 16) * math.sin(azimuth_rad)
+            label_y = center_y - (radius + 16) * math.cos(azimuth_rad)
             canvas.create_text(
-                x,
-                center_y + span + 14,
-                text=self._format_hour_angle_label(hour_angle),
+                label_x,
+                label_y,
+                text=label,
                 fill=self.muted,
-                font=Font(family="Segoe UI", size=8),
+                font=Font(family="Segoe UI", size=10, weight="bold"),
                 anchor="center",
             )
 
         canvas.create_text(
             center_x,
-            center_y - radius - 16,
-            text="Dec +90",
+            center_y,
+            text="Zenith",
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
         canvas.create_text(
             center_x,
             center_y + radius + 34,
-            text=f"Meridien local au centre | Fenetre +/-{self.sky_hour_span:.1f}h",
+            text=f"Horizon local | Latitude {self.latitude:+.3f}\N{DEGREE SIGN}",
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
@@ -740,17 +815,12 @@ class AstroClocksApp:
     def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
         self.sky_star_points = []
         for name, ra_hours, declination, magnitude in self.bright_stars_jnow:
-            hour_angle = self._normalize_hour_angle(lst_hours - ra_hours)
-            if abs(hour_angle) > self.sky_hour_span:
-                continue
-
-            point = self._project_sky_point(
-                center_x,
-                center_y,
-                radius,
-                hour_angle,
+            altitude, azimuth, hour_angle = self._equatorial_to_horizontal(
+                ra_hours,
                 declination,
+                lst_hours,
             )
+            point = self._project_horizontal_point(center_x, center_y, radius, altitude, azimuth)
             if point is None:
                 continue
 
@@ -765,6 +835,9 @@ class AstroClocksApp:
                     "y": y,
                     "ra_hours": ra_hours,
                     "declination": declination,
+                    "altitude": altitude,
+                    "azimuth": azimuth,
+                    "hour_angle": hour_angle,
                     "magnitude": magnitude,
                     "size": size,
                 }
@@ -780,8 +853,8 @@ class AstroClocksApp:
                     anchor="w",
                 )
 
-    def _draw_target_marker(self, canvas, center_x, center_y, radius, hour_angle, declination):
-        x, y, visible = self._project_target(center_x, center_y, radius, hour_angle, declination)
+    def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azimuth):
+        x, y, visible = self._project_target(center_x, center_y, radius, altitude, azimuth)
         marker_color = self.success if visible else self.fg
         canvas.create_oval(x - 11, y - 11, x + 11, y + 11, outline=marker_color, width=2)
         canvas.create_line(x - 17, y, x + 17, y, fill=marker_color, width=2)
@@ -838,10 +911,15 @@ class AstroClocksApp:
         if (dx**2 + dy**2) ** 0.5 > radius:
             return None
 
-        hour_angle = (dx / radius) * self.sky_hour_span
-        declination = max(-90, min(90, -(dy / radius) * 90))
-        ra_hours = (self.sky_geometry["lst_hours"] - hour_angle) % 24
-        return ra_hours, declination, hour_angle
+        sky_radius = (dx**2 + dy**2) ** 0.5
+        altitude = 90 - (sky_radius / radius) * 90
+        azimuth = math.degrees(math.atan2(dx, -dy)) % 360
+        ra_hours, declination, hour_angle = self._horizontal_to_equatorial(
+            altitude,
+            azimuth,
+            self.sky_geometry["lst_hours"],
+        )
+        return ra_hours, declination, hour_angle, altitude, azimuth
 
     def _nearest_sky_star(self, x, y):
         nearest = None
@@ -892,19 +970,23 @@ class AstroClocksApp:
             self.sky_status.config(text=self.sky_base_status)
             return
 
-        ra_hours, declination, hour_angle = coordinates
         star = self._nearest_sky_star(x, y)
         self._draw_hover_overlay(x, y, star)
 
         if star:
             label = (
                 f"{star['name']} | RA JNow {self._format_ra(star['ra_hours'])} | "
-                f"Dec {self._format_dec(star['declination'])} | mag {star['magnitude']:.2f}"
+                f"Dec {self._format_dec(star['declination'])} | "
+                f"Alt {star['altitude']:+.1f}\N{DEGREE SIGN} Az {star['azimuth']:.0f}\N{DEGREE SIGN} | "
+                f"mag {star['magnitude']:.2f}"
             )
         else:
+            ra_hours, declination, hour_angle, altitude, azimuth = coordinates
             label = (
                 f"Pointeur | RA JNow {self._format_ra(ra_hours)} | "
-                f"Dec {self._format_dec(declination)} | HA {hour_angle:+.2f}h"
+                f"Dec {self._format_dec(declination)} | "
+                f"Alt {altitude:+.1f}\N{DEGREE SIGN} Az {azimuth:.0f}\N{DEGREE SIGN} | "
+                f"HA {hour_angle:+.2f}h"
             )
 
         self.sky_status.config(text=f"{label}\n{self.sky_base_status}")
@@ -952,21 +1034,12 @@ class AstroClocksApp:
             )
             return
 
-        ra_hours, declination, _hour_angle = coordinates
+        ra_hours, declination, _hour_angle, _altitude, _azimuth = coordinates
         self._set_target_from_coordinates(
             ra_hours,
             declination,
             "Cible definie depuis la carte",
         )
-
-    def _zoom_sky_map(self, factor):
-        self.sky_hour_span = max(1.0, min(12.0, self.sky_hour_span * factor))
-        self.sky_hour_span = round(self.sky_hour_span, 2)
-        self._update_sky_map()
-
-    def _on_sky_mousewheel(self, event):
-        factor = 0.8 if event.delta > 0 else 1.25
-        self._zoom_sky_map(factor)
 
     def _update_sky_map(self, state=None):
         if self.sky_canvas is None or self.sky_status is None:
@@ -998,7 +1071,11 @@ class AstroClocksApp:
             "lst_hours": lst_hours,
         }
         target_ra_hours, target_declination = self._current_target_coordinates()
-        target_hour_angle = self._normalize_hour_angle(lst_hours - target_ra_hours)
+        target_altitude, target_azimuth, target_hour_angle = self._equatorial_to_horizontal(
+            target_ra_hours,
+            target_declination,
+            lst_hours,
+        )
 
         self._draw_sky_grid(self.sky_canvas, center_x, center_y, radius)
         self._draw_star_catalog(self.sky_canvas, center_x, center_y, radius, lst_hours)
@@ -1007,19 +1084,15 @@ class AstroClocksApp:
             center_x,
             center_y,
             radius,
-            target_hour_angle,
-            target_declination,
+            target_altitude,
+            target_azimuth,
         )
 
-        chart_note = (
-            f"dans la fenetre +/-{self.sky_hour_span:.1f}h"
-            if target_visible
-            else "hors fenetre, marqueur au bord"
-        )
+        chart_note = "au-dessus de l'horizon" if target_visible else "sous l'horizon"
         self.sky_base_status = (
             f"LST {state['lst']} | HA cible {target_hour_angle:+.2f}h | "
-            f"Dec {target_declination:+.1f}\N{DEGREE SIGN}\n"
-            f"Projection equatoriale JNow temps reel: {chart_note}"
+            f"Alt {target_altitude:+.1f}\N{DEGREE SIGN} Az {target_azimuth:.0f}\N{DEGREE SIGN}\n"
+            f"Horizon local JNow: {chart_note}"
         )
         self.sky_status.config(text=self.sky_base_status)
         self._update_sky_hover()
@@ -1098,7 +1171,7 @@ class AstroClocksApp:
   </style>
 </head>
 <body>
-  <div id="header">AstroClocks v{APP_VERSION} | Aladin Lite | FOV: 0.5° | ICRS RA: {ra_deg:.6f}° Dec: {dec_deg:+.6f}°</div>
+  <div id="header">AstroClocks v{APP_VERSION} | Aladin Lite | FOV: {self.aladin_fov_deg:.2f}° | ICRS RA: {ra_deg:.6f}° Dec: {dec_deg:+.6f}°</div>
   <div id="aladin-lite-div"></div>
   <script>
     A.init.then(() => {{
@@ -1106,7 +1179,7 @@ class AstroClocksApp:
         survey: 'P/DSS2/color',
         target: '{ra_deg:.8f} {dec_deg:+.8f}',
         cooFrame: 'J2000',
-        fov: 0.5,
+        fov: {self.aladin_fov_deg:.6f},
         showLayersControl: true,
         showGotoControl: true,
         showFullscreenControl: true,
@@ -1141,7 +1214,8 @@ class AstroClocksApp:
             return
 
         self._set_result_text(
-            f"Opened interactive sky view (ICRS): RA {ra_deg:.6f}° Dec {dec_deg:+.6f}° | FOV 0.5°"
+            f"Opened interactive sky view (ICRS): RA {ra_deg:.6f}° "
+            f"Dec {dec_deg:+.6f}° | FOV {self.aladin_fov_deg:.2f}°"
         )
 
     def update_value(self):
@@ -1157,30 +1231,160 @@ class AstroClocksApp:
         )
         self._update_sky_map()
 
-    def update_longitude_label(self):
-        self.longlabel.config(text=format_longitude_display(self.longitude))
+    def update_site_labels(self):
+        self.site_name_label.config(text=self.site_name)
+        self.latlabel.config(text=f"Latitude  : {format_latitude_display(self.latitude)}")
+        self.longlabel.config(text=f"Longitude : {format_longitude_display(self.longitude)}")
+        self.fov_label.config(text=f"Champ Aladin : {self.aladin_fov_deg:.2f}\N{DEGREE SIGN}")
+        if self.aladin_button is not None:
+            self.aladin_button.config(text=f"Aladin {self.aladin_fov_deg:.2f}\N{DEGREE SIGN}")
 
-    def set_longitude_default(self):
+    def _save_current_settings(self):
+        self.settings = AppSettings(
+            site_name=self.site_name,
+            latitude=self.latitude,
+            longitude=self.longitude,
+            aladin_fov_deg=self.aladin_fov_deg,
+        )
+        save_app_settings(self.settings)
+
+    def set_default_site(self):
+        self.site_name = DEFAULT_SITE_NAME
+        self.latitude = DEFAULT_LATITUDE
         self.longitude = DEFAULT_LONGITUDE
-        save_longitude(self.longitude)
-        self.update_longitude_label()
+        self.aladin_fov_deg = DEFAULT_ALADIN_FOV_DEG
+        self._save_current_settings()
+        self.update_site_labels()
         self._update_sky_map()
 
-    def set_longitude(self):
-        entry_value = self.long_entry.get()
-        if not is_float(entry_value):
-            self.set_longitude_default()
-            return
+    def _parse_float_setting(self, value, label, minimum, maximum):
+        if not is_float(value):
+            raise ValueError(f"{label} doit etre un nombre.")
 
-        longitude = float(entry_value)
-        if longitude < -180 or longitude > 180:
-            self.set_longitude_default()
-            return
+        numeric_value = float(value)
+        if numeric_value < minimum or numeric_value > maximum:
+            raise ValueError(f"{label} doit etre entre {minimum} et {maximum}.")
 
-        self.longitude = longitude
-        save_longitude(self.longitude)
-        self.update_longitude_label()
-        self._update_sky_map()
+        return numeric_value
+
+    def open_settings_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Parametres AstroClocks")
+        dialog.configure(bg=self.gbg)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        preset_lookup = {preset_label(preset): preset for preset in LOCATION_PRESETS}
+        preset_values = list(preset_lookup)
+
+        preset_var = tk.StringVar(value="")
+        site_var = tk.StringVar(value=self.site_name)
+        latitude_var = tk.StringVar(value=f"{self.latitude:.5f}")
+        longitude_var = tk.StringVar(value=f"{self.longitude:.5f}")
+        fov_var = tk.StringVar(value=f"{self.aladin_fov_deg:.2f}")
+
+        body = tk.Frame(dialog, bg=self.gbg, padx=18, pady=16)
+        body.grid(column=0, row=0, sticky="nsew")
+        body.grid_columnconfigure(1, weight=1)
+
+        def add_label(row, text):
+            tk.Label(
+                body,
+                text=text,
+                bg=self.gbg,
+                fg=self.muted,
+                font=Font(family="Segoe UI", size=10, weight="bold"),
+                anchor="w",
+            ).grid(column=0, row=row, padx=(0, 10), pady=7, sticky="w")
+
+        def build_entry(row, variable):
+            entry = tk.Entry(
+                body,
+                textvariable=variable,
+                bg=self.ebg,
+                fg=self.text,
+                insertbackground=self.fg,
+                font=Font(family="Segoe UI", size=11),
+                relief="flat",
+                highlightbackground=self.card_edge,
+                highlightcolor=self.accent,
+                highlightthickness=1,
+                width=34,
+            )
+            entry.grid(column=1, row=row, pady=7, sticky="ew")
+            return entry
+
+        add_label(0, "Lieu connu")
+        preset_combo = ttk.Combobox(
+            body,
+            textvariable=preset_var,
+            values=preset_values,
+            font=Font(family="Segoe UI", size=10),
+            width=42,
+        )
+        preset_combo.grid(column=1, row=0, pady=7, sticky="ew")
+        preset_combo["state"] = "readonly"
+
+        def apply_preset(_event=None):
+            preset = preset_lookup.get(preset_var.get())
+            if preset is None:
+                return
+            site_var.set(preset["name"])
+            latitude_var.set(f"{preset['latitude']:.5f}")
+            longitude_var.set(f"{preset['longitude']:.5f}")
+
+        preset_combo.bind("<<ComboboxSelected>>", apply_preset)
+
+        add_label(1, "Nom du site")
+        build_entry(1, site_var)
+        add_label(2, "Latitude")
+        build_entry(2, latitude_var)
+        add_label(3, "Longitude")
+        build_entry(3, longitude_var)
+        add_label(4, "Champ Aladin")
+        build_entry(4, fov_var)
+
+        hint = tk.Label(
+            body,
+            text="Latitude [-90, 90], longitude [-180, 180], champ Aladin en degres.",
+            bg=self.gbg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=9),
+            anchor="w",
+        )
+        hint.grid(column=0, row=5, columnspan=2, pady=(2, 12), sticky="ew")
+
+        actions = tk.Frame(body, bg=self.gbg)
+        actions.grid(column=0, row=6, columnspan=2, sticky="e")
+
+        def apply_settings():
+            try:
+                latitude = self._parse_float_setting(latitude_var.get(), "Latitude", -90, 90)
+                longitude = self._parse_float_setting(longitude_var.get(), "Longitude", -180, 180)
+                fov = self._parse_float_setting(fov_var.get(), "Champ Aladin", 0.01, 180)
+            except ValueError as exc:
+                messagebox.showerror("Parametres invalides", str(exc), parent=dialog)
+                return
+
+            self.site_name = site_var.get().strip() or "Site personnalise"
+            self.latitude = latitude
+            self.longitude = longitude
+            self.aladin_fov_deg = fov
+            self._save_current_settings()
+            self.update_site_labels()
+            self._update_sky_map()
+            dialog.destroy()
+
+        self._build_button(actions, "Annuler", dialog.destroy).grid(column=0, row=0, padx=(0, 8))
+        self._build_button(actions, "Appliquer", apply_settings).grid(column=1, row=0)
+
+        dialog.bind("<Return>", lambda _event: apply_settings())
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
 
     def _apply_coordinate_result(self, result):
         self._set_result_text(result["message"])
