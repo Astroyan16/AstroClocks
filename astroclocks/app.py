@@ -79,6 +79,11 @@ class AstroClocksApp:
         self.sky_canvas = None
         self.sky_status = None
         self.bright_stars_jnow = convert_star_catalog_j2000_to_jnow(BRIGHT_STARS_J2000)
+        self.sky_hour_span = 6.0
+        self.sky_geometry = None
+        self.sky_star_points = []
+        self.sky_hover_position = None
+        self.sky_base_status = ""
 
         self._configure_styles()
         self._configure_root()
@@ -500,9 +505,16 @@ class AstroClocksApp:
             bg=self.ebg,
             highlightthickness=0,
             bd=0,
+            cursor="crosshair",
         )
         self.sky_canvas.grid(column=0, row=0, padx=8, pady=8, sticky="nsew")
         self.sky_canvas.bind("<Configure>", lambda _event: self._update_sky_map())
+        self.sky_canvas.bind("<Motion>", self._on_sky_motion)
+        self.sky_canvas.bind("<Leave>", self._on_sky_leave)
+        self.sky_canvas.bind("<Button-1>", self._on_sky_click)
+        self.sky_canvas.bind("<MouseWheel>", self._on_sky_mousewheel)
+        self.sky_canvas.bind("<Button-4>", lambda _event: self._zoom_sky_map(0.8))
+        self.sky_canvas.bind("<Button-5>", lambda _event: self._zoom_sky_map(1.25))
 
         self.sky_status = tk.Label(
             self.lf_sky,
@@ -512,6 +524,7 @@ class AstroClocksApp:
             font=Font(family="Segoe UI", size=10),
             justify="left",
             anchor="w",
+            height=3,
         )
         self.sky_status.grid(column=0, row=1, padx=8, pady=(2, 8), sticky="ew")
 
@@ -525,7 +538,8 @@ class AstroClocksApp:
             + (float(self.alpha_mm.get()) / 60)
             + (float(self.alpha_ss.get()) / 3600)
         )
-        dec_sign = -1 if float(self.delta_dd.get()) < 0 else 1
+        delta_degrees_text = str(self.delta_dd.get()).strip()
+        dec_sign = -1 if delta_degrees_text.startswith("-") else 1
         dec_degrees = dec_sign * (
             abs(float(self.delta_dd.get()))
             + (float(self.delta_mm.get()) / 60)
@@ -537,7 +551,7 @@ class AstroClocksApp:
         return ((hours + 12) % 24) - 12
 
     def _project_sky_point(self, center_x, center_y, radius, hour_angle, declination):
-        x = center_x + (hour_angle / 6) * radius
+        x = center_x + (hour_angle / self.sky_hour_span) * radius
         y = center_y - (declination / 90) * radius
         distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
         if distance > radius:
@@ -545,15 +559,15 @@ class AstroClocksApp:
         return x, y
 
     def _project_target(self, center_x, center_y, radius, hour_angle, declination):
-        plotted_hour_angle = max(-6, min(6, hour_angle))
+        plotted_hour_angle = max(-self.sky_hour_span, min(self.sky_hour_span, hour_angle))
         plotted_declination = max(-90, min(90, declination))
-        x = center_x + (plotted_hour_angle / 6) * radius
+        x = center_x + (plotted_hour_angle / self.sky_hour_span) * radius
         y = center_y - (plotted_declination / 90) * radius
 
         dx = x - center_x
         dy = y - center_y
         distance = (dx**2 + dy**2) ** 0.5
-        visible = abs(hour_angle) <= 6 and distance <= radius
+        visible = abs(hour_angle) <= self.sky_hour_span and distance <= radius
         if distance > radius:
             scale = radius / distance
             x = center_x + dx * scale
@@ -562,6 +576,13 @@ class AstroClocksApp:
 
     def _circle_half_span(self, radius, offset):
         return max(0.0, radius**2 - offset**2) ** 0.5
+
+    def _format_hour_angle_label(self, value):
+        if abs(value) < 0.005:
+            value = 0
+        if float(value).is_integer():
+            return f"{int(value):+d}h"
+        return f"{value:+.1f}h"
 
     def _draw_sky_grid(self, canvas, center_x, center_y, radius):
         canvas.create_oval(
@@ -595,8 +616,14 @@ class AstroClocksApp:
                 anchor="e",
             )
 
-        for hour_angle in (-6, -3, 0, 3, 6):
-            x = center_x + (hour_angle / 6) * radius
+        for hour_angle in (
+            -self.sky_hour_span,
+            -self.sky_hour_span / 2,
+            0,
+            self.sky_hour_span / 2,
+            self.sky_hour_span,
+        ):
+            x = center_x + (hour_angle / self.sky_hour_span) * radius
             span = self._circle_half_span(radius, x - center_x)
             color = self.accent if hour_angle == 0 else grid_color
             width = 2 if hour_angle == 0 else 1
@@ -607,7 +634,7 @@ class AstroClocksApp:
             canvas.create_text(
                 x,
                 center_y + span + 14,
-                text=f"{hour_angle:+d}h",
+                text=self._format_hour_angle_label(hour_angle),
                 fill=self.muted,
                 font=Font(family="Segoe UI", size=8),
                 anchor="center",
@@ -623,15 +650,16 @@ class AstroClocksApp:
         canvas.create_text(
             center_x,
             center_y + radius + 34,
-            text="Meridien local au centre",
+            text=f"Meridien local au centre | Fenetre +/-{self.sky_hour_span:.1f}h",
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
 
     def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
+        self.sky_star_points = []
         for name, ra_hours, declination, magnitude in self.bright_stars_jnow:
             hour_angle = self._normalize_hour_angle(lst_hours - ra_hours)
-            if abs(hour_angle) > 6:
+            if abs(hour_angle) > self.sky_hour_span:
                 continue
 
             point = self._project_sky_point(
@@ -648,6 +676,17 @@ class AstroClocksApp:
             size = max(1.5, 4.4 - magnitude)
             fill = "#fff4c7" if magnitude < 0.5 else "#d7eaff"
             canvas.create_oval(x - size, y - size, x + size, y + size, fill=fill, outline="")
+            self.sky_star_points.append(
+                {
+                    "name": name,
+                    "x": x,
+                    "y": y,
+                    "ra_hours": ra_hours,
+                    "declination": declination,
+                    "magnitude": magnitude,
+                    "size": size,
+                }
+            )
 
             if magnitude <= 0.9:
                 canvas.create_text(
@@ -674,6 +713,179 @@ class AstroClocksApp:
         )
         return visible
 
+    def _format_ra(self, ra_hours):
+        total_seconds = int(round((ra_hours % 24) * 3600)) % (24 * 3600)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
+
+    def _format_dec(self, dec_degrees):
+        sign = "-" if dec_degrees < 0 else "+"
+        total_seconds = int(round(abs(dec_degrees) * 3600))
+        degrees = min(90, total_seconds // 3600)
+        minutes = 0 if degrees == 90 else (total_seconds % 3600) // 60
+        seconds = 0 if degrees == 90 else total_seconds % 60
+        return f"{sign}{degrees:02d}\N{DEGREE SIGN} {minutes:02d}' {seconds:02d}\""
+
+    def _coordinates_to_fields(self, ra_hours, dec_degrees):
+        total_ra_seconds = int(round((ra_hours % 24) * 3600)) % (24 * 3600)
+        alpha_hh = total_ra_seconds // 3600
+        alpha_mm = (total_ra_seconds % 3600) // 60
+        alpha_ss = total_ra_seconds % 60
+
+        dec_degrees = max(-90, min(90, dec_degrees))
+        total_dec_seconds = int(round(abs(dec_degrees) * 3600))
+        delta_dd = min(90, total_dec_seconds // 3600)
+        delta_mm = 0 if delta_dd == 90 else (total_dec_seconds % 3600) // 60
+        delta_ss = 0 if delta_dd == 90 else total_dec_seconds % 60
+        if dec_degrees < 0:
+            delta_dd = "-0" if delta_dd == 0 else -delta_dd
+
+        return alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta_ss
+
+    def _sky_coordinates_from_canvas(self, x, y):
+        if not self.sky_geometry:
+            return None
+
+        center_x = self.sky_geometry["center_x"]
+        center_y = self.sky_geometry["center_y"]
+        radius = self.sky_geometry["radius"]
+        dx = x - center_x
+        dy = y - center_y
+        if (dx**2 + dy**2) ** 0.5 > radius:
+            return None
+
+        hour_angle = (dx / radius) * self.sky_hour_span
+        declination = max(-90, min(90, -(dy / radius) * 90))
+        ra_hours = (self.sky_geometry["lst_hours"] - hour_angle) % 24
+        return ra_hours, declination, hour_angle
+
+    def _nearest_sky_star(self, x, y):
+        nearest = None
+        nearest_distance = 999
+        for star in self.sky_star_points:
+            distance = ((star["x"] - x) ** 2 + (star["y"] - y) ** 2) ** 0.5
+            if distance < nearest_distance:
+                nearest = star
+                nearest_distance = distance
+
+        if nearest is not None and nearest_distance <= max(12, nearest["size"] + 8):
+            return nearest
+        return None
+
+    def _draw_hover_overlay(self, x, y, star=None):
+        if self.sky_canvas is None:
+            return
+
+        self.sky_canvas.delete("sky-hover")
+        color = self.fg if star else self.accent
+        if star:
+            x = star["x"]
+            y = star["y"]
+
+        self.sky_canvas.create_oval(
+            x - 14,
+            y - 14,
+            x + 14,
+            y + 14,
+            outline=color,
+            width=2,
+            tags="sky-hover",
+        )
+        self.sky_canvas.create_line(x - 22, y, x + 22, y, fill=color, tags="sky-hover")
+        self.sky_canvas.create_line(x, y - 22, x, y + 22, fill=color, tags="sky-hover")
+
+    def _update_sky_hover(self):
+        if self.sky_hover_position is None:
+            if self.sky_canvas is not None:
+                self.sky_canvas.delete("sky-hover")
+            self.sky_status.config(text=self.sky_base_status)
+            return
+
+        x, y = self.sky_hover_position
+        coordinates = self._sky_coordinates_from_canvas(x, y)
+        if coordinates is None:
+            self.sky_canvas.delete("sky-hover")
+            self.sky_status.config(text=self.sky_base_status)
+            return
+
+        ra_hours, declination, hour_angle = coordinates
+        star = self._nearest_sky_star(x, y)
+        self._draw_hover_overlay(x, y, star)
+
+        if star:
+            label = (
+                f"{star['name']} | RA JNow {self._format_ra(star['ra_hours'])} | "
+                f"Dec {self._format_dec(star['declination'])} | mag {star['magnitude']:.2f}"
+            )
+        else:
+            label = (
+                f"Pointeur | RA JNow {self._format_ra(ra_hours)} | "
+                f"Dec {self._format_dec(declination)} | HA {hour_angle:+.2f}h"
+            )
+
+        self.sky_status.config(text=f"{label}\n{self.sky_base_status}")
+
+    def _set_target_from_coordinates(self, ra_hours, dec_degrees, label):
+        alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta_ss = self._coordinates_to_fields(
+            ra_hours,
+            dec_degrees,
+        )
+        self.alpha_hh.set(alpha_hh)
+        self.alpha_mm.set(alpha_mm)
+        self.alpha_ss.set(alpha_ss)
+        self.delta_dd.set(delta_dd)
+        self.delta_mm.set(delta_mm)
+        self.delta_ss.set(delta_ss)
+        self.update_value()
+        self._set_result_text(
+            f"{label}\nRA JNow: {self._format_ra(ra_hours)}\n"
+            f"Dec JNow: {self._format_dec(dec_degrees)}"
+        )
+
+    def _on_sky_motion(self, event):
+        self.sky_hover_position = (event.x, event.y)
+        self._update_sky_hover()
+
+    def _on_sky_leave(self, _event):
+        self.sky_hover_position = None
+        if self.sky_canvas is not None:
+            self.sky_canvas.delete("sky-hover")
+        if self.sky_status is not None:
+            self.sky_status.config(text=self.sky_base_status)
+
+    def _on_sky_click(self, event):
+        self.sky_hover_position = (event.x, event.y)
+        coordinates = self._sky_coordinates_from_canvas(event.x, event.y)
+        if coordinates is None:
+            return
+
+        star = self._nearest_sky_star(event.x, event.y)
+        if star:
+            self._set_target_from_coordinates(
+                star["ra_hours"],
+                star["declination"],
+                f"Cible definie depuis la carte: {star['name']}",
+            )
+            return
+
+        ra_hours, declination, _hour_angle = coordinates
+        self._set_target_from_coordinates(
+            ra_hours,
+            declination,
+            "Cible definie depuis la carte",
+        )
+
+    def _zoom_sky_map(self, factor):
+        self.sky_hour_span = max(1.0, min(12.0, self.sky_hour_span * factor))
+        self.sky_hour_span = round(self.sky_hour_span, 2)
+        self._update_sky_map()
+
+    def _on_sky_mousewheel(self, event):
+        factor = 0.8 if event.delta > 0 else 1.25
+        self._zoom_sky_map(factor)
+
     def _update_sky_map(self, state=None):
         if self.sky_canvas is None or self.sky_status is None:
             return
@@ -697,6 +909,12 @@ class AstroClocksApp:
         center_y = height / 2 - 10
         radius = max(40, min(width * 0.43, height * 0.38))
         lst_hours = self._parse_clock_hours(state["lst"])
+        self.sky_geometry = {
+            "center_x": center_x,
+            "center_y": center_y,
+            "radius": radius,
+            "lst_hours": lst_hours,
+        }
         target_ra_hours, target_declination = self._current_target_coordinates()
         target_hour_angle = self._normalize_hour_angle(lst_hours - target_ra_hours)
 
@@ -711,14 +929,18 @@ class AstroClocksApp:
             target_declination,
         )
 
-        chart_note = "dans la fenetre +/-6h" if target_visible else "hors fenetre, marqueur au bord"
-        self.sky_status.config(
-            text=(
-                f"LST {state['lst']} | HA cible {target_hour_angle:+.2f}h | "
-                f"Dec {target_declination:+.1f}\N{DEGREE SIGN}\n"
-                f"Projection equatoriale JNow temps reel: {chart_note}"
-            )
+        chart_note = (
+            f"dans la fenetre +/-{self.sky_hour_span:.1f}h"
+            if target_visible
+            else "hors fenetre, marqueur au bord"
         )
+        self.sky_base_status = (
+            f"LST {state['lst']} | HA cible {target_hour_angle:+.2f}h | "
+            f"Dec {target_declination:+.1f}\N{DEGREE SIGN}\n"
+            f"Projection equatoriale JNow temps reel: {chart_note}"
+        )
+        self.sky_status.config(text=self.sky_base_status)
+        self._update_sky_hover()
 
     def _set_result_text(self, text):
         self.result_text.config(state=tk.NORMAL)
@@ -734,8 +956,11 @@ class AstroClocksApp:
         )
 
     def _delta_text(self):
+        delta_degrees_text = str(self.delta_dd.get()).strip()
+        delta_sign = "-" if delta_degrees_text.startswith("-") else ""
+        delta_degrees = abs(int(delta_degrees_text))
         return (
-            f"{int(self.delta_dd.get()):02d}\N{DEGREE SIGN} "
+            f"{delta_sign}{delta_degrees:02d}\N{DEGREE SIGN} "
             f"{int(self.delta_mm.get()):02d}' "
             f"{int(self.delta_ss.get()):02d}\""
         )
@@ -749,12 +974,15 @@ class AstroClocksApp:
         self.delta_ss.set(self._sanitize_int(self.delta_ss.get(), 0, 59))
 
     def _sanitize_int(self, value, minimum, maximum):
+        value_text = str(value).strip()
         try:
-            sanitized = int(value)
+            sanitized = int(value_text)
         except ValueError:
             sanitized = minimum
 
         sanitized = max(minimum, min(maximum, sanitized))
+        if minimum < 0 and sanitized == 0 and value_text.startswith("-"):
+            return "-0"
         return str(sanitized)
 
     def _build_aladin_html(self, ra_deg, dec_deg):

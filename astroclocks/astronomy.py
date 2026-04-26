@@ -145,7 +145,7 @@ def resolve_deep_sky_coordinates(object_name):
 
 def jnow_to_icrs_degrees(alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta_ss):
     ra_hours = float(alpha_hh) + (float(alpha_mm) / 60) + (float(alpha_ss) / 3600)
-    dec_sign = -1 if float(delta_dd) < 0 else 1
+    dec_sign = -1 if str(delta_dd).strip().startswith("-") else 1
     dec_degrees = dec_sign * (
         abs(float(delta_dd)) + (float(delta_mm) / 60) + (float(delta_ss) / 3600)
     )
@@ -254,7 +254,14 @@ def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss):
 
 
 def compute_declination_display(delta_dd, delta_mm, delta_ss):
-    dec_dd = str(int(delta_dd) + 90).zfill(2)
-    dec_mm = str(int(delta_mm)).zfill(2)
-    dec_ss = str(int(delta_ss)).zfill(2)
+    dec_sign = -1 if str(delta_dd).strip().startswith("-") else 1
+    dec_degrees = dec_sign * (
+        abs(float(delta_dd)) + (float(delta_mm) / 60) + (float(delta_ss) / 3600)
+    )
+    total_seconds = int(round((dec_degrees + 90) * 3600))
+    total_seconds = max(0, min(180 * 3600, total_seconds))
+
+    dec_dd = str(total_seconds // 3600).zfill(2)
+    dec_mm = str((total_seconds % 3600) // 60).zfill(2)
+    dec_ss = str(total_seconds % 60).zfill(2)
     return f"{dec_dd}\N{DEGREE SIGN} {dec_mm}' {dec_ss}\""
