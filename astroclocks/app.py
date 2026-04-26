@@ -45,6 +45,9 @@ APP_EMAIL = "yannis.benazza@obspm.fr"
 APP_PHONE = "01 45 07 71 59"
 CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
 SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
 OBJECT_TYPE_CODES = (
     "Asteroid",
@@ -180,6 +183,39 @@ class AstroClocksApp:
             return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
         except Exception:
             return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+
+    def _center_dialog_on_root(self, dialog):
+        dialog.update_idletasks()
+        dialog_width = dialog.winfo_width()
+        dialog_height = dialog.winfo_height()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog_width) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog_height) // 2
+
+        monitor_x, monitor_y, monitor_width, monitor_height = self._current_monitor_geometry()
+        max_x = monitor_x + monitor_width - dialog_width
+        max_y = monitor_y + monitor_height - dialog_height
+        if max_x >= monitor_x:
+            x = min(max(x, monitor_x), max_x)
+        if max_y >= monitor_y:
+            y = min(max(y, monitor_y), max_y)
+
+        dialog.geometry(f"+{x}+{y}")
+        try:
+            hwnd = dialog.winfo_id()
+            # Tk exposes the client HWND; moving the wrapper preserves virtual-screen coordinates.
+            parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
+            ctypes.windll.user32.SetWindowPos(
+                parent_hwnd or hwnd,
+                0,
+                int(x),
+                int(y),
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        except Exception:
+            pass
+        dialog.lift(self.root)
 
     def _enter_fullscreen(self):
         if self.is_fullscreen:
@@ -400,10 +436,7 @@ class AstroClocksApp:
 
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
         dialog.bind("<Return>", lambda _event: dialog.destroy())
-        dialog.update_idletasks()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
-        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self._center_dialog_on_root(dialog)
         dialog.focus_set()
 
     def _build_labelframe(
@@ -1692,10 +1725,7 @@ class AstroClocksApp:
 
         dialog.bind("<Return>", lambda _event: apply_settings())
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
-        dialog.update_idletasks()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
-        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self._center_dialog_on_root(dialog)
 
     def _coordinate_result_message(self, result):
         if result.get("source") == "imcce":
