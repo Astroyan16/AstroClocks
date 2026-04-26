@@ -4,7 +4,8 @@ from dataclasses import asdict, dataclass
 from astroclocks.utils import resource_path
 
 
-DEFAULT_SITE_NAME = "Telescope T1m - Observatoire de Meudon"
+DEFAULT_SITE_NAME = "Télescope T1m - Observatoire de Meudon"
+LEGACY_DEFAULT_SITE_NAME = "Telescope T1m - Observatoire de Meudon"
 DEFAULT_LATITUDE = 48.805
 DEFAULT_LONGITUDE = 2.23006
 DEFAULT_ALADIN_FOV_DEG = 0.5
@@ -61,9 +62,12 @@ def normalize_settings(settings):
     language = str(getattr(settings, "language", DEFAULT_LANGUAGE) or DEFAULT_LANGUAGE).lower()
     if language not in SUPPORTED_LANGUAGES:
         language = DEFAULT_LANGUAGE
+    site_name = str(settings.site_name or DEFAULT_SITE_NAME)
+    if site_name == LEGACY_DEFAULT_SITE_NAME:
+        site_name = DEFAULT_SITE_NAME
 
     return AppSettings(
-        site_name=str(settings.site_name or DEFAULT_SITE_NAME),
+        site_name=site_name,
         latitude=_clamp(float(settings.latitude), -90, 90),
         longitude=_clamp(float(settings.longitude), -180, 180),
         aladin_fov_deg=_clamp(float(settings.aladin_fov_deg), 0.01, 180),
