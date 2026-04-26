@@ -39,6 +39,10 @@ from astroclocks.utils import is_float, resource_path
 
 
 APP_VERSION = "3.0"
+APP_YEAR = "2026"
+APP_AUTHOR = "Yannis Benazza"
+APP_EMAIL = "yannis.benazza@obspm.fr"
+APP_PHONE = "01 45 07 71 59"
 SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
 OBJECT_TYPE_CODES = (
     "Asteroid",
@@ -266,6 +270,23 @@ class AstroClocksApp:
         )
         self.header_settings_button.grid(column=0, row=0, padx=(0, 8), sticky="e")
 
+        self.about_button = tk.Button(
+            header_actions,
+            text=self._tr("button.about"),
+            foreground=self.text,
+            background=self.button_bg,
+            activeforeground=self.ebg,
+            activebackground=self.fg,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+            padx=14,
+            pady=5,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            command=self.open_about_dialog,
+        )
+        self.about_button.grid(column=1, row=0, padx=(0, 8), sticky="e")
+
         self.fullscreen_button = tk.Button(
             header_actions,
             text=self._tr("button.fullscreen"),
@@ -281,7 +302,35 @@ class AstroClocksApp:
             cursor="hand2",
             command=self._toggle_fullscreen,
         )
-        self.fullscreen_button.grid(column=1, row=0, sticky="e")
+        self.fullscreen_button.grid(column=2, row=0, padx=(0, 8), sticky="e")
+
+        self.quit_button = tk.Button(
+            header_actions,
+            text=self._tr("button.quit"),
+            foreground=self.text,
+            background=self.button_bg,
+            activeforeground=self.ebg,
+            activebackground=self.fg,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+            padx=14,
+            pady=5,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            command=self.root.destroy,
+        )
+        self.quit_button.grid(column=3, row=0, sticky="e")
+
+    def open_about_dialog(self):
+        message = (
+            f"AstroClocks\n\n"
+            f"{self._tr('about.version')} : {APP_VERSION}\n"
+            f"{self._tr('about.year')} : {APP_YEAR}\n"
+            f"{self._tr('about.author')} : {APP_AUTHOR}\n"
+            f"{self._tr('about.email')} : {APP_EMAIL}\n"
+            f"{self._tr('about.phone')} : {APP_PHONE}"
+        )
+        messagebox.showinfo(self._tr("about.title"), message, parent=self.root)
 
     def _build_labelframe(
         self,
@@ -1356,7 +1405,9 @@ class AstroClocksApp:
     def _refresh_language_texts(self):
         self.subtitle_label.config(text=self._tr("app.subtitle"))
         self.header_settings_button.config(text=self._tr("button.settings"))
+        self.about_button.config(text=self._tr("button.about"))
         self.fullscreen_button.config(text=self._tr("button.fullscreen"))
+        self.quit_button.config(text=self._tr("button.quit"))
         self.search_button.config(text=self._tr("button.search"))
         self.alpha_set_button.config(text=self._tr("button.set"))
         self.delta_set_button.config(text=self._tr("button.set"))
