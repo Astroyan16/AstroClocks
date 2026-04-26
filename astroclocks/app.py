@@ -735,7 +735,7 @@ class AstroClocksApp:
 
         sky_radius = ((90 - altitude) / 90) * radius
         azimuth_rad = math.radians(azimuth)
-        x = center_x + sky_radius * math.sin(azimuth_rad)
+        x = center_x - sky_radius * math.sin(azimuth_rad)
         y = center_y - sky_radius * math.cos(azimuth_rad)
         return x, y
 
@@ -743,7 +743,7 @@ class AstroClocksApp:
         plotted_altitude = max(0, min(90, altitude))
         sky_radius = ((90 - plotted_altitude) / 90) * radius
         azimuth_rad = math.radians(azimuth)
-        x = center_x + sky_radius * math.sin(azimuth_rad)
+        x = center_x - sky_radius * math.sin(azimuth_rad)
         y = center_y - sky_radius * math.cos(azimuth_rad)
         return x, y, altitude >= 0
 
@@ -780,13 +780,13 @@ class AstroClocksApp:
 
         for azimuth, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
             azimuth_rad = math.radians(azimuth)
-            x = center_x + radius * math.sin(azimuth_rad)
+            x = center_x - radius * math.sin(azimuth_rad)
             y = center_y - radius * math.cos(azimuth_rad)
             line_options = {"fill": self.accent if azimuth == 0 else grid_color}
             if azimuth != 0:
                 line_options["dash"] = (4, 5)
             canvas.create_line(center_x, center_y, x, y, **line_options)
-            label_x = center_x + (radius + 16) * math.sin(azimuth_rad)
+            label_x = center_x - (radius + 16) * math.sin(azimuth_rad)
             label_y = center_y - (radius + 16) * math.cos(azimuth_rad)
             canvas.create_text(
                 label_x,
@@ -913,7 +913,7 @@ class AstroClocksApp:
 
         sky_radius = (dx**2 + dy**2) ** 0.5
         altitude = 90 - (sky_radius / radius) * 90
-        azimuth = math.degrees(math.atan2(dx, -dy)) % 360
+        azimuth = math.degrees(math.atan2(-dx, -dy)) % 360
         ra_hours, declination, hour_angle = self._horizontal_to_equatorial(
             altitude,
             azimuth,
