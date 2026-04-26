@@ -8,6 +8,8 @@ DEFAULT_SITE_NAME = "Telescope T1m - Observatoire de Meudon"
 DEFAULT_LATITUDE = 48.805
 DEFAULT_LONGITUDE = 2.23006
 DEFAULT_ALADIN_FOV_DEG = 0.5
+DEFAULT_LANGUAGE = "en"
+SUPPORTED_LANGUAGES = {"en", "fr"}
 
 LONGITUDE_FILE = resource_path("Longitude.ini")
 SETTINGS_FILE = resource_path("AstroClocks.ini")
@@ -19,6 +21,7 @@ class AppSettings:
     latitude: float = DEFAULT_LATITUDE
     longitude: float = DEFAULT_LONGITUDE
     aladin_fov_deg: float = DEFAULT_ALADIN_FOV_DEG
+    language: str = DEFAULT_LANGUAGE
 
 
 def _clamp(value, minimum, maximum):
@@ -41,11 +44,16 @@ def _read_legacy_longitude():
 
 
 def normalize_settings(settings):
+    language = str(getattr(settings, "language", DEFAULT_LANGUAGE) or DEFAULT_LANGUAGE).lower()
+    if language not in SUPPORTED_LANGUAGES:
+        language = DEFAULT_LANGUAGE
+
     return AppSettings(
         site_name=str(settings.site_name or DEFAULT_SITE_NAME),
         latitude=_clamp(float(settings.latitude), -90, 90),
         longitude=_clamp(float(settings.longitude), -180, 180),
         aladin_fov_deg=_clamp(float(settings.aladin_fov_deg), 0.01, 180),
+        language=language,
     )
 
 
@@ -67,6 +75,7 @@ def load_app_settings():
             latitude=data.get("latitude", DEFAULT_LATITUDE),
             longitude=data.get("longitude", DEFAULT_LONGITUDE),
             aladin_fov_deg=data.get("aladin_fov_deg", DEFAULT_ALADIN_FOV_DEG),
+            language=data.get("language", DEFAULT_LANGUAGE),
         )
     )
 

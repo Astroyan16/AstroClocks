@@ -108,6 +108,9 @@ def resolve_solar_system_coordinates(selected_type, object_name):
             f"Alpha : {coordinates[0]}\n"
             f"Delta : {coordinates[1]}"
         ),
+        "source": "imcce",
+        "source_ra": coordinates[0],
+        "source_dec": coordinates[1],
         "alpha_hh": int(alpha_hh),
         "alpha_mm": int(alpha_mm),
         "alpha_ss": str(round(float(alpha_ss))).zfill(2),
@@ -134,6 +137,9 @@ def resolve_deep_sky_coordinates(object_name):
             f"RA (Alpha) : {alpha2000}\n"
             f"Dec (Delta) : {delta2000}"
         ),
+        "source": "sesame",
+        "source_ra": alpha2000,
+        "source_dec": delta2000,
         "alpha_hh": alpha_value[0:2],
         "alpha_mm": alpha_value[2:4],
         "alpha_ss": str(round(float(alpha_value[4:9]))).zfill(2),

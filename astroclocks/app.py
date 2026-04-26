@@ -19,6 +19,7 @@ from astroclocks.astronomy import (
     resolve_deep_sky_coordinates,
     resolve_solar_system_coordinates,
 )
+from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS, translate
 from astroclocks.settings import (
     AppSettings,
     DEFAULT_ALADIN_FOV_DEG,
@@ -31,38 +32,20 @@ from astroclocks.settings import (
     save_app_settings,
 )
 from astroclocks.sites import LOCATION_PRESETS, preset_label
+from astroclocks.star_catalog import NAMED_STARS_J2000
 from astroclocks.utils import is_float, resource_path
 
 
 APP_VERSION = "3.0"
-
-BRIGHT_STARS_J2000 = [
-    ("Sirius", 6.7525, -16.7161, -1.46),
-    ("Canopus", 6.3992, -52.6957, -0.74),
-    ("Arcturus", 14.2610, 19.1825, -0.05),
-    ("Vega", 18.6156, 38.7837, 0.03),
-    ("Capella", 5.2782, 45.9980, 0.08),
-    ("Rigel", 5.2423, -8.2016, 0.12),
-    ("Procyon", 7.6550, 5.2250, 0.34),
-    ("Achernar", 1.6286, -57.2368, 0.46),
-    ("Betelgeuse", 5.9195, 7.4071, 0.50),
-    ("Hadar", 14.0637, -60.3730, 0.61),
-    ("Altair", 19.8464, 8.8683, 0.77),
-    ("Acrux", 12.4433, -63.0991, 0.76),
-    ("Aldebaran", 4.5987, 16.5093, 0.85),
-    ("Spica", 13.4199, -11.1613, 0.97),
-    ("Antares", 16.4901, -26.4320, 1.06),
-    ("Pollux", 7.7553, 28.0262, 1.14),
-    ("Fomalhaut", 22.9608, -29.6222, 1.16),
-    ("Deneb", 20.6905, 45.2803, 1.25),
-    ("Regulus", 10.1395, 11.9672, 1.35),
-    ("Adhara", 6.9771, -28.9721, 1.50),
-    ("Castor", 7.5767, 31.8883, 1.58),
-    ("Shaula", 17.5601, -37.1038, 1.62),
-    ("Bellatrix", 5.4189, 6.3497, 1.64),
-    ("Elnath", 5.4382, 28.6075, 1.65),
-    ("Miaplacidus", 9.2201, -69.7172, 1.67),
-]
+SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
+OBJECT_TYPE_CODES = (
+    "Asteroid",
+    "Comet",
+    "Dwarf Planet",
+    "Planet",
+    "Natural Satellite",
+    "Star, Deep Sky Object",
+)
 
 
 class AstroClocksApp:
@@ -87,11 +70,12 @@ class AstroClocksApp:
         self.latitude = self.settings.latitude
         self.longitude = self.settings.longitude
         self.aladin_fov_deg = self.settings.aladin_fov_deg
+        self.language = self.settings.language
         self.coord_font_size = 24
         self.aladin_button = None
         self.sky_canvas = None
         self.sky_status = None
-        self.bright_stars_jnow = convert_star_catalog_j2000_to_jnow(BRIGHT_STARS_J2000)
+        self.named_stars_jnow = convert_star_catalog_j2000_to_jnow(NAMED_STARS_J2000)
         self.sky_geometry = None
         self.sky_star_points = []
         self.sky_hover_position = None
@@ -99,6 +83,8 @@ class AstroClocksApp:
         self.is_fullscreen = False
         self.windowed_geometry = None
         self.windowed_state = "normal"
+        self.labelframe_title_labels = []
+        self.object_type_label_to_code = {}
 
         self._configure_styles()
         self._configure_root()
@@ -114,6 +100,9 @@ class AstroClocksApp:
 
         self.root.bind("<Return>", lambda event: self.search_coordinates())
         self.root.bind("<Configure>", self._update_coordinate_font_size)
+
+    def _tr(self, key, **values):
+        return translate(self.language, key, **values)
 
     def _configure_styles(self):
         style = ttk.Style()
@@ -243,22 +232,22 @@ class AstroClocksApp:
         )
         title.grid(column=0, row=0, sticky="w")
 
-        subtitle = tk.Label(
+        self.subtitle_label = tk.Label(
             header,
-            text="Temps civil, temps sideral, coordonnees JNow et horizon local temps reel",
+            text=self._tr("app.subtitle"),
             foreground=self.muted,
             background=self.gbg,
             font=Font(family="Segoe UI", size=11),
             anchor="w",
         )
-        subtitle.grid(column=0, row=1, sticky="w", pady=(0, 4))
+        self.subtitle_label.grid(column=0, row=1, sticky="w", pady=(0, 4))
 
         header_actions = tk.Frame(header, bg=self.gbg)
         header_actions.grid(column=1, row=0, rowspan=2, sticky="e")
 
-        settings_button = tk.Button(
+        self.header_settings_button = tk.Button(
             header_actions,
-            text="Parametres",
+            text=self._tr("button.settings"),
             foreground=self.text,
             background=self.button_bg,
             activeforeground=self.ebg,
@@ -271,11 +260,11 @@ class AstroClocksApp:
             cursor="hand2",
             command=self.open_settings_dialog,
         )
-        settings_button.grid(column=0, row=0, padx=(0, 8), sticky="e")
+        self.header_settings_button.grid(column=0, row=0, padx=(0, 8), sticky="e")
 
-        fullscreen_button = tk.Button(
+        self.fullscreen_button = tk.Button(
             header_actions,
-            text="Plein Ecran (F11)",
+            text=self._tr("button.fullscreen"),
             foreground=self.ebg,
             background=self.accent,
             activeforeground=self.ebg,
@@ -288,9 +277,21 @@ class AstroClocksApp:
             cursor="hand2",
             command=self._toggle_fullscreen,
         )
-        fullscreen_button.grid(column=1, row=0, sticky="e")
+        self.fullscreen_button.grid(column=1, row=0, sticky="e")
 
-    def _build_labelframe(self, title, column, row, padx=10, pady=10, relief="raised", bd=None, rowspan=1):
+    def _build_labelframe(
+        self,
+        title_key,
+        column,
+        row,
+        padx=10,
+        pady=10,
+        relief="raised",
+        bd=None,
+        rowspan=1,
+        title_kwargs=None,
+    ):
+        title_kwargs = title_kwargs or {}
         shell = tk.Frame(
             self.root,
             background=self.card_bg,
@@ -303,14 +304,16 @@ class AstroClocksApp:
         shell.grid_columnconfigure(0, weight=1)
         shell.grid_rowconfigure(1, weight=1)
 
-        tk.Label(
+        title_label = tk.Label(
             shell,
-            text=title.upper(),
+            text=self._tr(title_key, **title_kwargs).upper(),
             foreground=self.muted,
             background=self.card_bg,
             font=Font(family="Segoe UI", size=10, weight="bold"),
             anchor="w",
-        ).grid(column=0, row=0, padx=14, pady=(12, 4), sticky="ew")
+        )
+        title_label.grid(column=0, row=0, padx=14, pady=(12, 4), sticky="ew")
+        self.labelframe_title_labels.append((title_label, title_key, title_kwargs))
 
         body = tk.Frame(shell, background=self.card_bg)
         body.grid(column=0, row=1, padx=10, pady=(0, 10), sticky="nsew")
@@ -336,19 +339,23 @@ class AstroClocksApp:
     def _create_frames(self):
         self._create_header()
         timezone = format_timezone_label()
-        self.lf_long = self._build_labelframe("Site d'observation", 0, 1)
-        self.lf_search = self._build_labelframe("Find coordinates of an object", 1, 1)
-        self.lf_sky = self._build_labelframe("Horizon local", 2, 1, rowspan=5, bd=6)
-        self.lf_local = self._build_labelframe(f"Local Time ({timezone})", 0, 2)
-        self.lf_utc = self._build_labelframe("UTC", 1, 2)
-        self.lf_alpha = self._build_labelframe("Alpha JNow (h m s)", 0, 3)
-        self.lf_delta = self._build_labelframe("Delta JNow (d m s)", 1, 3)
-        self.lf_gmst = self._build_labelframe("Greenwich Sidereal Time", 0, 4)
-        self.lf_lst = self._build_labelframe("Local Sidereal Time", 1, 4)
-        self.lf_ha = self._build_labelframe(
-            "Hour Angle (EAST circle +6h)", 0, 5, relief="ridge", bd=6
+        self.lf_long = self._build_labelframe("frame.site", 0, 1)
+        self.lf_search = self._build_labelframe("frame.search", 1, 1)
+        self.lf_sky = self._build_labelframe("frame.sky", 2, 1, rowspan=5, bd=6)
+        self.lf_local = self._build_labelframe(
+            "frame.local_time", 0, 2, title_kwargs={"timezone": timezone}
         )
-        self.lf_dec = self._build_labelframe("Declination (+90deg)", 1, 5, relief="ridge", bd=6)
+        self.lf_utc = self._build_labelframe("frame.utc", 1, 2)
+        self.lf_alpha = self._build_labelframe("frame.alpha", 0, 3)
+        self.lf_delta = self._build_labelframe("frame.delta", 1, 3)
+        self.lf_gmst = self._build_labelframe("frame.gmst", 0, 4)
+        self.lf_lst = self._build_labelframe("frame.lst", 1, 4)
+        self.lf_ha = self._build_labelframe(
+            "frame.hour_angle", 0, 5, relief="ridge", bd=6
+        )
+        self.lf_dec = self._build_labelframe(
+            "frame.declination", 1, 5, relief="ridge", bd=6
+        )
         for frame in (
             self.lf_long,
             self.lf_local,
@@ -410,15 +417,35 @@ class AstroClocksApp:
         )
         self.fov_label.grid(column=0, row=3, columnspan=2, padx=8, pady=4, sticky="ew")
 
-        self._build_button(self.lf_long, "Parametres", self.open_settings_dialog).grid(
-            column=0, row=4, padx=8, pady=8, sticky="ew"
+        self.site_settings_button = self._build_button(
+            self.lf_long, self._tr("button.settings"), self.open_settings_dialog
         )
+        self.site_settings_button.grid(column=0, row=4, padx=8, pady=8, sticky="ew")
 
-        self._build_button(self.lf_long, "Meudon T1m", self.set_default_site).grid(
-            column=1, row=4, padx=8, pady=8, sticky="ew"
+        self.default_site_button = self._build_button(
+            self.lf_long, self._tr("button.meudon"), self.set_default_site
         )
+        self.default_site_button.grid(column=1, row=4, padx=8, pady=8, sticky="ew")
         self.lf_long.grid_columnconfigure(0, weight=1)
         self.lf_long.grid_columnconfigure(1, weight=1)
+
+    def _object_type_display(self, object_type_code):
+        return self._tr(f"object_type.{object_type_code}")
+
+    def _selected_object_type_code(self):
+        selected_label = self.combo_box.get()
+        return self.object_type_label_to_code.get(selected_label, selected_label)
+
+    def _set_object_type_values(self, selected_code=None):
+        if selected_code is None and hasattr(self, "combo_box"):
+            selected_code = self._selected_object_type_code()
+        if selected_code not in OBJECT_TYPE_CODES:
+            selected_code = "Star, Deep Sky Object"
+
+        values = [self._object_type_display(code) for code in OBJECT_TYPE_CODES]
+        self.object_type_label_to_code = dict(zip(values, OBJECT_TYPE_CODES))
+        self.combo_box["values"] = values
+        self.combo_box.set(self._object_type_display(selected_code))
 
     def _create_search_widgets(self):
         self.search_entry = tk.Entry(
@@ -435,34 +462,25 @@ class AstroClocksApp:
         )
         self.search_entry.grid(column=0, row=0, ipady=7, padx=8, pady=8, sticky="ew")
 
-        self._build_button(self.lf_search, "Search", self.search_coordinates).grid(
-            column=1, row=1, padx=8, pady=8, sticky="ew"
+        self.search_button = self._build_button(
+            self.lf_search, self._tr("button.search"), self.search_coordinates
         )
+        self.search_button.grid(column=1, row=1, padx=8, pady=8, sticky="ew")
 
         self.aladin_button = self._build_button(
             self.lf_search,
-            f"Aladin {self.aladin_fov_deg:.2f}\N{DEGREE SIGN}",
+            self._tr("button.aladin", value=self.aladin_fov_deg),
             self.show_sky_view,
         )
-        self.aladin_button.grid(
-            column=1, row=0, padx=8, pady=8, sticky="ew"
-        )
+        self.aladin_button.grid(column=1, row=0, padx=8, pady=8, sticky="ew")
 
         self.combo_box = ttk.Combobox(
             self.lf_search,
-            values=[
-                "Asteroid",
-                "Comet",
-                "Dwarf Planet",
-                "Planet",
-                "Natural Satellite",
-                "Star, Deep Sky Object",
-            ],
             font=Font(family="Segoe UI", size=13),
         )
         self.combo_box.grid(column=0, row=1, padx=8, pady=8, sticky="ew")
         self.combo_box["state"] = "readonly"
-        self.combo_box.current(5)
+        self._set_object_type_values("Star, Deep Sky Object")
 
         self.result_text = tk.Text(
             self.lf_search,
@@ -549,13 +567,15 @@ class AstroClocksApp:
         self._build_spinbox(self.lf_delta, self.delta_mm, 0, 59, 2)
         self._build_spinbox(self.lf_delta, self.delta_ss, 0, 59, 3)
 
-        self._build_button(self.lf_alpha, "Set", self.update_value).grid(
-            column=4, row=0, padx=8, pady=8, sticky="ew"
+        self.alpha_set_button = self._build_button(
+            self.lf_alpha, self._tr("button.set"), self.update_value
         )
+        self.alpha_set_button.grid(column=4, row=0, padx=8, pady=8, sticky="ew")
 
-        self._build_button(self.lf_delta, "Set", self.update_value).grid(
-            column=4, row=0, padx=8, pady=8, sticky="ew"
+        self.delta_set_button = self._build_button(
+            self.lf_delta, self._tr("button.set"), self.update_value
         )
+        self.delta_set_button.grid(column=4, row=0, padx=8, pady=8, sticky="ew")
 
         for frame in (self.lf_alpha, self.lf_delta):
             frame.grid_columnconfigure(0, weight=1)
@@ -800,21 +820,21 @@ class AstroClocksApp:
         canvas.create_text(
             center_x,
             center_y,
-            text="Zenith",
+            text=self._tr("sky.zenith"),
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
         canvas.create_text(
             center_x,
             center_y + radius + 34,
-            text=f"Horizon local | Latitude {self.latitude:+.3f}\N{DEGREE SIGN}",
+            text=self._tr("sky.horizon_latitude", latitude=self.latitude),
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
 
     def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
         self.sky_star_points = []
-        for name, ra_hours, declination, magnitude in self.bright_stars_jnow:
+        for name, ra_hours, declination, magnitude in self.named_stars_jnow:
             altitude, azimuth, hour_angle = self._equatorial_to_horizontal(
                 ra_hours,
                 declination,
@@ -825,8 +845,13 @@ class AstroClocksApp:
                 continue
 
             x, y = point
-            size = max(1.5, 4.4 - magnitude)
-            fill = "#fff4c7" if magnitude < 0.5 else "#d7eaff"
+            size = max(1.2, min(5.8, 4.8 - magnitude))
+            if magnitude < 0.5:
+                fill = "#fff4c7"
+            elif magnitude < 2.5:
+                fill = "#d7eaff"
+            else:
+                fill = "#9fb2c3"
             canvas.create_oval(x - size, y - size, x + size, y + size, fill=fill, outline="")
             self.sky_star_points.append(
                 {
@@ -843,7 +868,7 @@ class AstroClocksApp:
                 }
             )
 
-            if magnitude <= 0.9:
+            if magnitude <= SKY_STAR_LABEL_MAX_MAGNITUDE:
                 canvas.create_text(
                     x + 7,
                     y - 7,
@@ -862,7 +887,7 @@ class AstroClocksApp:
         canvas.create_text(
             x,
             y + 26,
-            text="Cible",
+            text=self._tr("sky.target"),
             fill=marker_color,
             font=Font(family="Segoe UI", size=9, weight="bold"),
         )
@@ -956,6 +981,52 @@ class AstroClocksApp:
         self.sky_canvas.create_line(x - 22, y, x + 22, y, fill=color, tags="sky-hover")
         self.sky_canvas.create_line(x, y - 22, x, y + 22, fill=color, tags="sky-hover")
 
+        if not star:
+            return
+
+        label = star["name"]
+        label_font = Font(family="Segoe UI", size=9, weight="bold")
+        canvas_width = self.sky_canvas.winfo_width()
+        canvas_height = self.sky_canvas.winfo_height()
+        margin = 8
+        offset = 18
+        padding_x = 7
+        padding_y = 4
+        text_width = label_font.measure(label)
+
+        label_x = x + offset
+        label_anchor = "w"
+        if label_x + text_width + padding_x > canvas_width - margin:
+            label_x = x - offset
+            label_anchor = "e"
+
+        label_y = y - 20
+        if label_y - padding_y < margin:
+            label_y = min(canvas_height - margin, y + 20)
+
+        text_id = self.sky_canvas.create_text(
+            label_x,
+            label_y,
+            text=label,
+            fill=self.text,
+            font=label_font,
+            anchor=label_anchor,
+            tags="sky-hover",
+        )
+        bbox = self.sky_canvas.bbox(text_id)
+        if bbox:
+            rect_id = self.sky_canvas.create_rectangle(
+                bbox[0] - padding_x,
+                bbox[1] - padding_y,
+                bbox[2] + padding_x,
+                bbox[3] + padding_y,
+                fill=self.ebg,
+                outline=color,
+                width=1,
+                tags="sky-hover",
+            )
+            self.sky_canvas.tag_lower(rect_id, text_id)
+
     def _update_sky_hover(self):
         if self.sky_hover_position is None:
             if self.sky_canvas is not None:
@@ -983,7 +1054,7 @@ class AstroClocksApp:
         else:
             ra_hours, declination, hour_angle, altitude, azimuth = coordinates
             label = (
-                f"Pointeur | RA JNow {self._format_ra(ra_hours)} | "
+                f"{self._tr('sky.pointer')} | RA JNow {self._format_ra(ra_hours)} | "
                 f"Dec {self._format_dec(declination)} | "
                 f"Alt {altitude:+.1f}\N{DEGREE SIGN} Az {azimuth:.0f}\N{DEGREE SIGN} | "
                 f"HA {hour_angle:+.2f}h"
@@ -1004,8 +1075,12 @@ class AstroClocksApp:
         self.delta_ss.set(delta_ss)
         self.update_value()
         self._set_result_text(
-            f"{label}\nRA JNow: {self._format_ra(ra_hours)}\n"
-            f"Dec JNow: {self._format_dec(dec_degrees)}"
+            self._tr(
+                "result.target_coordinates",
+                label=label,
+                ra=self._format_ra(ra_hours),
+                dec=self._format_dec(dec_degrees),
+            )
         )
 
     def _on_sky_motion(self, event):
@@ -1030,7 +1105,7 @@ class AstroClocksApp:
             self._set_target_from_coordinates(
                 star["ra_hours"],
                 star["declination"],
-                f"Cible definie depuis la carte: {star['name']}",
+                self._tr("sky.target_set_star", name=star["name"]),
             )
             return
 
@@ -1038,7 +1113,7 @@ class AstroClocksApp:
         self._set_target_from_coordinates(
             ra_hours,
             declination,
-            "Cible definie depuis la carte",
+            self._tr("sky.target_set"),
         )
 
     def _update_sky_map(self, state=None):
@@ -1088,11 +1163,19 @@ class AstroClocksApp:
             target_azimuth,
         )
 
-        chart_note = "au-dessus de l'horizon" if target_visible else "sous l'horizon"
-        self.sky_base_status = (
-            f"LST {state['lst']} | HA cible {target_hour_angle:+.2f}h | "
-            f"Alt {target_altitude:+.1f}\N{DEGREE SIGN} Az {target_azimuth:.0f}\N{DEGREE SIGN}\n"
-            f"Horizon local JNow: {chart_note}"
+        chart_note = (
+            self._tr("sky.above_horizon")
+            if target_visible
+            else self._tr("sky.below_horizon")
+        )
+        self.sky_base_status = self._tr(
+            "sky.status",
+            lst=state["lst"],
+            hour_angle=target_hour_angle,
+            altitude=target_altitude,
+            azimuth=target_azimuth,
+            note=chart_note,
+            count=len(self.sky_star_points),
         )
         self.sky_status.config(text=self.sky_base_status)
         self._update_sky_hover()
@@ -1210,12 +1293,16 @@ class AstroClocksApp:
             output_file.write_text(html_content, encoding="utf-8")
             webbrowser.open_new_tab(output_file.as_uri())
         except Exception:
-            self._set_result_text("Interactive sky view unavailable. Check internet connection.")
+            self._set_result_text(self._tr("result.aladin_unavailable"))
             return
 
         self._set_result_text(
-            f"Opened interactive sky view (ICRS): RA {ra_deg:.6f}° "
-            f"Dec {dec_deg:+.6f}° | FOV {self.aladin_fov_deg:.2f}°"
+            self._tr(
+                "result.aladin_opened",
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+                fov=self.aladin_fov_deg,
+            )
         )
 
     def update_value(self):
@@ -1233,11 +1320,32 @@ class AstroClocksApp:
 
     def update_site_labels(self):
         self.site_name_label.config(text=self.site_name)
-        self.latlabel.config(text=f"Latitude  : {format_latitude_display(self.latitude)}")
-        self.longlabel.config(text=f"Longitude : {format_longitude_display(self.longitude)}")
-        self.fov_label.config(text=f"Champ Aladin : {self.aladin_fov_deg:.2f}\N{DEGREE SIGN}")
+        self.latlabel.config(
+            text=self._tr("site.latitude", value=format_latitude_display(self.latitude))
+        )
+        self.longlabel.config(
+            text=self._tr("site.longitude", value=format_longitude_display(self.longitude))
+        )
+        self.fov_label.config(text=self._tr("site.fov", value=self.aladin_fov_deg))
         if self.aladin_button is not None:
-            self.aladin_button.config(text=f"Aladin {self.aladin_fov_deg:.2f}\N{DEGREE SIGN}")
+            self.aladin_button.config(text=self._tr("button.aladin", value=self.aladin_fov_deg))
+
+    def _refresh_language_texts(self):
+        self.subtitle_label.config(text=self._tr("app.subtitle"))
+        self.header_settings_button.config(text=self._tr("button.settings"))
+        self.fullscreen_button.config(text=self._tr("button.fullscreen"))
+        self.site_settings_button.config(text=self._tr("button.settings"))
+        self.default_site_button.config(text=self._tr("button.meudon"))
+        self.search_button.config(text=self._tr("button.search"))
+        self.alpha_set_button.config(text=self._tr("button.set"))
+        self.delta_set_button.config(text=self._tr("button.set"))
+
+        for title_label, title_key, title_kwargs in self.labelframe_title_labels:
+            title_label.config(text=self._tr(title_key, **title_kwargs).upper())
+
+        self._set_object_type_values()
+        self.update_site_labels()
+        self.update_value()
 
     def _save_current_settings(self):
         self.settings = AppSettings(
@@ -1245,6 +1353,7 @@ class AstroClocksApp:
             latitude=self.latitude,
             longitude=self.longitude,
             aladin_fov_deg=self.aladin_fov_deg,
+            language=self.language,
         )
         save_app_settings(self.settings)
 
@@ -1259,17 +1368,24 @@ class AstroClocksApp:
 
     def _parse_float_setting(self, value, label, minimum, maximum):
         if not is_float(value):
-            raise ValueError(f"{label} doit etre un nombre.")
+            raise ValueError(self._tr("error.must_be_number", label=label))
 
         numeric_value = float(value)
         if numeric_value < minimum or numeric_value > maximum:
-            raise ValueError(f"{label} doit etre entre {minimum} et {maximum}.")
+            raise ValueError(
+                self._tr(
+                    "error.out_of_range",
+                    label=label,
+                    minimum=minimum,
+                    maximum=maximum,
+                )
+            )
 
         return numeric_value
 
     def open_settings_dialog(self):
         dialog = tk.Toplevel(self.root)
-        dialog.title("Parametres AstroClocks")
+        dialog.title(self._tr("settings.title"))
         dialog.configure(bg=self.gbg)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -1277,9 +1393,11 @@ class AstroClocksApp:
 
         preset_lookup = {preset_label(preset): preset for preset in LOCATION_PRESETS}
         preset_values = list(preset_lookup)
+        language_lookup = {label: code for code, label in LANGUAGE_OPTIONS}
 
         preset_var = tk.StringVar(value="")
         site_var = tk.StringVar(value=self.site_name)
+        language_var = tk.StringVar(value=LANGUAGE_NAMES.get(self.language, LANGUAGE_NAMES["en"]))
         latitude_var = tk.StringVar(value=f"{self.latitude:.5f}")
         longitude_var = tk.StringVar(value=f"{self.longitude:.5f}")
         fov_var = tk.StringVar(value=f"{self.aladin_fov_deg:.2f}")
@@ -1315,7 +1433,7 @@ class AstroClocksApp:
             entry.grid(column=1, row=row, pady=7, sticky="ew")
             return entry
 
-        add_label(0, "Lieu connu")
+        add_label(0, self._tr("settings.preset"))
         preset_combo = ttk.Combobox(
             body,
             textvariable=preset_var,
@@ -1336,48 +1454,69 @@ class AstroClocksApp:
 
         preset_combo.bind("<<ComboboxSelected>>", apply_preset)
 
-        add_label(1, "Nom du site")
+        add_label(1, self._tr("settings.site_name"))
         build_entry(1, site_var)
-        add_label(2, "Latitude")
-        build_entry(2, latitude_var)
-        add_label(3, "Longitude")
-        build_entry(3, longitude_var)
-        add_label(4, "Champ Aladin")
-        build_entry(4, fov_var)
+
+        add_label(2, self._tr("settings.language"))
+        language_combo = ttk.Combobox(
+            body,
+            textvariable=language_var,
+            values=[label for _code, label in LANGUAGE_OPTIONS],
+            font=Font(family="Segoe UI", size=10),
+            width=42,
+        )
+        language_combo.grid(column=1, row=2, pady=7, sticky="ew")
+        language_combo["state"] = "readonly"
+
+        add_label(3, self._tr("settings.latitude"))
+        build_entry(3, latitude_var)
+        add_label(4, self._tr("settings.longitude"))
+        build_entry(4, longitude_var)
+        add_label(5, self._tr("settings.aladin_fov"))
+        build_entry(5, fov_var)
 
         hint = tk.Label(
             body,
-            text="Latitude [-90, 90], longitude [-180, 180], champ Aladin en degres.",
+            text=self._tr("settings.hint"),
             bg=self.gbg,
             fg=self.muted,
             font=Font(family="Segoe UI", size=9),
             anchor="w",
         )
-        hint.grid(column=0, row=5, columnspan=2, pady=(2, 12), sticky="ew")
+        hint.grid(column=0, row=6, columnspan=2, pady=(2, 12), sticky="ew")
 
         actions = tk.Frame(body, bg=self.gbg)
-        actions.grid(column=0, row=6, columnspan=2, sticky="e")
+        actions.grid(column=0, row=7, columnspan=2, sticky="e")
 
         def apply_settings():
             try:
-                latitude = self._parse_float_setting(latitude_var.get(), "Latitude", -90, 90)
-                longitude = self._parse_float_setting(longitude_var.get(), "Longitude", -180, 180)
-                fov = self._parse_float_setting(fov_var.get(), "Champ Aladin", 0.01, 180)
+                latitude = self._parse_float_setting(
+                    latitude_var.get(), self._tr("settings.latitude"), -90, 90
+                )
+                longitude = self._parse_float_setting(
+                    longitude_var.get(), self._tr("settings.longitude"), -180, 180
+                )
+                fov = self._parse_float_setting(
+                    fov_var.get(), self._tr("settings.aladin_fov"), 0.01, 180
+                )
             except ValueError as exc:
-                messagebox.showerror("Parametres invalides", str(exc), parent=dialog)
+                messagebox.showerror(self._tr("settings.invalid_title"), str(exc), parent=dialog)
                 return
 
-            self.site_name = site_var.get().strip() or "Site personnalise"
+            selected_language = language_lookup.get(language_var.get(), self.language)
+            self.language = selected_language
+            self.site_name = site_var.get().strip() or self._tr("settings.custom_site")
             self.latitude = latitude
             self.longitude = longitude
             self.aladin_fov_deg = fov
             self._save_current_settings()
-            self.update_site_labels()
-            self._update_sky_map()
+            self._refresh_language_texts()
             dialog.destroy()
 
-        self._build_button(actions, "Annuler", dialog.destroy).grid(column=0, row=0, padx=(0, 8))
-        self._build_button(actions, "Appliquer", apply_settings).grid(column=1, row=0)
+        self._build_button(actions, self._tr("button.cancel"), dialog.destroy).grid(
+            column=0, row=0, padx=(0, 8)
+        )
+        self._build_button(actions, self._tr("button.apply"), apply_settings).grid(column=1, row=0)
 
         dialog.bind("<Return>", lambda _event: apply_settings())
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
@@ -1386,8 +1525,23 @@ class AstroClocksApp:
         y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
 
+    def _coordinate_result_message(self, result):
+        if result.get("source") == "imcce":
+            return self._tr(
+                "result.imcce_coordinates",
+                ra=result.get("source_ra", ""),
+                dec=result.get("source_dec", ""),
+            )
+        if result.get("source") == "sesame":
+            return self._tr(
+                "result.sesame_coordinates",
+                ra=result.get("source_ra", ""),
+                dec=result.get("source_dec", ""),
+            )
+        return result["message"]
+
     def _apply_coordinate_result(self, result):
-        self._set_result_text(result["message"])
+        self._set_result_text(self._coordinate_result_message(result))
         self.alpha_hh.set(result["alpha_hh"])
         self.alpha_mm.set(result["alpha_mm"])
         self.alpha_ss.set(result["alpha_ss"])
@@ -1422,25 +1576,25 @@ class AstroClocksApp:
             "Natural Satellite",
         ]
 
-        selected_type = self.combo_box.get()
+        selected_type = self._selected_object_type_code()
         object_name = self.search_entry.get()
 
         if selected_type in solar_system_types:
             try:
                 result = resolve_solar_system_coordinates(selected_type, object_name)
             except Exception:
-                self._set_result_text("An error occurred while retrieving the ephemerides.")
+                self._set_result_text(self._tr("result.ephemerides_error"))
                 return
 
             self._apply_coordinate_result(result)
             return
 
         if object_name.lower() in solar_system:
-            self._set_result_text("Please select the right object type !")
+            self._set_result_text(self._tr("result.object_type_error"))
             return
 
         if not selected_type:
-            self._set_result_text("Please select an object type.")
+            self._set_result_text(self._tr("result.no_object_type"))
             return
 
         if not object_name:
@@ -1450,9 +1604,7 @@ class AstroClocksApp:
         try:
             result = resolve_deep_sky_coordinates(object_name)
         except name_resolve.NameResolveError:
-            self._set_result_text(
-                "Object not found !\nPlease enter a valid name\n(ex : M13, HIP114971, Sirius,..)"
-            )
+            self._set_result_text(self._tr("result.object_not_found"))
             return
 
         self._apply_coordinate_result(result)
@@ -1475,7 +1627,7 @@ class AstroClocksApp:
             self._update_sky_map(state)
         except Exception as exc:
             if self.sky_status is not None:
-                self.sky_status.config(text=f"Carte du ciel indisponible: {exc}")
+                self.sky_status.config(text=self._tr("sky.unavailable", error=exc))
         finally:
             self.root.after(250, self.clocks)
 
