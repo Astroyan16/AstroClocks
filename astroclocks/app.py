@@ -23,6 +23,8 @@ from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS, translate
 from astroclocks.settings import (
     AppSettings,
     DEFAULT_ALADIN_FOV_DEG,
+    DEFAULT_DECLINATION_OFFSET_ENABLED,
+    DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
     DEFAULT_SITE_NAME,
@@ -71,6 +73,8 @@ class AstroClocksApp:
         self.longitude = self.settings.longitude
         self.aladin_fov_deg = self.settings.aladin_fov_deg
         self.language = self.settings.language
+        self.hour_angle_offset_enabled = self.settings.hour_angle_offset_enabled
+        self.declination_offset_enabled = self.settings.declination_offset_enabled
         self.coord_font_size = 24
         self.aladin_button = None
         self.sky_canvas = None
@@ -292,6 +296,7 @@ class AstroClocksApp:
         title_kwargs=None,
     ):
         title_kwargs = title_kwargs or {}
+        title_values = title_kwargs() if callable(title_kwargs) else title_kwargs
         shell = tk.Frame(
             self.root,
             background=self.card_bg,
@@ -306,7 +311,7 @@ class AstroClocksApp:
 
         title_label = tk.Label(
             shell,
-            text=self._tr(title_key, **title_kwargs).upper(),
+            text=self._tr(title_key, **title_values).upper(),
             foreground=self.muted,
             background=self.card_bg,
             font=Font(family="Segoe UI", size=10, weight="bold"),
@@ -336,6 +341,18 @@ class AstroClocksApp:
             command=command,
         )
 
+    def _hour_angle_title_kwargs(self):
+        suffix = self._tr("frame.hour_angle_offset_suffix") if self.hour_angle_offset_enabled else ""
+        return {"suffix": suffix}
+
+    def _declination_title_kwargs(self):
+        suffix = (
+            self._tr("frame.declination_offset_suffix")
+            if self.declination_offset_enabled
+            else ""
+        )
+        return {"suffix": suffix}
+
     def _create_frames(self):
         self._create_header()
         timezone = format_timezone_label()
@@ -351,10 +368,20 @@ class AstroClocksApp:
         self.lf_gmst = self._build_labelframe("frame.gmst", 0, 4)
         self.lf_lst = self._build_labelframe("frame.lst", 1, 4)
         self.lf_ha = self._build_labelframe(
-            "frame.hour_angle", 0, 5, relief="ridge", bd=6
+            "frame.hour_angle",
+            0,
+            5,
+            relief="ridge",
+            bd=6,
+            title_kwargs=self._hour_angle_title_kwargs,
         )
         self.lf_dec = self._build_labelframe(
-            "frame.declination", 1, 5, relief="ridge", bd=6
+            "frame.declination",
+            1,
+            5,
+            relief="ridge",
+            bd=6,
+            title_kwargs=self._declination_title_kwargs,
         )
         for frame in (
             self.lf_long,
@@ -636,7 +663,12 @@ class AstroClocksApp:
 
         self.lbl_dec_angle = tk.Label(
             self.lf_dec,
-            text=compute_declination_display(0, 0, 0),
+            text=compute_declination_display(
+                0,
+                0,
+                0,
+                apply_offset=self.declination_offset_enabled,
+            ),
             bg=self.ebg,
             fg=self.fg,
             font=Font(family="Consolas", size=44, weight="bold"),
@@ -1120,6 +1152,7 @@ class AstroClocksApp:
                 self.alpha_hh.get(),
                 self.alpha_mm.get(),
                 self.alpha_ss.get(),
+                hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
             )
 
         self.sky_canvas.delete("all")
@@ -1303,6 +1336,7 @@ class AstroClocksApp:
                 self.delta_dd.get(),
                 self.delta_mm.get(),
                 self.delta_ss.get(),
+                apply_offset=self.declination_offset_enabled,
             )
         )
         self._update_sky_map()
@@ -1328,7 +1362,8 @@ class AstroClocksApp:
         self.delta_set_button.config(text=self._tr("button.set"))
 
         for title_label, title_key, title_kwargs in self.labelframe_title_labels:
-            title_label.config(text=self._tr(title_key, **title_kwargs).upper())
+            title_values = title_kwargs() if callable(title_kwargs) else title_kwargs
+            title_label.config(text=self._tr(title_key, **title_values).upper())
 
         self._set_object_type_values()
         self.update_site_labels()
@@ -1341,6 +1376,8 @@ class AstroClocksApp:
             longitude=self.longitude,
             aladin_fov_deg=self.aladin_fov_deg,
             language=self.language,
+            hour_angle_offset_enabled=self.hour_angle_offset_enabled,
+            declination_offset_enabled=self.declination_offset_enabled,
         )
         save_app_settings(self.settings)
 
@@ -1379,6 +1416,8 @@ class AstroClocksApp:
         latitude_var = tk.StringVar(value=f"{self.latitude:.5f}")
         longitude_var = tk.StringVar(value=f"{self.longitude:.5f}")
         fov_var = tk.StringVar(value=f"{self.aladin_fov_deg:.2f}")
+        hour_angle_offset_var = tk.BooleanVar(value=self.hour_angle_offset_enabled)
+        declination_offset_var = tk.BooleanVar(value=self.declination_offset_enabled)
 
         body = tk.Frame(dialog, bg=self.gbg, padx=18, pady=16)
         body.grid(column=0, row=0, sticky="nsew")
@@ -1410,6 +1449,21 @@ class AstroClocksApp:
             )
             entry.grid(column=1, row=row, pady=7, sticky="ew")
             return entry
+
+        def build_checkbutton(parent, variable, text):
+            return tk.Checkbutton(
+                parent,
+                text=text,
+                variable=variable,
+                bg=self.gbg,
+                fg=self.text,
+                activebackground=self.gbg,
+                activeforeground=self.fg,
+                selectcolor=self.ebg,
+                font=Font(family="Segoe UI", size=10),
+                anchor="w",
+                relief="flat",
+            )
 
         add_label(0, self._tr("settings.preset"))
         preset_combo = ttk.Combobox(
@@ -1453,6 +1507,20 @@ class AstroClocksApp:
         add_label(5, self._tr("settings.aladin_fov"))
         build_entry(5, fov_var)
 
+        add_label(6, self._tr("settings.instrument"))
+        instrument_options = tk.Frame(body, bg=self.gbg)
+        instrument_options.grid(column=1, row=6, pady=7, sticky="ew")
+        build_checkbutton(
+            instrument_options,
+            hour_angle_offset_var,
+            self._tr("settings.hour_angle_offset"),
+        ).pack(anchor="w")
+        build_checkbutton(
+            instrument_options,
+            declination_offset_var,
+            self._tr("settings.declination_offset"),
+        ).pack(anchor="w", pady=(4, 0))
+
         hint = tk.Label(
             body,
             text=self._tr("settings.hint"),
@@ -1461,16 +1529,18 @@ class AstroClocksApp:
             font=Font(family="Segoe UI", size=9),
             anchor="w",
         )
-        hint.grid(column=0, row=6, columnspan=2, pady=(2, 12), sticky="ew")
+        hint.grid(column=0, row=7, columnspan=2, pady=(2, 12), sticky="ew")
 
         actions = tk.Frame(body, bg=self.gbg)
-        actions.grid(column=0, row=7, columnspan=2, sticky="e")
+        actions.grid(column=0, row=8, columnspan=2, sticky="e")
 
         def reset_defaults():
             site_var.set(DEFAULT_SITE_NAME)
             latitude_var.set(f"{DEFAULT_LATITUDE:.5f}")
             longitude_var.set(f"{DEFAULT_LONGITUDE:.5f}")
             fov_var.set(f"{DEFAULT_ALADIN_FOV_DEG:.2f}")
+            hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
+            declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
 
         def apply_settings():
             try:
@@ -1493,6 +1563,8 @@ class AstroClocksApp:
             self.latitude = latitude
             self.longitude = longitude
             self.aladin_fov_deg = fov
+            self.hour_angle_offset_enabled = hour_angle_offset_var.get()
+            self.declination_offset_enabled = declination_offset_var.get()
             self._save_current_settings()
             self._refresh_language_texts()
             dialog.destroy()
@@ -1603,6 +1675,7 @@ class AstroClocksApp:
             self.alpha_hh.get(),
             self.alpha_mm.get(),
             self.alpha_ss.get(),
+            hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
         )
 
         self.label_local.config(text=state["local"])

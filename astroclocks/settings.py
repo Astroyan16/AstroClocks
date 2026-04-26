@@ -9,6 +9,8 @@ DEFAULT_LATITUDE = 48.805
 DEFAULT_LONGITUDE = 2.23006
 DEFAULT_ALADIN_FOV_DEG = 0.5
 DEFAULT_LANGUAGE = "en"
+DEFAULT_HOUR_ANGLE_OFFSET_ENABLED = True
+DEFAULT_DECLINATION_OFFSET_ENABLED = True
 SUPPORTED_LANGUAGES = {"en", "fr"}
 
 LONGITUDE_FILE = resource_path("Longitude.ini")
@@ -22,10 +24,22 @@ class AppSettings:
     longitude: float = DEFAULT_LONGITUDE
     aladin_fov_deg: float = DEFAULT_ALADIN_FOV_DEG
     language: str = DEFAULT_LANGUAGE
+    hour_angle_offset_enabled: bool = DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
+    declination_offset_enabled: bool = DEFAULT_DECLINATION_OFFSET_ENABLED
 
 
 def _clamp(value, minimum, maximum):
     return max(minimum, min(maximum, value))
+
+
+def _coerce_bool(value, default):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if value is None:
+        return default
+    return bool(value)
 
 
 def _read_legacy_longitude():
@@ -54,6 +68,14 @@ def normalize_settings(settings):
         longitude=_clamp(float(settings.longitude), -180, 180),
         aladin_fov_deg=_clamp(float(settings.aladin_fov_deg), 0.01, 180),
         language=language,
+        hour_angle_offset_enabled=_coerce_bool(
+            getattr(settings, "hour_angle_offset_enabled", DEFAULT_HOUR_ANGLE_OFFSET_ENABLED),
+            DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
+        ),
+        declination_offset_enabled=_coerce_bool(
+            getattr(settings, "declination_offset_enabled", DEFAULT_DECLINATION_OFFSET_ENABLED),
+            DEFAULT_DECLINATION_OFFSET_ENABLED,
+        ),
     )
 
 
@@ -76,6 +98,12 @@ def load_app_settings():
             longitude=data.get("longitude", DEFAULT_LONGITUDE),
             aladin_fov_deg=data.get("aladin_fov_deg", DEFAULT_ALADIN_FOV_DEG),
             language=data.get("language", DEFAULT_LANGUAGE),
+            hour_angle_offset_enabled=data.get(
+                "hour_angle_offset_enabled", DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
+            ),
+            declination_offset_enabled=data.get(
+                "declination_offset_enabled", DEFAULT_DECLINATION_OFFSET_ENABLED
+            ),
         )
     )
 

@@ -203,7 +203,7 @@ def fetch_sky_area_png(
         return response.read()
 
 
-def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss):
+def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss, hour_angle_offset_hours=6):
     date_time = strftime("%m%d%Y %H%M%S")
     date_time_utc = datetime.datetime.utcnow().strftime("%m%d%Y %H%M%S")
 
@@ -244,7 +244,7 @@ def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss):
     lst_string = f"{int(lst):02d}:{int(lst_mm):02d}:{int(lst_ss):02d}"
 
     alpha_seconds = float(alpha_hh) * 3600 + float(alpha_mm) * 60 + float(alpha_ss)
-    hour_angle = (3600 * (lst + 6) - alpha_seconds)
+    hour_angle = (3600 * (lst + hour_angle_offset_hours) - alpha_seconds)
     ha_hh = int((hour_angle / 3600) % 24)
     ha_mm = int(((hour_angle / 60 - ha_hh * 60) % 60))
     ha_ss = int((hour_angle - ha_mm * 60 - ha_hh * 3600) % 60)
@@ -259,15 +259,21 @@ def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss):
     }
 
 
-def compute_declination_display(delta_dd, delta_mm, delta_ss):
+def compute_declination_display(delta_dd, delta_mm, delta_ss, apply_offset=True):
     dec_sign = -1 if str(delta_dd).strip().startswith("-") else 1
     dec_degrees = dec_sign * (
         abs(float(delta_dd)) + (float(delta_mm) / 60) + (float(delta_ss) / 3600)
     )
-    total_seconds = int(round((dec_degrees + 90) * 3600))
-    total_seconds = max(0, min(180 * 3600, total_seconds))
+    display_degrees = dec_degrees + 90 if apply_offset else dec_degrees
+    lower_bound = 0 if apply_offset else -90
+    upper_bound = 180 if apply_offset else 90
+    total_seconds = int(round(display_degrees * 3600))
+    total_seconds = max(lower_bound * 3600, min(upper_bound * 3600, total_seconds))
 
-    dec_dd = str(total_seconds // 3600).zfill(2)
+    sign = "-" if total_seconds < 0 else ""
+    total_seconds = abs(total_seconds)
+
+    dec_dd = sign + str(total_seconds // 3600).zfill(2)
     dec_mm = str((total_seconds % 3600) // 60).zfill(2)
     dec_ss = str(total_seconds % 60).zfill(2)
     return f"{dec_dd}\N{DEGREE SIGN} {dec_mm}' {dec_ss}\""
