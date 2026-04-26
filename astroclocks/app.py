@@ -793,9 +793,7 @@ class AstroClocksApp:
             azimuth_rad = math.radians(azimuth)
             x = center_x - radius * math.sin(azimuth_rad)
             y = center_y - radius * math.cos(azimuth_rad)
-            line_options = {"fill": self.accent if azimuth == 0 else grid_color}
-            if azimuth != 0:
-                line_options["dash"] = (4, 5)
+            line_options = {"fill": grid_color, "dash": (4, 5)}
             canvas.create_line(center_x, center_y, x, y, **line_options)
             label_x = center_x - (radius + 16) * math.sin(azimuth_rad)
             label_y = center_y - (radius + 16) * math.cos(azimuth_rad)
