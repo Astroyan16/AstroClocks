@@ -11,6 +11,7 @@ from astropy.coordinates import name_resolve
 from astroclocks.astronomy import (
     compute_clock_state,
     compute_declination_display,
+    convert_star_catalog_j2000_to_jnow,
     format_timezone_label,
     jnow_to_icrs_degrees,
     resolve_deep_sky_coordinates,
@@ -27,7 +28,7 @@ from astroclocks.utils import is_float, resource_path
 
 APP_VERSION = "3.0"
 
-BRIGHT_STARS = [
+BRIGHT_STARS_J2000 = [
     ("Sirius", 6.7525, -16.7161, -1.46),
     ("Canopus", 6.3992, -52.6957, -0.74),
     ("Arcturus", 14.2610, 19.1825, -0.05),
@@ -77,6 +78,7 @@ class AstroClocksApp:
         self.coord_font_size = 24
         self.sky_canvas = None
         self.sky_status = None
+        self.bright_stars_jnow = convert_star_catalog_j2000_to_jnow(BRIGHT_STARS_J2000)
 
         self._configure_styles()
         self._configure_root()
@@ -627,7 +629,7 @@ class AstroClocksApp:
         )
 
     def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
-        for name, ra_hours, declination, magnitude in BRIGHT_STARS:
+        for name, ra_hours, declination, magnitude in self.bright_stars_jnow:
             hour_angle = self._normalize_hour_angle(lst_hours - ra_hours)
             if abs(hour_angle) > 6:
                 continue
@@ -714,7 +716,7 @@ class AstroClocksApp:
             text=(
                 f"LST {state['lst']} | HA cible {target_hour_angle:+.2f}h | "
                 f"Dec {target_declination:+.1f}\N{DEGREE SIGN}\n"
-                f"Projection equatoriale temps reel: {chart_note}"
+                f"Projection equatoriale JNow temps reel: {chart_note}"
             )
         )
 

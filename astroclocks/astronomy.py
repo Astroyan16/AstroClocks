@@ -36,6 +36,25 @@ def convert_j2000_to_now(coords):
     return jnow[0].to_string("hmsdms")
 
 
+def convert_star_catalog_j2000_to_jnow(stars):
+    """Convert a J2000/ICRS star catalog to the current FK5 equinox."""
+    if not stars:
+        return []
+
+    date_time = Time(Time(datetime.datetime.utcnow(), scale="utc").jd, format="jd", scale="utc")
+    fk5_now = FK5(equinox=date_time)
+    catalog = SkyCoord(
+        ra=[star[1] for star in stars] * u.hourangle,
+        dec=[star[2] for star in stars] * u.deg,
+        frame="icrs",
+    ).transform_to(fk5_now)
+
+    return [
+        (star[0], catalog[index].ra.hour, catalog[index].dec.deg, star[3])
+        for index, star in enumerate(stars)
+    ]
+
+
 def get_planet_coord(object_type, planet_name):
     """Retrieve ICRS coordinates from IMCCE Miriade."""
     wsdl_url = "https://ssp.imcce.fr/webservices/miriade/miriade.php?wsdl"
