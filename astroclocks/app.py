@@ -43,6 +43,8 @@ APP_YEAR = "2026"
 APP_AUTHOR = "Yannis Benazza"
 APP_EMAIL = "yannis.benazza@obspm.fr"
 APP_PHONE = "01 45 07 71 59"
+CLOCK_REFRESH_HZ = 15
+CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
 OBJECT_TYPE_CODES = (
     "Asteroid",
@@ -1812,7 +1814,7 @@ class AstroClocksApp:
             if self.sky_status is not None:
                 self.sky_status.config(text=self._tr("sky.unavailable", error=exc))
         finally:
-            self.root.after(250, self.clocks)
+            self.root.after(CLOCK_REFRESH_MS, self.clocks)
 
     def run(self):
         download_IERS_A()

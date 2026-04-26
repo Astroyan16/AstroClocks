@@ -203,25 +203,41 @@ def fetch_sky_area_png(
         return response.read()
 
 
-def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss, hour_angle_offset_hours=6):
-    date_time = strftime("%m%d%Y %H%M%S")
-    date_time_utc = datetime.datetime.utcnow().strftime("%m%d%Y %H%M%S")
+def _format_hms_from_hours(hours):
+    total_seconds = int(hours * 3600) % 86400
+    hour = total_seconds // 3600
+    minute = (total_seconds % 3600) // 60
+    second = total_seconds % 60
+    return f"{hour:02d}:{minute:02d}:{second:02d}"
 
-    hour = float(date_time[9:11])
-    minute = float(date_time[11:13])
-    second = float(date_time[13:15])
 
-    month_utc = float(date_time_utc[0:2])
-    day_utc = float(date_time_utc[2:4])
-    year_utc = float(date_time_utc[4:8])
-    hour_utc = float(date_time_utc[9:11])
-    minute_utc = float(date_time_utc[11:13])
-    second_utc = float(date_time_utc[13:15])
+def _coerce_utc_datetime(now_utc):
+    if now_utc is None:
+        return datetime.datetime.now(datetime.timezone.utc)
+    if now_utc.tzinfo is None:
+        return now_utc.replace(tzinfo=datetime.timezone.utc)
+    return now_utc.astimezone(datetime.timezone.utc)
 
-    local_string = f"{int(hour):02d}:{int(minute):02d}:{int(second):02d}"
-    utc_string = f"{int(hour_utc):02d}:{int(minute_utc):02d}:{int(second_utc):02d}"
 
-    ut = hour_utc + (minute_utc / 60) + (second_utc / 3600)
+def compute_clock_state(
+    longitude,
+    alpha_hh,
+    alpha_mm,
+    alpha_ss,
+    hour_angle_offset_hours=6,
+    now_utc=None,
+):
+    utc_now = _coerce_utc_datetime(now_utc)
+    local_now = utc_now.astimezone()
+
+    local_string = local_now.strftime("%H:%M:%S")
+    utc_string = utc_now.strftime("%H:%M:%S")
+
+    month_utc = utc_now.month
+    day_utc = utc_now.day
+    year_utc = utc_now.year
+    second_utc = utc_now.second + (utc_now.microsecond / 1_000_000)
+    ut = utc_now.hour + (utc_now.minute / 60) + (second_utc / 3600)
     julian_date = (
         (367 * year_utc)
         - int((7 * (year_utc + int((month_utc + 9) / 12))) / 4)
@@ -233,21 +249,17 @@ def compute_clock_state(longitude, alpha_hh, alpha_mm, alpha_ss, hour_angle_offs
 
     gmst = 18.697374558 + 24.06570982441908 * (julian_date - 2451545)
     gmst = gmst % 24
-    gmst_mm = (gmst - int(gmst)) * 60
-    gmst_ss = (gmst_mm - int(gmst_mm)) * 60
-    gmst_string = f"{int(gmst):02d}:{int(gmst_mm):02d}:{int(gmst_ss):02d}"
+    gmst_string = _format_hms_from_hours(gmst)
 
     longitude_hours = longitude / 15
     lst = (gmst + longitude_hours) % 24
-    lst_mm = (lst - int(lst)) * 60
-    lst_ss = (lst_mm - int(lst_mm)) * 60
-    lst_string = f"{int(lst):02d}:{int(lst_mm):02d}:{int(lst_ss):02d}"
+    lst_string = _format_hms_from_hours(lst)
 
     alpha_seconds = float(alpha_hh) * 3600 + float(alpha_mm) * 60 + float(alpha_ss)
-    hour_angle = (3600 * (lst + hour_angle_offset_hours) - alpha_seconds)
-    ha_hh = int((hour_angle / 3600) % 24)
-    ha_mm = int(((hour_angle / 60 - ha_hh * 60) % 60))
-    ha_ss = int((hour_angle - ha_mm * 60 - ha_hh * 3600) % 60)
+    hour_angle = (3600 * (lst + hour_angle_offset_hours) - alpha_seconds) % 86400
+    ha_hh = int(hour_angle // 3600)
+    ha_mm = int((hour_angle % 3600) // 60)
+    ha_ss = int(hour_angle % 60)
     ha_string = f"{ha_hh:02d}h {ha_mm:02d}m {ha_ss:02d}s"
 
     return {
