@@ -126,13 +126,8 @@ class AstroClocksApp:
 
     def _configure_root(self):
         self.root.attributes("-fullscreen", False)
-        self.root.bind(
-            "<F11>",
-            lambda event: self.root.attributes(
-                "-fullscreen", not self.root.attributes("-fullscreen")
-            ),
-        )
-        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
+        self.root.bind("<F11>", self._toggle_fullscreen)
+        self.root.bind("<Escape>", self._exit_fullscreen)
         self.root.config(background=self.gbg)
         self.root.grid_columnconfigure(0, weight=1, uniform="main")
         self.root.grid_columnconfigure(1, weight=1, uniform="main")
@@ -140,6 +135,12 @@ class AstroClocksApp:
         self.root.grid_rowconfigure(0, weight=0)
         for row in range(1, 6):
             self.root.grid_rowconfigure(row, weight=1)
+
+    def _toggle_fullscreen(self, _event=None):
+        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
+
+    def _exit_fullscreen(self, _event=None):
+        self.root.attributes("-fullscreen", False)
 
     def _create_header(self):
         header = tk.Frame(self.root, bg=self.gbg)
@@ -166,16 +167,22 @@ class AstroClocksApp:
         )
         subtitle.grid(column=0, row=1, sticky="w", pady=(0, 4))
 
-        pill = tk.Label(
+        fullscreen_button = tk.Button(
             header,
-            text="F11 plein ecran",
+            text="Plein Ecran (F11)",
             foreground=self.ebg,
             background=self.accent,
+            activeforeground=self.ebg,
+            activebackground=self.fg,
             font=Font(family="Segoe UI", size=10, weight="bold"),
             padx=14,
             pady=5,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            command=self._toggle_fullscreen,
         )
-        pill.grid(column=1, row=0, rowspan=2, sticky="e")
+        fullscreen_button.grid(column=1, row=0, rowspan=2, sticky="e")
 
     def _build_labelframe(self, title, column, row, padx=10, pady=10, relief="raised", bd=None, rowspan=1):
         shell = tk.Frame(
