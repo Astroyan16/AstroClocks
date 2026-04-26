@@ -556,17 +556,6 @@ class AstroClocksApp:
         )
         self.longlabel.grid(column=0, row=2, columnspan=2, padx=8, pady=4, sticky="ew")
 
-        self.fov_label = tk.Label(
-            self.lf_long,
-            font=Font(family="Segoe UI", size=12),
-            background=self.ebg,
-            foreground=self.muted,
-            anchor="w",
-            padx=10,
-            pady=5,
-        )
-        self.fov_label.grid(column=0, row=3, columnspan=2, padx=8, pady=4, sticky="ew")
-
         self.lf_long.grid_columnconfigure(0, weight=1)
         self.lf_long.grid_columnconfigure(1, weight=1)
 
@@ -1472,7 +1461,6 @@ class AstroClocksApp:
         self.longlabel.config(
             text=self._tr("site.longitude", value=format_longitude_display(self.longitude))
         )
-        self.fov_label.config(text=self._tr("site.fov", value=self.aladin_fov_deg))
         if self.aladin_button is not None:
             self.aladin_button.config(text=self._tr("button.aladin", value=self.aladin_fov_deg))
 
