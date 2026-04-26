@@ -322,15 +322,87 @@ class AstroClocksApp:
         self.quit_button.grid(column=3, row=0, sticky="e")
 
     def open_about_dialog(self):
-        message = (
-            f"AstroClocks\n\n"
-            f"{self._tr('about.version')} : {APP_VERSION}\n"
-            f"{self._tr('about.year')} : {APP_YEAR}\n"
-            f"{self._tr('about.author')} : {APP_AUTHOR}\n"
-            f"{self._tr('about.email')} : {APP_EMAIL}\n"
-            f"{self._tr('about.phone')} : {APP_PHONE}"
+        dialog = tk.Toplevel(self.root)
+        dialog.title(self._tr("about.title"))
+        dialog.configure(bg=self.gbg)
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        body = tk.Frame(
+            dialog,
+            bg=self.card_bg,
+            padx=24,
+            pady=20,
+            highlightbackground=self.card_edge,
+            highlightthickness=1,
+            bd=0,
         )
-        messagebox.showinfo(self._tr("about.title"), message, parent=self.root)
+        body.grid(column=0, row=0, padx=12, pady=12, sticky="nsew")
+        body.grid_columnconfigure(1, weight=1)
+
+        tk.Label(
+            body,
+            text="AstroClocks",
+            bg=self.card_bg,
+            fg=self.fg,
+            font=Font(family="Segoe UI", size=20, weight="bold"),
+        ).grid(column=0, row=0, columnspan=2, sticky="w")
+        tk.Label(
+            body,
+            text=f"v{APP_VERSION} | {APP_YEAR}",
+            bg=self.card_bg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=10),
+        ).grid(column=0, row=1, columnspan=2, sticky="w", pady=(2, 14))
+
+        tk.Frame(body, bg=self.card_edge, height=1).grid(
+            column=0, row=2, columnspan=2, sticky="ew", pady=(0, 14)
+        )
+
+        label_font = Font(family="Segoe UI", size=10, weight="bold")
+        value_font = Font(family="Segoe UI", size=11)
+        email_font = Font(family="Segoe UI", size=11, underline=True)
+
+        def add_row(row, label, value, link=False):
+            tk.Label(
+                body,
+                text=f"{label} :",
+                bg=self.card_bg,
+                fg=self.muted,
+                font=label_font,
+            ).grid(column=0, row=row, sticky="e", padx=(0, 14), pady=4)
+            value_label = tk.Label(
+                body,
+                text=value,
+                bg=self.card_bg,
+                fg=self.accent if link else self.text,
+                font=email_font if link else value_font,
+                cursor="hand2" if link else "",
+            )
+            value_label.grid(column=1, row=row, sticky="w", pady=4)
+            if link:
+                value_label.bind(
+                    "<Button-1>", lambda _event: webbrowser.open(f"mailto:{APP_EMAIL}")
+                )
+
+        add_row(3, self._tr("about.author"), APP_AUTHOR)
+        add_row(4, self._tr("about.email"), APP_EMAIL, link=True)
+        add_row(5, self._tr("about.phone"), APP_PHONE)
+
+        actions = tk.Frame(body, bg=self.card_bg)
+        actions.grid(column=0, row=6, columnspan=2, sticky="e", pady=(18, 0))
+        self._build_button(actions, self._tr("button.close"), dialog.destroy).grid(
+            column=0, row=0
+        )
+
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.bind("<Return>", lambda _event: dialog.destroy())
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dialog.focus_set()
 
     def _build_labelframe(
         self,
