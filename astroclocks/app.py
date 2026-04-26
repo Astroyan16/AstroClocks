@@ -558,6 +558,9 @@ class AstroClocksApp:
             y = center_y + dy * scale
         return x, y, visible
 
+    def _circle_half_span(self, radius, offset):
+        return max(0.0, radius**2 - offset**2) ** 0.5
+
     def _draw_sky_grid(self, canvas, center_x, center_y, radius):
         canvas.create_oval(
             center_x - radius,
@@ -572,7 +575,7 @@ class AstroClocksApp:
         grid_color = "#1d3341"
         for declination in (-60, -30, 0, 30, 60):
             y = center_y - (declination / 90) * radius
-            span = max(0, (radius**2 - (y - center_y) ** 2) ** 0.5)
+            span = self._circle_half_span(radius, y - center_y)
             canvas.create_line(
                 center_x - span,
                 y,
@@ -592,7 +595,7 @@ class AstroClocksApp:
 
         for hour_angle in (-6, -3, 0, 3, 6):
             x = center_x + (hour_angle / 6) * radius
-            span = max(0, (radius**2 - (x - center_x) ** 2) ** 0.5)
+            span = self._circle_half_span(radius, x - center_x)
             color = self.accent if hour_angle == 0 else grid_color
             width = 2 if hour_angle == 0 else 1
             line_options = {"fill": color, "width": width}
@@ -952,8 +955,13 @@ class AstroClocksApp:
         self.label_gmst.config(text=state["gmst"])
         self.label_lst.config(text=state["lst"])
         self.lbl_hour_angle.config(text=state["hour_angle"])
-        self._update_sky_map(state)
-        self.root.after(250, self.clocks)
+        try:
+            self._update_sky_map(state)
+        except Exception as exc:
+            if self.sky_status is not None:
+                self.sky_status.config(text=f"Carte du ciel indisponible: {exc}")
+        finally:
+            self.root.after(250, self.clocks)
 
     def run(self):
         download_IERS_A()
