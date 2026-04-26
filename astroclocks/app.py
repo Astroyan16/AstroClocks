@@ -1,3 +1,4 @@
+import ctypes
 import tempfile
 import tkinter as tk
 import webbrowser
@@ -84,6 +85,9 @@ class AstroClocksApp:
         self.sky_star_points = []
         self.sky_hover_position = None
         self.sky_base_status = ""
+        self.is_fullscreen = False
+        self.windowed_geometry = None
+        self.windowed_state = "normal"
 
         self._configure_styles()
         self._configure_root()
@@ -136,11 +140,82 @@ class AstroClocksApp:
         for row in range(1, 6):
             self.root.grid_rowconfigure(row, weight=1)
 
+    def _current_monitor_geometry(self):
+        try:
+            self.root.update_idletasks()
+
+            class Rect(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
+
+            class MonitorInfo(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", ctypes.c_ulong),
+                    ("rcMonitor", Rect),
+                    ("rcWork", Rect),
+                    ("dwFlags", ctypes.c_ulong),
+                ]
+
+            monitor = ctypes.windll.user32.MonitorFromWindow(self.root.winfo_id(), 2)
+            monitor_info = MonitorInfo()
+            monitor_info.cbSize = ctypes.sizeof(MonitorInfo)
+            if not ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
+                raise RuntimeError("Unable to read monitor geometry")
+
+            rect = monitor_info.rcMonitor
+            return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+        except Exception:
+            return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+
+    def _enter_fullscreen(self):
+        if self.is_fullscreen:
+            return
+
+        self.windowed_geometry = self.root.geometry()
+        try:
+            self.windowed_state = self.root.state()
+        except tk.TclError:
+            self.windowed_state = "normal"
+
+        left, top, width, height = self._current_monitor_geometry()
+        if self.windowed_state == "zoomed":
+            self.root.state("normal")
+            self.root.update_idletasks()
+
+        self.root.attributes("-fullscreen", False)
+        self.root.overrideredirect(True)
+        self.root.geometry(f"{width}x{height}+{left}+{top}")
+        self.root.update_idletasks()
+        self.root.update()
+        self.root.attributes("-topmost", True)
+        self.root.lift()
+        self.root.focus_force()
+        self.root.geometry(f"{width}x{height}+{left}+{top}")
+        self.is_fullscreen = True
+
     def _toggle_fullscreen(self, _event=None):
-        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
+        if self.is_fullscreen:
+            self._exit_fullscreen()
+            return
+
+        self._enter_fullscreen()
 
     def _exit_fullscreen(self, _event=None):
+        self.root.attributes("-topmost", False)
         self.root.attributes("-fullscreen", False)
+        if not self.is_fullscreen:
+            return
+
+        self.root.overrideredirect(False)
+        if self.windowed_geometry:
+            self.root.geometry(self.windowed_geometry)
+        if self.windowed_state == "zoomed":
+            self.root.after(50, lambda: self.root.state("zoomed"))
+        self.is_fullscreen = False
 
     def _create_header(self):
         header = tk.Frame(self.root, bg=self.gbg)
