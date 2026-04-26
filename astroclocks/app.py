@@ -417,15 +417,6 @@ class AstroClocksApp:
         )
         self.fov_label.grid(column=0, row=3, columnspan=2, padx=8, pady=4, sticky="ew")
 
-        self.site_settings_button = self._build_button(
-            self.lf_long, self._tr("button.settings"), self.open_settings_dialog
-        )
-        self.site_settings_button.grid(column=0, row=4, padx=8, pady=8, sticky="ew")
-
-        self.default_site_button = self._build_button(
-            self.lf_long, self._tr("button.meudon"), self.set_default_site
-        )
-        self.default_site_button.grid(column=1, row=4, padx=8, pady=8, sticky="ew")
         self.lf_long.grid_columnconfigure(0, weight=1)
         self.lf_long.grid_columnconfigure(1, weight=1)
 
@@ -1334,8 +1325,6 @@ class AstroClocksApp:
         self.subtitle_label.config(text=self._tr("app.subtitle"))
         self.header_settings_button.config(text=self._tr("button.settings"))
         self.fullscreen_button.config(text=self._tr("button.fullscreen"))
-        self.site_settings_button.config(text=self._tr("button.settings"))
-        self.default_site_button.config(text=self._tr("button.meudon"))
         self.search_button.config(text=self._tr("button.search"))
         self.alpha_set_button.config(text=self._tr("button.set"))
         self.delta_set_button.config(text=self._tr("button.set"))
@@ -1356,15 +1345,6 @@ class AstroClocksApp:
             language=self.language,
         )
         save_app_settings(self.settings)
-
-    def set_default_site(self):
-        self.site_name = DEFAULT_SITE_NAME
-        self.latitude = DEFAULT_LATITUDE
-        self.longitude = DEFAULT_LONGITUDE
-        self.aladin_fov_deg = DEFAULT_ALADIN_FOV_DEG
-        self._save_current_settings()
-        self.update_site_labels()
-        self._update_sky_map()
 
     def _parse_float_setting(self, value, label, minimum, maximum):
         if not is_float(value):
@@ -1488,6 +1468,12 @@ class AstroClocksApp:
         actions = tk.Frame(body, bg=self.gbg)
         actions.grid(column=0, row=7, columnspan=2, sticky="e")
 
+        def reset_defaults():
+            site_var.set(DEFAULT_SITE_NAME)
+            latitude_var.set(f"{DEFAULT_LATITUDE:.5f}")
+            longitude_var.set(f"{DEFAULT_LONGITUDE:.5f}")
+            fov_var.set(f"{DEFAULT_ALADIN_FOV_DEG:.2f}")
+
         def apply_settings():
             try:
                 latitude = self._parse_float_setting(
@@ -1513,10 +1499,13 @@ class AstroClocksApp:
             self._refresh_language_texts()
             dialog.destroy()
 
-        self._build_button(actions, self._tr("button.cancel"), dialog.destroy).grid(
+        self._build_button(actions, self._tr("button.default"), reset_defaults).grid(
             column=0, row=0, padx=(0, 8)
         )
-        self._build_button(actions, self._tr("button.apply"), apply_settings).grid(column=1, row=0)
+        self._build_button(actions, self._tr("button.cancel"), dialog.destroy).grid(
+            column=1, row=0, padx=(0, 8)
+        )
+        self._build_button(actions, self._tr("button.apply"), apply_settings).grid(column=2, row=0)
 
         dialog.bind("<Return>", lambda _event: apply_settings())
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
