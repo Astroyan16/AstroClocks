@@ -52,9 +52,15 @@ APP_EMAIL = "yannis.benazza@obspm.fr"
 APP_PHONE = "01 45 07 71 59"
 CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
+DEFAULT_WINDOW_WIDTH = 1440
+DEFAULT_WINDOW_HEIGHT = 900
+MIN_WINDOW_WIDTH = 1180
+MIN_WINDOW_HEIGHT = 760
+WINDOW_SCREEN_MARGIN = 32
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
+MONITOR_DEFAULTTONEAREST = 2
 SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
 OBJECT_TYPE_CODES = (
     "Asteroid",
@@ -66,12 +72,38 @@ OBJECT_TYPE_CODES = (
 )
 
 
+class WinRect(ctypes.Structure):
+    _fields_ = [
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long),
+    ]
+
+
+class WinMonitorInfo(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_ulong),
+        ("rcMonitor", WinRect),
+        ("rcWork", WinRect),
+        ("dwFlags", ctypes.c_ulong),
+    ]
+
+
+class WinPoint(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_long),
+        ("y", ctypes.c_long),
+    ]
+
+
 class AstroClocksApp:
     def __init__(self):
         self.root = tk.Tk()
+        self.root.withdraw()
         self.root.title(f"AstroClocks v{APP_VERSION}")
         self.root.iconbitmap(resource_path("AppIcon.ico"))
-        self.root.minsize(1440, 900)
+        self.root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
 
         self.gbg = "#101419"
         self.card_bg = "#171f26"
@@ -127,6 +159,7 @@ class AstroClocksApp:
         self.update_site_labels()
         self.update_value(activate_target=False)
         self._schedule_connectivity_check(0)
+        self._place_initial_window()
 
         self.root.bind("<Return>", lambda event: self.search_coordinates())
         self.root.bind("<Configure>", self._update_coordinate_font_size)
@@ -234,36 +267,97 @@ class AstroClocksApp:
         for row in range(1, 6):
             self.root.grid_rowconfigure(row, weight=1)
 
-    def _current_monitor_geometry(self):
+    def _monitor_geometry_from_handle(self, hwnd, use_work_area=False):
+        monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        return self._monitor_geometry(monitor, use_work_area=use_work_area)
+
+    def _monitor_geometry_from_point(self, x, y, use_work_area=False):
+        ctypes.windll.user32.MonitorFromPoint.argtypes = [WinPoint, ctypes.c_ulong]
+        ctypes.windll.user32.MonitorFromPoint.restype = ctypes.c_void_p
+        monitor = ctypes.windll.user32.MonitorFromPoint(
+            WinPoint(int(x), int(y)),
+            MONITOR_DEFAULTTONEAREST,
+        )
+        return self._monitor_geometry(monitor, use_work_area=use_work_area)
+
+    def _monitor_geometry(self, monitor, use_work_area=False):
+        monitor_info = WinMonitorInfo()
+        monitor_info.cbSize = ctypes.sizeof(WinMonitorInfo)
+        if not ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
+            raise RuntimeError("Unable to read monitor geometry")
+
+        rect = monitor_info.rcWork if use_work_area else monitor_info.rcMonitor
+        return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+
+    def _fallback_screen_geometry(self):
+        return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+
+    def _current_monitor_geometry(self, use_work_area=False):
         try:
             self.root.update_idletasks()
-
-            class Rect(ctypes.Structure):
-                _fields_ = [
-                    ("left", ctypes.c_long),
-                    ("top", ctypes.c_long),
-                    ("right", ctypes.c_long),
-                    ("bottom", ctypes.c_long),
-                ]
-
-            class MonitorInfo(ctypes.Structure):
-                _fields_ = [
-                    ("cbSize", ctypes.c_ulong),
-                    ("rcMonitor", Rect),
-                    ("rcWork", Rect),
-                    ("dwFlags", ctypes.c_ulong),
-                ]
-
-            monitor = ctypes.windll.user32.MonitorFromWindow(self.root.winfo_id(), 2)
-            monitor_info = MonitorInfo()
-            monitor_info.cbSize = ctypes.sizeof(MonitorInfo)
-            if not ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
-                raise RuntimeError("Unable to read monitor geometry")
-
-            rect = monitor_info.rcMonitor
-            return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+            return self._monitor_geometry_from_handle(
+                self.root.winfo_id(),
+                use_work_area=use_work_area,
+            )
         except Exception:
-            return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            return self._fallback_screen_geometry()
+
+    def _pointer_monitor_geometry(self, use_work_area=False):
+        try:
+            pointer_x, pointer_y = self.root.winfo_pointerxy()
+            return self._monitor_geometry_from_point(
+                pointer_x,
+                pointer_y,
+                use_work_area=use_work_area,
+            )
+        except Exception:
+            return self._fallback_screen_geometry()
+
+    def _move_window_to(self, window, x, y):
+        try:
+            hwnd = window.winfo_id()
+            # Tk exposes the client HWND; moving the wrapper preserves virtual-screen coordinates.
+            parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
+            ctypes.windll.user32.SetWindowPos(
+                parent_hwnd or hwnd,
+                0,
+                int(x),
+                int(y),
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        except Exception:
+            window.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
+
+    def _place_initial_window(self):
+        monitor_x, monitor_y, monitor_width, monitor_height = self._pointer_monitor_geometry(
+            use_work_area=True
+        )
+        available_width = max(640, monitor_width - WINDOW_SCREEN_MARGIN)
+        available_height = max(480, monitor_height - WINDOW_SCREEN_MARGIN)
+        window_width = min(DEFAULT_WINDOW_WIDTH, available_width)
+        window_height = min(DEFAULT_WINDOW_HEIGHT, available_height)
+
+        self.root.minsize(
+            min(MIN_WINDOW_WIDTH, window_width),
+            min(MIN_WINDOW_HEIGHT, window_height),
+        )
+        x = monitor_x + max(0, (monitor_width - window_width) // 2)
+        y = monitor_y + max(0, (monitor_height - window_height) // 2)
+
+        try:
+            self.root.attributes("-alpha", 0.0)
+        except tk.TclError:
+            pass
+        self.root.geometry(f"{window_width}x{window_height}+0+0")
+        self.root.update_idletasks()
+        self.root.deiconify()
+        self._move_window_to(self.root, x, y)
+        try:
+            self.root.attributes("-alpha", 1.0)
+        except tk.TclError:
+            pass
 
     def _center_dialog_on_root(self, dialog):
         dialog.update_idletasks()
@@ -280,22 +374,7 @@ class AstroClocksApp:
         if max_y >= monitor_y:
             y = min(max(y, monitor_y), max_y)
 
-        dialog.geometry(f"+{x}+{y}")
-        try:
-            hwnd = dialog.winfo_id()
-            # Tk exposes the client HWND; moving the wrapper preserves virtual-screen coordinates.
-            parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
-            ctypes.windll.user32.SetWindowPos(
-                parent_hwnd or hwnd,
-                0,
-                int(x),
-                int(y),
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-        except Exception:
-            pass
+        self._move_window_to(dialog, x, y)
         dialog.lift(self.root)
 
     def _enter_fullscreen(self):
