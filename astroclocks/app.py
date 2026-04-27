@@ -4,6 +4,7 @@ import socket
 import tempfile
 import threading
 import tkinter as tk
+import time
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -16,6 +17,7 @@ from astropy.coordinates import name_resolve
 from astroclocks.astronomy import (
     compute_clock_state,
     compute_declination_display,
+    compute_solar_system_positions,
     convert_star_catalog_j2000_to_jnow,
     format_timezone_label,
     jnow_to_icrs_degrees,
@@ -33,7 +35,12 @@ from astroclocks.settings import (
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
     DEFAULT_SITE_NAME,
+    DEFAULT_SKY_MAGNITUDE_LIMIT,
+    DEFAULT_SKY_SHOW_ALTAZ_GRID,
+    DEFAULT_SKY_SHOW_EQUATORIAL_GRID,
+    DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
     DEFAULT_TIMEZONE_NAME,
+    MAX_SKY_MAGNITUDE_LIMIT,
     format_latitude_display,
     format_longitude_display,
     load_app_settings,
@@ -44,7 +51,7 @@ from astroclocks.star_catalog import NAMED_STARS_J2000
 from astroclocks.utils import is_float, resource_path
 
 
-APP_VERSION = "3.0"
+APP_VERSION = "3.1"
 APP_RELEASE_MONTH = 4
 APP_YEAR = "2026"
 APP_AUTHOR = "Yannis Benazza"
@@ -52,6 +59,7 @@ APP_EMAIL = "yannis.benazza@obspm.fr"
 APP_PHONE = "01 45 07 71 59"
 CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
+SOLAR_SYSTEM_CACHE_SECONDS = 60
 DEFAULT_WINDOW_WIDTH = 1440
 DEFAULT_WINDOW_HEIGHT = 900
 MIN_WINDOW_WIDTH = 1180
@@ -62,6 +70,18 @@ SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 MONITOR_DEFAULTTONEAREST = 2
 SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
+TARGET_LOW_ALTITUDE_COLOR = "#f6c451"
+SOLAR_SYSTEM_BODY_COLORS = {
+    "Sun": "#ffd166",
+    "Moon": "#dce6ef",
+    "Mercury": "#b8a189",
+    "Venus": "#f4d58d",
+    "Mars": "#ff8a65",
+    "Jupiter": "#f2c078",
+    "Saturn": "#e6d3a3",
+    "Uranus": "#8ecae6",
+    "Neptune": "#7aa2ff",
+}
 OBJECT_TYPE_CODES = (
     "Asteroid",
     "Comet",
@@ -122,6 +142,10 @@ class AstroClocksApp:
         self.latitude = self.settings.latitude
         self.longitude = self.settings.longitude
         self.aladin_fov_deg = self.settings.aladin_fov_deg
+        self.sky_magnitude_limit = self.settings.sky_magnitude_limit
+        self.sky_show_altaz_grid = self.settings.sky_show_altaz_grid
+        self.sky_show_equatorial_grid = self.settings.sky_show_equatorial_grid
+        self.sky_show_solar_system = self.settings.sky_show_solar_system
         self.timezone_name = self._normalize_timezone_name(self.settings.timezone_name)
         self.daylight_saving_enabled = self.settings.daylight_saving_enabled
         self.language = self.settings.language
@@ -137,9 +161,12 @@ class AstroClocksApp:
         self.named_stars_jnow = convert_star_catalog_j2000_to_jnow(NAMED_STARS_J2000)
         self.sky_geometry = None
         self.sky_star_points = []
+        self.sky_solar_system_points = []
         self.sky_hover_position = None
         self.sky_base_status = ""
         self.sky_base_status_highlights = ()
+        self.solar_system_cache_key = None
+        self.solar_system_cache = []
         self.target_active = False
         self.is_fullscreen = False
         self.windowed_geometry = None
@@ -1194,24 +1221,26 @@ class AstroClocksApp:
         )
 
         grid_color = "#1d3341"
-        for altitude in (30, 60):
-            ring_radius = ((90 - altitude) / 90) * radius
-            canvas.create_oval(
-                center_x - ring_radius,
-                center_y - ring_radius,
-                center_x + ring_radius,
-                center_y + ring_radius,
-                outline=grid_color,
-                dash=(4, 5),
-            )
-            canvas.create_text(
-                center_x + ring_radius - 6,
-                center_y - 8,
-                text=f"{altitude}\N{DEGREE SIGN}",
-                fill=self.muted,
-                font=Font(family="Segoe UI", size=8),
-                anchor="e",
-            )
+        if self.sky_show_altaz_grid:
+            for altitude in (15, 30, 45, 60, 75):
+                ring_radius = ((90 - altitude) / 90) * radius
+                canvas.create_oval(
+                    center_x - ring_radius,
+                    center_y - ring_radius,
+                    center_x + ring_radius,
+                    center_y + ring_radius,
+                    outline=grid_color,
+                    dash=(4, 5),
+                )
+                if altitude in (30, 60):
+                    canvas.create_text(
+                        center_x + ring_radius - 6,
+                        center_y - 8,
+                        text=f"{altitude}\N{DEGREE SIGN}",
+                        fill=self.muted,
+                        font=Font(family="Segoe UI", size=8),
+                        anchor="e",
+                    )
 
         cardinal_labels = (
             (0, self._tr("direction.north_short")),
@@ -1223,8 +1252,9 @@ class AstroClocksApp:
             azimuth_rad = math.radians(azimuth)
             x = center_x - radius * math.sin(azimuth_rad)
             y = center_y - radius * math.cos(azimuth_rad)
-            line_options = {"fill": grid_color, "dash": (4, 5)}
-            canvas.create_line(center_x, center_y, x, y, **line_options)
+            if self.sky_show_altaz_grid:
+                line_options = {"fill": grid_color, "dash": (4, 5)}
+                canvas.create_line(center_x, center_y, x, y, **line_options)
             label_x = center_x - (radius + 16) * math.sin(azimuth_rad)
             label_y = center_y - (radius + 16) * math.cos(azimuth_rad)
             canvas.create_text(
@@ -1243,9 +1273,55 @@ class AstroClocksApp:
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
+
+    def _draw_equatorial_grid(self, canvas, center_x, center_y, radius, lst_hours):
+        grid_color = "#263d4b"
+
+        def draw_segment(points):
+            if len(points) < 2:
+                return
+            flattened = [coordinate for point in points for coordinate in point]
+            canvas.create_line(flattened, fill=grid_color, dash=(2, 7), width=1)
+
+        for declination in (-60, -30, 0, 30, 60):
+            segment = []
+            for step in range(97):
+                ra_hours = (step / 96) * 24
+                altitude, azimuth, _hour_angle = self._equatorial_to_horizontal(
+                    ra_hours,
+                    declination,
+                    lst_hours,
+                )
+                point = self._project_horizontal_point(center_x, center_y, radius, altitude, azimuth)
+                if point is None:
+                    draw_segment(segment)
+                    segment = []
+                else:
+                    segment.append(point)
+            draw_segment(segment)
+
+        for ra_hours in range(0, 24, 3):
+            segment = []
+            for declination in range(-80, 85, 5):
+                altitude, azimuth, _hour_angle = self._equatorial_to_horizontal(
+                    ra_hours,
+                    declination,
+                    lst_hours,
+                )
+                point = self._project_horizontal_point(center_x, center_y, radius, altitude, azimuth)
+                if point is None:
+                    draw_segment(segment)
+                    segment = []
+                else:
+                    segment.append(point)
+            draw_segment(segment)
+
     def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
         self.sky_star_points = []
         for name, ra_hours, declination, magnitude in self.named_stars_jnow:
+            if magnitude > self.sky_magnitude_limit:
+                continue
+
             altitude, azimuth, hour_angle = self._equatorial_to_horizontal(
                 ra_hours,
                 declination,
@@ -1289,9 +1365,78 @@ class AstroClocksApp:
                     anchor="w",
                 )
 
+    def _solar_system_positions(self):
+        cache_key = (
+            int(time.time() // SOLAR_SYSTEM_CACHE_SECONDS),
+            round(self.latitude, 5),
+            round(self.longitude, 5),
+        )
+        if cache_key == self.solar_system_cache_key:
+            return self.solar_system_cache
+
+        try:
+            self.solar_system_cache = compute_solar_system_positions(
+                self.latitude,
+                self.longitude,
+            )
+            self.solar_system_cache_key = cache_key
+        except Exception:
+            self.solar_system_cache = []
+            self.solar_system_cache_key = cache_key
+        return self.solar_system_cache
+
+    def _draw_solar_system_objects(self, canvas, center_x, center_y, radius):
+        self.sky_solar_system_points = []
+        if not self.sky_show_solar_system:
+            return
+
+        for body in self._solar_system_positions():
+            altitude = body["altitude"]
+            azimuth = body["azimuth"]
+            point = self._project_horizontal_point(center_x, center_y, radius, altitude, azimuth)
+            if point is None:
+                continue
+
+            x, y = point
+            name = body["name"]
+            fill = SOLAR_SYSTEM_BODY_COLORS.get(name, self.accent)
+            size = 6 if name in {"Sun", "Moon"} else 4
+            canvas.create_oval(
+                x - size,
+                y - size,
+                x + size,
+                y + size,
+                fill=fill,
+                outline=self.ebg,
+                width=1,
+            )
+            canvas.create_text(
+                x + size + 5,
+                y,
+                text=self._tr(f"solar.{name}"),
+                fill=fill,
+                font=Font(family="Segoe UI", size=8, weight="bold"),
+                anchor="w",
+            )
+            self.sky_solar_system_points.append(
+                {
+                    "name": name,
+                    "x": x,
+                    "y": y,
+                    "ra_hours": body["ra_hours"],
+                    "declination": body["declination"],
+                    "altitude": altitude,
+                    "azimuth": azimuth,
+                    "size": size,
+                }
+            )
+
     def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azimuth):
         x, y, visible = self._project_target(center_x, center_y, radius, altitude, azimuth)
-        marker_color = self.success if visible else self.danger
+        if visible and altitude < 10:
+            marker_color = TARGET_LOW_ALTITUDE_COLOR
+        else:
+            marker_color = self.success if visible else self.danger
         canvas.create_oval(x - 11, y - 11, x + 11, y + 11, outline=marker_color, width=2)
         canvas.create_line(x - 17, y, x + 17, y, fill=marker_color, width=2)
         canvas.create_line(x, y - 17, x, y + 17, fill=marker_color, width=2)
@@ -1634,7 +1779,10 @@ class AstroClocksApp:
             "lst_hours": lst_hours,
         }
         self._draw_sky_grid(self.sky_canvas, center_x, center_y, radius)
+        if self.sky_show_equatorial_grid:
+            self._draw_equatorial_grid(self.sky_canvas, center_x, center_y, radius, lst_hours)
         self._draw_star_catalog(self.sky_canvas, center_x, center_y, radius, lst_hours)
+        self._draw_solar_system_objects(self.sky_canvas, center_x, center_y, radius)
 
         if not self.target_active:
             self.sky_base_status = self._sky_inactive_status()
@@ -1658,11 +1806,12 @@ class AstroClocksApp:
             target_azimuth,
         )
 
-        chart_note = (
-            self._tr("sky.above_horizon")
-            if target_visible
-            else self._tr("sky.below_horizon")
-        )
+        if target_altitude >= 10:
+            chart_note = self._tr("sky.above_horizon")
+        elif target_altitude >= 0:
+            chart_note = self._tr("sky.low_horizon")
+        else:
+            chart_note = self._tr("sky.below_horizon")
         altitude_text = f"{target_altitude:+.2f}"
         self.sky_base_status = self._tr(
             "sky.status",
@@ -1887,6 +2036,10 @@ class AstroClocksApp:
             latitude=self.latitude,
             longitude=self.longitude,
             aladin_fov_deg=self.aladin_fov_deg,
+            sky_magnitude_limit=self.sky_magnitude_limit,
+            sky_show_altaz_grid=self.sky_show_altaz_grid,
+            sky_show_equatorial_grid=self.sky_show_equatorial_grid,
+            sky_show_solar_system=self.sky_show_solar_system,
             timezone_name=self.timezone_name,
             daylight_saving_enabled=self.daylight_saving_enabled,
             language=self.language,
@@ -1936,6 +2089,10 @@ class AstroClocksApp:
         timezone_auto_var = tk.BooleanVar(value=not bool(self.timezone_name))
         daylight_saving_var = tk.BooleanVar(value=self.daylight_saving_enabled)
         fov_var = tk.StringVar(value=f"{self.aladin_fov_deg:.2f}")
+        sky_magnitude_limit_var = tk.StringVar(value=f"{self.sky_magnitude_limit:.1f}")
+        sky_show_altaz_grid_var = tk.BooleanVar(value=self.sky_show_altaz_grid)
+        sky_show_equatorial_grid_var = tk.BooleanVar(value=self.sky_show_equatorial_grid)
+        sky_show_solar_system_var = tk.BooleanVar(value=self.sky_show_solar_system)
         hour_angle_offset_var = tk.BooleanVar(value=self.hour_angle_offset_enabled)
         declination_offset_var = tk.BooleanVar(value=self.declination_offset_enabled)
 
@@ -2067,9 +2224,53 @@ class AstroClocksApp:
         add_label(7, self._tr("settings.aladin_fov"))
         build_entry(7, fov_var)
 
-        add_label(8, self._tr("settings.instrument"))
+        add_label(8, self._tr("settings.sky_map"))
+        sky_options = tk.Frame(body, bg=self.gbg)
+        sky_options.grid(column=1, row=8, pady=7, sticky="ew")
+        sky_options.grid_columnconfigure(0, weight=1)
+        magnitude_frame = tk.Frame(sky_options, bg=self.gbg)
+        magnitude_frame.grid(column=0, row=0, sticky="ew")
+        magnitude_frame.grid_columnconfigure(1, weight=1)
+        tk.Label(
+            magnitude_frame,
+            text=self._tr("settings.sky_magnitude_limit"),
+            bg=self.gbg,
+            fg=self.text,
+            font=Font(family="Segoe UI", size=10),
+            anchor="w",
+        ).grid(column=0, row=0, padx=(0, 10), sticky="w")
+        tk.Entry(
+            magnitude_frame,
+            textvariable=sky_magnitude_limit_var,
+            bg=self.ebg,
+            fg=self.text,
+            insertbackground=self.fg,
+            font=Font(family="Segoe UI", size=10),
+            relief="flat",
+            highlightbackground=self.card_edge,
+            highlightcolor=self.accent,
+            highlightthickness=1,
+            width=8,
+        ).grid(column=1, row=0, sticky="w")
+        build_checkbutton(
+            sky_options,
+            sky_show_altaz_grid_var,
+            self._tr("settings.sky_show_altaz_grid"),
+        ).grid(column=0, row=1, sticky="w", pady=(5, 0))
+        build_checkbutton(
+            sky_options,
+            sky_show_equatorial_grid_var,
+            self._tr("settings.sky_show_equatorial_grid"),
+        ).grid(column=0, row=2, sticky="w", pady=(4, 0))
+        build_checkbutton(
+            sky_options,
+            sky_show_solar_system_var,
+            self._tr("settings.sky_show_solar_system"),
+        ).grid(column=0, row=3, sticky="w", pady=(4, 0))
+
+        add_label(9, self._tr("settings.instrument"))
         instrument_options = tk.Frame(body, bg=self.gbg)
-        instrument_options.grid(column=1, row=8, pady=7, sticky="ew")
+        instrument_options.grid(column=1, row=9, pady=7, sticky="ew")
         build_checkbutton(
             instrument_options,
             hour_angle_offset_var,
@@ -2089,10 +2290,10 @@ class AstroClocksApp:
             font=Font(family="Segoe UI", size=9),
             anchor="w",
         )
-        hint.grid(column=0, row=9, columnspan=2, pady=(2, 12), sticky="ew")
+        hint.grid(column=0, row=10, columnspan=2, pady=(2, 12), sticky="ew")
 
         actions = tk.Frame(body, bg=self.gbg)
-        actions.grid(column=0, row=10, columnspan=2, sticky="e")
+        actions.grid(column=0, row=11, columnspan=2, sticky="e")
 
         def reset_defaults():
             site_var.set(DEFAULT_SITE_NAME)
@@ -2104,6 +2305,10 @@ class AstroClocksApp:
             daylight_saving_var.set(DEFAULT_DAYLIGHT_SAVING_ENABLED)
             sync_timezone_state()
             fov_var.set(f"{DEFAULT_ALADIN_FOV_DEG:.2f}")
+            sky_magnitude_limit_var.set(f"{DEFAULT_SKY_MAGNITUDE_LIMIT:.1f}")
+            sky_show_altaz_grid_var.set(DEFAULT_SKY_SHOW_ALTAZ_GRID)
+            sky_show_equatorial_grid_var.set(DEFAULT_SKY_SHOW_EQUATORIAL_GRID)
+            sky_show_solar_system_var.set(DEFAULT_SKY_SHOW_SOLAR_SYSTEM)
             hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
             declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
 
@@ -2117,6 +2322,12 @@ class AstroClocksApp:
                 )
                 fov = self._parse_float_setting(
                     fov_var.get(), self._tr("settings.aladin_fov"), 0.01, 180
+                )
+                sky_magnitude_limit = self._parse_float_setting(
+                    sky_magnitude_limit_var.get(),
+                    self._tr("settings.sky_magnitude_limit"),
+                    -2,
+                    MAX_SKY_MAGNITUDE_LIMIT,
                 )
             except ValueError as exc:
                 messagebox.showerror(self._tr("settings.invalid_title"), str(exc), parent=dialog)
@@ -2152,6 +2363,11 @@ class AstroClocksApp:
                 daylight_saving_var.get() if timezone_name else DEFAULT_DAYLIGHT_SAVING_ENABLED
             )
             self.aladin_fov_deg = fov
+            self.sky_magnitude_limit = sky_magnitude_limit
+            self.sky_show_altaz_grid = sky_show_altaz_grid_var.get()
+            self.sky_show_equatorial_grid = sky_show_equatorial_grid_var.get()
+            self.sky_show_solar_system = sky_show_solar_system_var.get()
+            self.solar_system_cache_key = None
             self.hour_angle_offset_enabled = hour_angle_offset_var.get()
             self.declination_offset_enabled = declination_offset_var.get()
             self._save_current_settings()

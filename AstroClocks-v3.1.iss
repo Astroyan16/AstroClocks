@@ -1,13 +1,13 @@
-; Inno Setup script for AstroClocks v3.0.
+; Inno Setup script for AstroClocks v3.1.
 
 #define MyAppName "AstroClocks"
-#define MyAppVersion "3.0"
+#define MyAppVersion "3.1"
 #define MyAppPublisher "Yannis Benazza"
-#define MyAppExeName "AstroClocks-v3.0.exe"
-#define MyAppSourceDir "output\AstroClocks-v3.0"
+#define MyAppExeName "AstroClocks-v3.1.exe"
+#define MyAppSourceDir "output\AstroClocks-v3.1"
 
 [Setup]
-; Keep the AppId stable so v3.0 upgrades the same AstroClocks application.
+; Keep the AppId stable so v3.1 upgrades the same AstroClocks application.
 AppId={{FB044594-264E-48D7-9B18-96531C01515F}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
@@ -16,7 +16,7 @@ DefaultDirName={autopf}\AstroClocks
 DisableProgramGroupPage=yes
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=installer
-OutputBaseFilename=Install_AstroClocks3.0
+OutputBaseFilename=Install_AstroClocks3.1
 SetupIconFile=AppIcon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma
@@ -40,6 +40,10 @@ Name: "startup"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:Start
 [Files]
 Source: "{#MyAppSourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+Type: files; Name: "{app}\AstroClocks-v3.0.exe"
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

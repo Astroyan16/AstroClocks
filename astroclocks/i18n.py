@@ -75,8 +75,14 @@ TRANSLATIONS = {
         "settings.timezone_auto": "Automatic time zone",
         "settings.daylight_saving": "Enable daylight saving time",
         "settings.aladin_fov": "Aladin field",
+        "settings.sky_map": "Sky map",
+        "settings.sky_magnitude_limit": "Magnitude limit",
+        "settings.sky_show_altaz_grid": "Show AltAz grid",
+        "settings.sky_show_equatorial_grid": "Show equatorial grid",
+        "settings.sky_show_solar_system": "Show main solar system objects",
         "settings.hint": (
-            "Latitude [-90, 90], longitude [-180, 180]. Automatic time zone uses Windows."
+            "Latitude [-90, 90], longitude [-180, 180]. Magnitude limit max: 15. "
+            "Automatic time zone uses Windows."
         ),
         "settings.invalid_title": "Invalid settings",
         "settings.timezone_invalid": (
@@ -94,12 +100,22 @@ TRANSLATIONS = {
         "direction.east_short": "E",
         "direction.south_short": "S",
         "direction.west_short": "W",
+        "solar.Sun": "Sun",
+        "solar.Moon": "Moon",
+        "solar.Mercury": "Mercury",
+        "solar.Venus": "Venus",
+        "solar.Mars": "Mars",
+        "solar.Jupiter": "Jupiter",
+        "solar.Saturn": "Saturn",
+        "solar.Uranus": "Uranus",
+        "solar.Neptune": "Neptune",
         "sky.zenith": "Zenith",
         "sky.target": "Target",
         "sky.pointer": "Pointer",
         "sky.target_set": "Target set from map",
         "sky.target_set_star": "Target set from map: {name}",
         "sky.above_horizon": "above horizon",
+        "sky.low_horizon": "low above horizon",
         "sky.below_horizon": "below horizon",
         "sky.no_target": "No target selected | {count} named stars visible",
         "sky.status": (
@@ -195,8 +211,14 @@ TRANSLATIONS = {
         "settings.timezone_auto": "Fuseau horaire automatique",
         "settings.daylight_saving": "Activer l'heure d'été",
         "settings.aladin_fov": "Champ Aladin",
+        "settings.sky_map": "Carte du ciel",
+        "settings.sky_magnitude_limit": "Magnitude limite",
+        "settings.sky_show_altaz_grid": "Afficher la grille AltAz",
+        "settings.sky_show_equatorial_grid": "Afficher la grille équatoriale",
+        "settings.sky_show_solar_system": "Afficher les principaux objets du système solaire",
         "settings.hint": (
-            "Latitude [-90, 90], longitude [-180, 180]. Le fuseau automatique utilise Windows."
+            "Latitude [-90, 90], longitude [-180, 180]. Magnitude limite max : 15. "
+            "Le fuseau automatique utilise Windows."
         ),
         "settings.invalid_title": "Paramètres invalides",
         "settings.timezone_invalid": (
@@ -214,12 +236,22 @@ TRANSLATIONS = {
         "direction.east_short": "E",
         "direction.south_short": "S",
         "direction.west_short": "O",
+        "solar.Sun": "Soleil",
+        "solar.Moon": "Lune",
+        "solar.Mercury": "Mercure",
+        "solar.Venus": "Vénus",
+        "solar.Mars": "Mars",
+        "solar.Jupiter": "Jupiter",
+        "solar.Saturn": "Saturne",
+        "solar.Uranus": "Uranus",
+        "solar.Neptune": "Neptune",
         "sky.zenith": "Zénith",
         "sky.target": "Cible",
         "sky.pointer": "Pointeur",
         "sky.target_set": "Cible définie depuis la carte",
         "sky.target_set_star": "Cible définie depuis la carte : {name}",
         "sky.above_horizon": "au-dessus de l'horizon",
+        "sky.low_horizon": "basse sur l'horizon",
         "sky.below_horizon": "sous l'horizon",
         "sky.no_target": "Aucune cible sélectionnée | {count} étoiles nommées visibles",
         "sky.status": (

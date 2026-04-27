@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import zeep
 from astropy import units as u
-from astropy.coordinates import FK5, SkyCoord
+from astropy.coordinates import AltAz, EarthLocation, FK5, SkyCoord, get_body, get_sun
+from astropy.coordinates import solar_system_ephemeris
 from astropy.time import Time
 
 from astroclocks.utils import separate_dms_coordinates
@@ -219,6 +220,51 @@ def jnow_to_icrs_degrees(alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta
     )
     center = jnow_center.transform_to("icrs")
     return center.ra.deg, center.dec.deg
+
+
+def compute_solar_system_positions(latitude, longitude, now_utc=None):
+    """Return apparent local Alt/Az and current-equator coordinates for major bodies."""
+    utc_now = _coerce_utc_datetime(now_utc)
+    observation_time = Time(utc_now, scale="utc")
+    location = EarthLocation.from_geodetic(
+        lon=float(longitude) * u.deg,
+        lat=float(latitude) * u.deg,
+    )
+    altaz_frame = AltAz(obstime=observation_time, location=location)
+    fk5_now = FK5(equinox=observation_time)
+
+    bodies = (
+        ("Sun", "sun"),
+        ("Moon", "moon"),
+        ("Mercury", "mercury"),
+        ("Venus", "venus"),
+        ("Mars", "mars"),
+        ("Jupiter", "jupiter"),
+        ("Saturn", "saturn"),
+        ("Uranus", "uranus"),
+        ("Neptune", "neptune"),
+    )
+    positions = []
+    with solar_system_ephemeris.set("builtin"):
+        for label, body_name in bodies:
+            coordinates = get_sun(observation_time) if body_name == "sun" else get_body(
+                body_name,
+                observation_time,
+                location,
+            )
+            altaz = coordinates.transform_to(altaz_frame)
+            jnow = coordinates.transform_to(fk5_now)
+            positions.append(
+                {
+                    "name": label,
+                    "ra_hours": jnow.ra.hour,
+                    "declination": jnow.dec.deg,
+                    "altitude": altaz.alt.deg,
+                    "azimuth": altaz.az.deg,
+                }
+            )
+
+    return positions
 
 
 def fetch_sky_area_png(

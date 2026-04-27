@@ -15,6 +15,11 @@ LEGACY_DEFAULT_SITE_NAMES = {
 DEFAULT_LATITUDE = 48.805
 DEFAULT_LONGITUDE = 2.23006
 DEFAULT_ALADIN_FOV_DEG = 0.5
+DEFAULT_SKY_MAGNITUDE_LIMIT = 4.0
+DEFAULT_SKY_SHOW_ALTAZ_GRID = True
+DEFAULT_SKY_SHOW_EQUATORIAL_GRID = True
+DEFAULT_SKY_SHOW_SOLAR_SYSTEM = False
+MAX_SKY_MAGNITUDE_LIMIT = 15.0
 DEFAULT_TIMEZONE_NAME = ""
 DEFAULT_DAYLIGHT_SAVING_ENABLED = False
 DEFAULT_LANGUAGE = "en"
@@ -43,6 +48,10 @@ class AppSettings:
     latitude: float = DEFAULT_LATITUDE
     longitude: float = DEFAULT_LONGITUDE
     aladin_fov_deg: float = DEFAULT_ALADIN_FOV_DEG
+    sky_magnitude_limit: float = DEFAULT_SKY_MAGNITUDE_LIMIT
+    sky_show_altaz_grid: bool = DEFAULT_SKY_SHOW_ALTAZ_GRID
+    sky_show_equatorial_grid: bool = DEFAULT_SKY_SHOW_EQUATORIAL_GRID
+    sky_show_solar_system: bool = DEFAULT_SKY_SHOW_SOLAR_SYSTEM
     timezone_name: str = DEFAULT_TIMEZONE_NAME
     daylight_saving_enabled: bool = DEFAULT_DAYLIGHT_SAVING_ENABLED
     language: str = DEFAULT_LANGUAGE
@@ -97,6 +106,23 @@ def normalize_settings(settings):
         latitude=_clamp(float(settings.latitude), -90, 90),
         longitude=_clamp(float(settings.longitude), -180, 180),
         aladin_fov_deg=_clamp(float(settings.aladin_fov_deg), 0.01, 180),
+        sky_magnitude_limit=_clamp(
+            float(getattr(settings, "sky_magnitude_limit", DEFAULT_SKY_MAGNITUDE_LIMIT)),
+            -2,
+            MAX_SKY_MAGNITUDE_LIMIT,
+        ),
+        sky_show_altaz_grid=_coerce_bool(
+            getattr(settings, "sky_show_altaz_grid", DEFAULT_SKY_SHOW_ALTAZ_GRID),
+            DEFAULT_SKY_SHOW_ALTAZ_GRID,
+        ),
+        sky_show_equatorial_grid=_coerce_bool(
+            getattr(settings, "sky_show_equatorial_grid", DEFAULT_SKY_SHOW_EQUATORIAL_GRID),
+            DEFAULT_SKY_SHOW_EQUATORIAL_GRID,
+        ),
+        sky_show_solar_system=_coerce_bool(
+            getattr(settings, "sky_show_solar_system", DEFAULT_SKY_SHOW_SOLAR_SYSTEM),
+            DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
+        ),
         timezone_name=timezone_name,
         daylight_saving_enabled=_coerce_bool(
             getattr(settings, "daylight_saving_enabled", DEFAULT_DAYLIGHT_SAVING_ENABLED),
@@ -141,6 +167,22 @@ def load_app_settings():
             latitude=data.get("latitude", DEFAULT_LATITUDE),
             longitude=data.get("longitude", DEFAULT_LONGITUDE),
             aladin_fov_deg=data.get("aladin_fov_deg", DEFAULT_ALADIN_FOV_DEG),
+            sky_magnitude_limit=data.get(
+                "sky_magnitude_limit",
+                DEFAULT_SKY_MAGNITUDE_LIMIT,
+            ),
+            sky_show_altaz_grid=data.get(
+                "sky_show_altaz_grid",
+                DEFAULT_SKY_SHOW_ALTAZ_GRID,
+            ),
+            sky_show_equatorial_grid=data.get(
+                "sky_show_equatorial_grid",
+                DEFAULT_SKY_SHOW_EQUATORIAL_GRID,
+            ),
+            sky_show_solar_system=data.get(
+                "sky_show_solar_system",
+                DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
+            ),
             timezone_name=data.get("timezone_name", DEFAULT_TIMEZONE_NAME),
             daylight_saving_enabled=data.get(
                 "daylight_saving_enabled", DEFAULT_DAYLIGHT_SAVING_ENABLED
