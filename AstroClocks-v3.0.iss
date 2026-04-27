@@ -27,8 +27,15 @@ WizardStyle=modern
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
+[CustomMessages]
+english.StartupTasks=Startup options
+english.AutoStartTask=Launch AstroClocks when Windows starts
+french.StartupTasks=Options de démarrage
+french.AutoStartTask=Lancer AstroClocks au démarrage de Windows
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "startup"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:StartupTasks}"; Flags: unchecked
 
 [Files]
 Source: "{#MyAppSourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -37,6 +44,9 @@ Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Registry]
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall shellexec skipifsilent
