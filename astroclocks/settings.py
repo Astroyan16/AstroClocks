@@ -1,5 +1,7 @@
 import json
+import os
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from astroclocks.utils import resource_path
 
@@ -20,8 +22,18 @@ DEFAULT_HOUR_ANGLE_OFFSET_ENABLED = True
 DEFAULT_DECLINATION_OFFSET_ENABLED = True
 SUPPORTED_LANGUAGES = {"en", "fr"}
 
-LONGITUDE_FILE = resource_path("Longitude.ini")
-SETTINGS_FILE = resource_path("AstroClocks.ini")
+LEGACY_LONGITUDE_FILE = resource_path("Longitude.ini")
+LEGACY_SETTINGS_FILE = resource_path("AstroClocks.ini")
+
+
+def _user_config_dir():
+    appdata = os.getenv("APPDATA")
+    if appdata:
+        return Path(appdata) / "AstroClocks"
+    return Path.home() / ".astroclocks"
+
+
+SETTINGS_FILE = _user_config_dir() / "AstroClocks.ini"
 
 
 @dataclass
@@ -54,7 +66,7 @@ def _coerce_bool(value, default):
 
 def _read_legacy_longitude():
     try:
-        with open(LONGITUDE_FILE, "r", encoding="utf-8") as file:
+        with open(LEGACY_LONGITUDE_FILE, "r", encoding="utf-8") as file:
             content = file.readline().strip()
     except FileNotFoundError:
         return DEFAULT_LONGITUDE
@@ -103,10 +115,18 @@ def normalize_settings(settings):
 
 
 def load_app_settings():
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
+    for settings_file in (SETTINGS_FILE, LEGACY_SETTINGS_FILE):
+        try:
+            with open(settings_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            break
+        except FileNotFoundError:
+            data = None
+        except json.JSONDecodeError:
+            data = None
+            break
+
+    if data is None:
         return normalize_settings(
             AppSettings(
                 latitude=DEFAULT_LATITUDE,
@@ -138,6 +158,7 @@ def load_app_settings():
 
 def save_app_settings(settings):
     settings = normalize_settings(settings)
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(SETTINGS_FILE, "w+", encoding="utf-8") as file:
         json.dump(asdict(settings), file, indent=2)
 

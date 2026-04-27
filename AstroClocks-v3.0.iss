@@ -4,7 +4,7 @@
 #define MyAppVersion "3.0"
 #define MyAppPublisher "Yannis Benazza"
 #define MyAppExeName "AstroClocks-v3.0.exe"
-#define MyAppSourceDir "output\AstroClocks v3.0"
+#define MyAppSourceDir "output\AstroClocks-v3.0"
 
 [Setup]
 ; Keep the AppId stable so v3.0 upgrades the same AstroClocks application.
