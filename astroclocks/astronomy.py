@@ -1,8 +1,8 @@
 import datetime
 import json
-from time import strftime
 from urllib.parse import urlencode
 from urllib.request import urlopen
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import zeep
 from astropy import units as u
@@ -12,19 +12,74 @@ from astropy.time import Time
 from astroclocks.utils import separate_dms_coordinates
 
 
-def format_timezone_label():
-    tz_value = strftime("%z")
-    if float(tz_value[3:5]) > 0:
-        return (
-            "UTC"
-            + tz_value[0]
-            + str(
-                float(f"{float(tz_value[0:3]):.2f}")
-                + float(f"{float(tz_value[3:5]) / 60:.2f}")
-            )
-        )
+def _format_timezone_offset(offset):
+    if offset is None:
+        return "UTC"
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    total_minutes = abs(total_minutes)
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    return f"UTC{sign}{hours:02d}:{minutes:02d}"
 
-    return "UTC" + tz_value[0] + str(int(f"{float(tz_value[0:3]):.0f}"))
+
+def resolve_timezone(timezone_name=None):
+    timezone_name = str(timezone_name or "").strip()
+    if not timezone_name:
+        return None
+
+    upper_name = timezone_name.upper()
+    if upper_name in {"UTC", "GMT", "Z"}:
+        return datetime.timezone.utc
+
+    for prefix in ("UTC", "GMT"):
+        if upper_name.startswith(prefix) and len(timezone_name) > len(prefix):
+            offset_text = timezone_name[len(prefix) :].strip()
+            if offset_text[0] not in "+-":
+                break
+            sign = 1 if offset_text[0] == "+" else -1
+            offset_body = offset_text[1:]
+            if ":" in offset_body:
+                hour_text, minute_text = offset_body.split(":", 1)
+            else:
+                hour_text = offset_body[:2]
+                minute_text = offset_body[2:] or "0"
+            try:
+                hours = int(hour_text)
+                minutes = int(minute_text)
+            except ValueError as exc:
+                raise ValueError(f"Invalid time zone: {timezone_name}") from exc
+            if hours > 23 or minutes > 59:
+                raise ValueError(f"Invalid time zone: {timezone_name}")
+            return datetime.timezone(sign * datetime.timedelta(hours=hours, minutes=minutes))
+
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Invalid time zone: {timezone_name}") from exc
+
+
+def _manual_timezone_offset(utc_now, tzinfo, daylight_saving_enabled):
+    local_now = utc_now.astimezone(tzinfo)
+    offset = local_now.utcoffset() or datetime.timedelta()
+    dst = local_now.dst() or datetime.timedelta()
+    offset -= dst
+    if daylight_saving_enabled:
+        offset += datetime.timedelta(hours=1)
+    return offset
+
+
+def format_timezone_label(timezone_name=None, daylight_saving_enabled=False, now_utc=None):
+    utc_now = _coerce_utc_datetime(now_utc)
+    tzinfo = resolve_timezone(timezone_name)
+    timezone_name = str(timezone_name or "").strip()
+    if timezone_name:
+        offset = _manual_timezone_offset(utc_now, tzinfo, daylight_saving_enabled)
+        offset_label = _format_timezone_offset(offset)
+        return f"{offset_label} ({timezone_name})"
+    local_now = utc_now.astimezone()
+    offset = local_now.utcoffset()
+    return _format_timezone_offset(offset)
 
 
 def convert_j2000_to_now(coords):
@@ -225,10 +280,17 @@ def compute_clock_state(
     alpha_mm,
     alpha_ss,
     hour_angle_offset_hours=6,
+    timezone_name=None,
+    daylight_saving_enabled=False,
     now_utc=None,
 ):
     utc_now = _coerce_utc_datetime(now_utc)
-    local_now = utc_now.astimezone()
+    tzinfo = resolve_timezone(timezone_name)
+    if tzinfo is not None:
+        offset = _manual_timezone_offset(utc_now, tzinfo, daylight_saving_enabled)
+        local_now = (utc_now + offset).replace(tzinfo=datetime.timezone(offset))
+    else:
+        local_now = utc_now.astimezone()
 
     local_string = local_now.strftime("%H:%M:%S")
     utc_string = utc_now.strftime("%H:%M:%S")

@@ -4,11 +4,17 @@ from dataclasses import asdict, dataclass
 from astroclocks.utils import resource_path
 
 
-DEFAULT_SITE_NAME = "Télescope T1m - Observatoire de Meudon"
-LEGACY_DEFAULT_SITE_NAME = "Telescope T1m - Observatoire de Meudon"
+DEFAULT_SITE_NAME = "Observatoire de Meudon - T1m"
+DEFAULT_COUNTRY = "France"
+LEGACY_DEFAULT_SITE_NAMES = {
+    "Telescope T1m - Observatoire de Meudon",
+    "Télescope T1m - Observatoire de Meudon",
+}
 DEFAULT_LATITUDE = 48.805
 DEFAULT_LONGITUDE = 2.23006
 DEFAULT_ALADIN_FOV_DEG = 0.5
+DEFAULT_TIMEZONE_NAME = ""
+DEFAULT_DAYLIGHT_SAVING_ENABLED = False
 DEFAULT_LANGUAGE = "en"
 DEFAULT_HOUR_ANGLE_OFFSET_ENABLED = True
 DEFAULT_DECLINATION_OFFSET_ENABLED = True
@@ -21,9 +27,12 @@ SETTINGS_FILE = resource_path("AstroClocks.ini")
 @dataclass
 class AppSettings:
     site_name: str = DEFAULT_SITE_NAME
+    country: str = DEFAULT_COUNTRY
     latitude: float = DEFAULT_LATITUDE
     longitude: float = DEFAULT_LONGITUDE
     aladin_fov_deg: float = DEFAULT_ALADIN_FOV_DEG
+    timezone_name: str = DEFAULT_TIMEZONE_NAME
+    daylight_saving_enabled: bool = DEFAULT_DAYLIGHT_SAVING_ENABLED
     language: str = DEFAULT_LANGUAGE
     hour_angle_offset_enabled: bool = DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
     declination_offset_enabled: bool = DEFAULT_DECLINATION_OFFSET_ENABLED
@@ -63,14 +72,24 @@ def normalize_settings(settings):
     if language not in SUPPORTED_LANGUAGES:
         language = DEFAULT_LANGUAGE
     site_name = str(settings.site_name or DEFAULT_SITE_NAME)
-    if site_name == LEGACY_DEFAULT_SITE_NAME:
+    if site_name in LEGACY_DEFAULT_SITE_NAMES:
         site_name = DEFAULT_SITE_NAME
+    country = str(getattr(settings, "country", DEFAULT_COUNTRY) or DEFAULT_COUNTRY).strip()
+    timezone_name = str(
+        getattr(settings, "timezone_name", DEFAULT_TIMEZONE_NAME) or DEFAULT_TIMEZONE_NAME
+    ).strip()
 
     return AppSettings(
         site_name=site_name,
+        country=country or DEFAULT_COUNTRY,
         latitude=_clamp(float(settings.latitude), -90, 90),
         longitude=_clamp(float(settings.longitude), -180, 180),
         aladin_fov_deg=_clamp(float(settings.aladin_fov_deg), 0.01, 180),
+        timezone_name=timezone_name,
+        daylight_saving_enabled=_coerce_bool(
+            getattr(settings, "daylight_saving_enabled", DEFAULT_DAYLIGHT_SAVING_ENABLED),
+            DEFAULT_DAYLIGHT_SAVING_ENABLED,
+        ),
         language=language,
         hour_angle_offset_enabled=_coerce_bool(
             getattr(settings, "hour_angle_offset_enabled", DEFAULT_HOUR_ANGLE_OFFSET_ENABLED),
@@ -98,9 +117,14 @@ def load_app_settings():
     return normalize_settings(
         AppSettings(
             site_name=data.get("site_name", DEFAULT_SITE_NAME),
+            country=data.get("country", DEFAULT_COUNTRY),
             latitude=data.get("latitude", DEFAULT_LATITUDE),
             longitude=data.get("longitude", DEFAULT_LONGITUDE),
             aladin_fov_deg=data.get("aladin_fov_deg", DEFAULT_ALADIN_FOV_DEG),
+            timezone_name=data.get("timezone_name", DEFAULT_TIMEZONE_NAME),
+            daylight_saving_enabled=data.get(
+                "daylight_saving_enabled", DEFAULT_DAYLIGHT_SAVING_ENABLED
+            ),
             language=data.get("language", DEFAULT_LANGUAGE),
             hour_angle_offset_enabled=data.get(
                 "hour_angle_offset_enabled", DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
@@ -154,9 +178,9 @@ def get_hemisphere(longitude):
     return "E" if longitude >= 0 else "W"
 
 
-def format_longitude_display(longitude):
-    return _format_signed_angle(longitude, "E", "W")
+def format_longitude_display(longitude, east_suffix="E", west_suffix="W"):
+    return _format_signed_angle(longitude, east_suffix, west_suffix)
 
 
-def format_latitude_display(latitude):
-    return _format_signed_angle(latitude, "N", "S")
+def format_latitude_display(latitude, north_suffix="N", south_suffix="S"):
+    return _format_signed_angle(latitude, north_suffix, south_suffix)

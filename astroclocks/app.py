@@ -1,11 +1,14 @@
 import ctypes
 import math
+import socket
 import tempfile
+import threading
 import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 from tkinter.font import Font
+from zoneinfo import available_timezones
 
 from astroplan import download_IERS_A
 from astropy.coordinates import name_resolve
@@ -23,11 +26,14 @@ from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS, translate
 from astroclocks.settings import (
     AppSettings,
     DEFAULT_ALADIN_FOV_DEG,
+    DEFAULT_COUNTRY,
+    DEFAULT_DAYLIGHT_SAVING_ENABLED,
     DEFAULT_DECLINATION_OFFSET_ENABLED,
     DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
     DEFAULT_SITE_NAME,
+    DEFAULT_TIMEZONE_NAME,
     format_latitude_display,
     format_longitude_display,
     load_app_settings,
@@ -39,6 +45,7 @@ from astroclocks.utils import is_float, resource_path
 
 
 APP_VERSION = "3.0"
+APP_RELEASE_MONTH = 4
 APP_YEAR = "2026"
 APP_AUTHOR = "Yannis Benazza"
 APP_EMAIL = "yannis.benazza@obspm.fr"
@@ -75,17 +82,24 @@ class AstroClocksApp:
         self.muted = "#93a6b7"
         self.accent = "#4cc9f0"
         self.success = "#7bd88f"
+        self.danger = "#ff5c5c"
         self.button_bg = "#22303a"
         self.settings = load_app_settings()
         self.site_name = self.settings.site_name
+        self.country = self.settings.country
         self.latitude = self.settings.latitude
         self.longitude = self.settings.longitude
         self.aladin_fov_deg = self.settings.aladin_fov_deg
+        self.timezone_name = self._normalize_timezone_name(self.settings.timezone_name)
+        self.daylight_saving_enabled = self.settings.daylight_saving_enabled
         self.language = self.settings.language
         self.hour_angle_offset_enabled = self.settings.hour_angle_offset_enabled
         self.declination_offset_enabled = self.settings.declination_offset_enabled
         self.coord_font_size = 24
         self.aladin_button = None
+        self.connectivity_label = None
+        self.network_online = None
+        self.connectivity_check_pending = False
         self.sky_canvas = None
         self.sky_status = None
         self.named_stars_jnow = convert_star_catalog_j2000_to_jnow(NAMED_STARS_J2000)
@@ -93,6 +107,8 @@ class AstroClocksApp:
         self.sky_star_points = []
         self.sky_hover_position = None
         self.sky_base_status = ""
+        self.sky_base_status_highlights = ()
+        self.target_active = False
         self.is_fullscreen = False
         self.windowed_geometry = None
         self.windowed_state = "normal"
@@ -109,13 +125,63 @@ class AstroClocksApp:
         self._create_hour_angle_widgets()
         self._create_sky_widgets()
         self.update_site_labels()
-        self.update_value()
+        self.update_value(activate_target=False)
+        self._schedule_connectivity_check(0)
 
         self.root.bind("<Return>", lambda event: self.search_coordinates())
         self.root.bind("<Configure>", self._update_coordinate_font_size)
 
     def _tr(self, key, **values):
         return translate(self.language, key, **values)
+
+    def _release_date_text(self):
+        return f"{self._tr(f'about.month.{APP_RELEASE_MONTH}')} {APP_YEAR}"
+
+    def _normalize_timezone_name(self, timezone_name):
+        timezone_name = str(timezone_name or "").strip()
+        if timezone_name:
+            try:
+                format_timezone_label(timezone_name)
+            except ValueError:
+                return DEFAULT_TIMEZONE_NAME
+        return timezone_name
+
+    def _validate_timezone_name(self, timezone_name):
+        timezone_name = str(timezone_name or "").strip()
+        if timezone_name:
+            format_timezone_label(timezone_name)
+        return timezone_name
+
+    def _timezone_options(self):
+        offsets = ["UTC"]
+        for total_minutes in range(-12 * 60, 14 * 60 + 1, 15):
+            if total_minutes == 0:
+                continue
+            sign = "+" if total_minutes > 0 else "-"
+            absolute_minutes = abs(total_minutes)
+            offsets.append(
+                f"UTC{sign}{absolute_minutes // 60:02d}:{absolute_minutes % 60:02d}"
+            )
+
+        zone_names = sorted(available_timezones())
+        preferred = [name for name in ("Europe/Paris", "UTC") if name in zone_names or name == "UTC"]
+        options = preferred + zone_names + offsets
+        if self.timezone_name:
+            options.insert(0, self.timezone_name)
+        return list(dict.fromkeys(options))
+
+    def _timezone_label(self):
+        try:
+            return format_timezone_label(
+                self.timezone_name,
+                daylight_saving_enabled=self.daylight_saving_enabled
+                and bool(self.timezone_name),
+            )
+        except ValueError:
+            return format_timezone_label()
+
+    def _local_time_title_kwargs(self):
+        return {"timezone": self._timezone_label()}
 
     def _configure_styles(self):
         style = ttk.Style()
@@ -126,11 +192,26 @@ class AstroClocksApp:
         self.root.option_add("*TCombobox*Listbox*selectBackground", self.accent)
         self.root.option_add("*TCombobox*Listbox*selectForeground", self.ebg)
 
-        style.map("TCombobox", fieldbackground=[("readonly", self.ebg)])
-        style.map("TCombobox", selectbackground=[("readonly", self.ebg)])
-        style.map("TCombobox", selectforeground=[("readonly", self.text)])
-        style.map("TCombobox", background=[("readonly", self.card_edge)])
-        style.map("TCombobox", foreground=[("readonly", self.text)])
+        style.map(
+            "TCombobox",
+            fieldbackground=[("disabled", self.card_bg), ("readonly", self.ebg)],
+        )
+        style.map(
+            "TCombobox",
+            selectbackground=[("disabled", self.card_bg), ("readonly", self.ebg)],
+        )
+        style.map(
+            "TCombobox",
+            selectforeground=[("disabled", self.muted), ("readonly", self.text)],
+        )
+        style.map(
+            "TCombobox",
+            background=[("disabled", self.card_edge), ("readonly", self.card_edge)],
+        )
+        style.map(
+            "TCombobox",
+            foreground=[("disabled", self.muted), ("readonly", self.text)],
+        )
         style.configure(
             "TCombobox",
             arrowsize=18,
@@ -291,6 +372,16 @@ class AstroClocksApp:
         header_actions = tk.Frame(header, bg=self.gbg)
         header_actions.grid(column=1, row=0, rowspan=2, sticky="e")
 
+        self.connectivity_label = tk.Label(
+            header_actions,
+            text=self._tr("network.checking"),
+            foreground=self.muted,
+            background=self.gbg,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+            anchor="e",
+        )
+        self.connectivity_label.grid(column=0, row=0, padx=(0, 14), sticky="e")
+
         self.header_settings_button = tk.Button(
             header_actions,
             text=self._tr("button.settings"),
@@ -306,7 +397,7 @@ class AstroClocksApp:
             cursor="hand2",
             command=self.open_settings_dialog,
         )
-        self.header_settings_button.grid(column=0, row=0, padx=(0, 8), sticky="e")
+        self.header_settings_button.grid(column=1, row=0, padx=(0, 8), sticky="e")
 
         self.about_button = tk.Button(
             header_actions,
@@ -323,7 +414,7 @@ class AstroClocksApp:
             cursor="hand2",
             command=self.open_about_dialog,
         )
-        self.about_button.grid(column=1, row=0, padx=(0, 8), sticky="e")
+        self.about_button.grid(column=2, row=0, padx=(0, 8), sticky="e")
 
         self.fullscreen_button = tk.Button(
             header_actions,
@@ -340,7 +431,7 @@ class AstroClocksApp:
             cursor="hand2",
             command=self._toggle_fullscreen,
         )
-        self.fullscreen_button.grid(column=2, row=0, padx=(0, 8), sticky="e")
+        self.fullscreen_button.grid(column=3, row=0, padx=(0, 8), sticky="e")
 
         self.quit_button = tk.Button(
             header_actions,
@@ -357,7 +448,7 @@ class AstroClocksApp:
             cursor="hand2",
             command=self.root.destroy,
         )
-        self.quit_button.grid(column=3, row=0, sticky="e")
+        self.quit_button.grid(column=4, row=0, sticky="e")
 
     def open_about_dialog(self):
         dialog = tk.Toplevel(self.root)
@@ -388,7 +479,7 @@ class AstroClocksApp:
         ).grid(column=0, row=0, columnspan=2, sticky="w")
         tk.Label(
             body,
-            text=f"v{APP_VERSION} | {APP_YEAR}",
+            text=f"v{APP_VERSION} | {self._release_date_text()}",
             bg=self.card_bg,
             fg=self.muted,
             font=Font(family="Segoe UI", size=10),
@@ -488,6 +579,7 @@ class AstroClocksApp:
             fg=self.text,
             activebackground=self.accent,
             activeforeground=self.ebg,
+            disabledforeground=self.muted,
             font=Font(family="Segoe UI", size=11, weight="bold"),
             relief="flat",
             bd=0,
@@ -495,6 +587,54 @@ class AstroClocksApp:
             pady=7,
             cursor="hand2",
             command=command,
+        )
+
+    def _schedule_connectivity_check(self, delay_ms=1000):
+        self.root.after(delay_ms, self._start_connectivity_check)
+
+    def _start_connectivity_check(self):
+        if self.connectivity_check_pending:
+            self._schedule_connectivity_check()
+            return
+
+        self.connectivity_check_pending = True
+        threading.Thread(target=self._run_connectivity_check, daemon=True).start()
+
+    def _run_connectivity_check(self):
+        is_online = False
+        try:
+            with socket.create_connection(("aladin.cds.unistra.fr", 443), timeout=0.8):
+                is_online = True
+        except OSError:
+            is_online = False
+
+        try:
+            self.root.after(0, lambda: self._apply_connectivity_result(is_online))
+        except tk.TclError:
+            pass
+
+    def _apply_connectivity_result(self, is_online):
+        self.connectivity_check_pending = False
+        self.network_online = is_online
+
+        if self.connectivity_label is not None:
+            text_key = "network.connected" if is_online else "network.offline"
+            self.connectivity_label.config(
+                text=self._tr(text_key),
+                foreground=self.success if is_online else self.danger,
+            )
+
+        self._update_aladin_button_state()
+        self._schedule_connectivity_check()
+
+    def _update_aladin_button_state(self):
+        if self.aladin_button is None:
+            return
+
+        is_offline = self.network_online is False
+        self.aladin_button.config(
+            state=tk.DISABLED if is_offline else tk.NORMAL,
+            cursor="arrow" if is_offline else "hand2",
         )
 
     def _hour_angle_title_kwargs(self):
@@ -511,12 +651,11 @@ class AstroClocksApp:
 
     def _create_frames(self):
         self._create_header()
-        timezone = format_timezone_label()
         self.lf_long = self._build_labelframe("frame.site", 0, 1)
         self.lf_search = self._build_labelframe("frame.search", 1, 1)
         self.lf_sky = self._build_labelframe("frame.sky", 2, 1, rowspan=5, bd=6)
         self.lf_local = self._build_labelframe(
-            "frame.local_time", 0, 2, title_kwargs={"timezone": timezone}
+            "frame.local_time", 0, 2, title_kwargs=self._local_time_title_kwargs
         )
         self.lf_utc = self._build_labelframe("frame.utc", 1, 2)
         self.lf_alpha = self._build_labelframe("frame.alpha", 0, 3)
@@ -567,6 +706,28 @@ class AstroClocksApp:
         )
         self.site_name_label.grid(column=0, row=0, columnspan=2, padx=8, pady=(8, 4), sticky="ew")
 
+        self.country_label = tk.Label(
+            self.lf_long,
+            font=Font(family="Segoe UI", size=12),
+            background=self.ebg,
+            foreground=self.fg,
+            anchor="w",
+            padx=10,
+            pady=5,
+        )
+        self.country_label.grid(column=0, row=1, columnspan=2, padx=8, pady=4, sticky="ew")
+
+        self.timezone_label = tk.Label(
+            self.lf_long,
+            font=Font(family="Segoe UI", size=12),
+            background=self.ebg,
+            foreground=self.fg,
+            anchor="w",
+            padx=10,
+            pady=5,
+        )
+        self.timezone_label.grid(column=0, row=2, columnspan=2, padx=8, pady=4, sticky="ew")
+
         self.latlabel = tk.Label(
             self.lf_long,
             font=Font(family="Segoe UI", size=12),
@@ -576,7 +737,7 @@ class AstroClocksApp:
             padx=10,
             pady=5,
         )
-        self.latlabel.grid(column=0, row=1, columnspan=2, padx=8, pady=4, sticky="ew")
+        self.latlabel.grid(column=0, row=3, columnspan=2, padx=8, pady=4, sticky="ew")
 
         self.longlabel = tk.Label(
             self.lf_long,
@@ -587,7 +748,7 @@ class AstroClocksApp:
             padx=10,
             pady=5,
         )
-        self.longlabel.grid(column=0, row=2, columnspan=2, padx=8, pady=4, sticky="ew")
+        self.longlabel.grid(column=0, row=4, columnspan=2, padx=8, pady=4, sticky="ew")
 
         self.lf_long.grid_columnconfigure(0, weight=1)
         self.lf_long.grid_columnconfigure(1, weight=1)
@@ -636,6 +797,7 @@ class AstroClocksApp:
             self.show_sky_view,
         )
         self.aladin_button.grid(column=1, row=0, padx=8, pady=8, sticky="ew")
+        self._update_aladin_button_state()
 
         self.combo_box = ttk.Combobox(
             self.lf_search,
@@ -731,12 +893,12 @@ class AstroClocksApp:
         self._build_spinbox(self.lf_delta, self.delta_ss, 0, 59, 3)
 
         self.alpha_set_button = self._build_button(
-            self.lf_alpha, self._tr("button.set"), self.update_value
+            self.lf_alpha, self._tr("button.set"), self._activate_target_from_controls
         )
         self.alpha_set_button.grid(column=4, row=0, padx=8, pady=8, sticky="ew")
 
         self.delta_set_button = self._build_button(
-            self.lf_delta, self._tr("button.set"), self.update_value
+            self.lf_delta, self._tr("button.set"), self._activate_target_from_controls
         )
         self.delta_set_button.grid(column=4, row=0, padx=8, pady=8, sticky="ew")
 
@@ -766,7 +928,7 @@ class AstroClocksApp:
             highlightbackground=self.card_edge,
             highlightcolor=self.accent,
             highlightthickness=1,
-            command=self.update_value,
+            command=self._activate_target_from_controls,
         ).grid(column=column, row=row, ipadx=1, ipady=1, padx=8, pady=8, sticky="ew")
 
     def _update_coordinate_font_size(self, _event=None):
@@ -840,16 +1002,22 @@ class AstroClocksApp:
         self.sky_canvas.bind("<Leave>", self._on_sky_leave)
         self.sky_canvas.bind("<Button-1>", self._on_sky_click)
 
-        self.sky_status = tk.Label(
+        self.sky_status = tk.Text(
             self.lf_sky,
-            text="",
             bg=self.card_bg,
             fg=self.muted,
             font=Font(family="Segoe UI", size=10),
-            justify="left",
-            anchor="w",
             height=3,
+            relief="flat",
+            bd=0,
+            padx=6,
+            pady=4,
+            wrap="word",
+            cursor="arrow",
+            takefocus=0,
         )
+        self.sky_status.tag_configure("danger", foreground=self.danger)
+        self.sky_status.config(state=tk.DISABLED)
         self.sky_status.grid(column=0, row=1, padx=8, pady=(2, 8), sticky="ew")
 
     def _parse_clock_hours(self, value):
@@ -966,7 +1134,13 @@ class AstroClocksApp:
                 anchor="e",
             )
 
-        for azimuth, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
+        cardinal_labels = (
+            (0, self._tr("direction.north_short")),
+            (90, self._tr("direction.east_short")),
+            (180, self._tr("direction.south_short")),
+            (270, self._tr("direction.west_short")),
+        )
+        for azimuth, label in cardinal_labels:
             azimuth_rad = math.radians(azimuth)
             x = center_x - radius * math.sin(azimuth_rad)
             y = center_y - radius * math.cos(azimuth_rad)
@@ -990,14 +1164,6 @@ class AstroClocksApp:
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
         )
-        canvas.create_text(
-            center_x,
-            center_y + radius + 34,
-            text=self._tr("sky.horizon_latitude", latitude=self.latitude),
-            fill=self.muted,
-            font=Font(family="Segoe UI", size=9),
-        )
-
     def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
         self.sky_star_points = []
         for name, ra_hours, declination, magnitude in self.named_stars_jnow:
@@ -1046,7 +1212,7 @@ class AstroClocksApp:
 
     def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azimuth):
         x, y, visible = self._project_target(center_x, center_y, radius, altitude, azimuth)
-        marker_color = self.success if visible else self.fg
+        marker_color = self.success if visible else self.danger
         canvas.create_oval(x - 11, y - 11, x + 11, y + 11, outline=marker_color, width=2)
         canvas.create_line(x - 17, y, x + 17, y, fill=marker_color, width=2)
         canvas.create_line(x, y - 17, x, y + 17, fill=marker_color, width=2)
@@ -1073,6 +1239,45 @@ class AstroClocksApp:
         minutes = 0 if degrees == 90 else (total_seconds % 3600) // 60
         seconds = 0 if degrees == 90 else total_seconds % 60
         return f"{sign}{degrees:02d}\N{DEGREE SIGN} {minutes:02d}' {seconds:02d}\""
+
+    def _format_signed_hms_compact(self, hours):
+        sign = "-" if hours < 0 else "+"
+        total_seconds = int(round(abs(hours) * 3600))
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"{sign}{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _format_signed_dms_compact(self, degrees_value):
+        sign = "-" if degrees_value < 0 else "+"
+        total_seconds = int(round(abs(degrees_value) * 3600))
+        degrees = min(90, total_seconds // 3600)
+        minutes = 0 if degrees == 90 else (total_seconds % 3600) // 60
+        seconds = 0 if degrees == 90 else total_seconds % 60
+        return f"{sign}{degrees:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _format_unsigned_hms_compact(self, hours_value):
+        total_seconds = int(round((hours_value % 24) * 3600)) % (24 * 3600)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _format_jnow_horizontal_status(
+        self,
+        ra_hours,
+        declination,
+        altitude,
+        azimuth,
+        hour_angle,
+    ):
+        return (
+            f"JNow : RA = {self._format_unsigned_hms_compact(ra_hours)} ; "
+            f"DEC = {self._format_signed_dms_compact(declination)} | "
+            f"Alt = {altitude:+.2f}\N{DEGREE SIGN} ; "
+            f"Az = {azimuth:05.1f}\N{DEGREE SIGN} | "
+            f"HA = {self._format_signed_hms_compact(hour_angle)}"
+        )
 
     def _coordinates_to_fields(self, ra_hours, dec_degrees):
         total_ra_seconds = int(round((ra_hours % 24) * 3600)) % (24 * 3600)
@@ -1193,42 +1398,76 @@ class AstroClocksApp:
             )
             self.sky_canvas.tag_lower(rect_id, text_id)
 
+    def _set_sky_status(self, text, highlights=()):
+        if self.sky_status is None:
+            return
+
+        self.sky_status.config(state=tk.NORMAL)
+        self.sky_status.delete("1.0", tk.END)
+        self.sky_status.insert("1.0", text)
+        self.sky_status.tag_remove("danger", "1.0", tk.END)
+        for highlight in highlights:
+            if not highlight:
+                continue
+            start = "1.0"
+            while True:
+                index = self.sky_status.search(highlight, start, tk.END)
+                if not index:
+                    break
+                end = f"{index}+{len(highlight)}c"
+                self.sky_status.tag_add("danger", index, end)
+                start = end
+        self.sky_status.config(state=tk.DISABLED)
+
+    def _sky_inactive_status(self):
+        return self._tr("sky.no_target", count=len(self.sky_star_points))
+
     def _update_sky_hover(self):
         if self.sky_hover_position is None:
             if self.sky_canvas is not None:
                 self.sky_canvas.delete("sky-hover")
-            self.sky_status.config(text=self.sky_base_status)
+            self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
             return
 
         x, y = self.sky_hover_position
         coordinates = self._sky_coordinates_from_canvas(x, y)
         if coordinates is None:
             self.sky_canvas.delete("sky-hover")
-            self.sky_status.config(text=self.sky_base_status)
+            self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
             return
 
         star = self._nearest_sky_star(x, y)
         self._draw_hover_overlay(x, y, star)
 
         if star:
+            jnow_status = self._format_jnow_horizontal_status(
+                star["ra_hours"],
+                star["declination"],
+                star["altitude"],
+                star["azimuth"],
+                star["hour_angle"],
+            )
             label = (
-                f"{star['name']} | RA JNow {self._format_ra(star['ra_hours'])} | "
-                f"Dec {self._format_dec(star['declination'])} | "
-                f"Alt {star['altitude']:+.1f}\N{DEGREE SIGN} Az {star['azimuth']:.0f}\N{DEGREE SIGN} | "
-                f"mag {star['magnitude']:.2f}"
+                f"{star['name']} | {jnow_status} | mag {star['magnitude']:.2f}"
             )
         else:
             ra_hours, declination, hour_angle, altitude, azimuth = coordinates
-            label = (
-                f"{self._tr('sky.pointer')} | RA JNow {self._format_ra(ra_hours)} | "
-                f"Dec {self._format_dec(declination)} | "
-                f"Alt {altitude:+.1f}\N{DEGREE SIGN} Az {azimuth:.0f}\N{DEGREE SIGN} | "
-                f"HA {hour_angle:+.2f}h"
+            jnow_status = self._format_jnow_horizontal_status(
+                ra_hours,
+                declination,
+                altitude,
+                azimuth,
+                hour_angle,
             )
+            label = f"{self._tr('sky.pointer')} | {jnow_status}"
 
-        self.sky_status.config(text=f"{label}\n{self.sky_base_status}")
+        self._set_sky_status(
+            f"{label}\n{self.sky_base_status}",
+            self.sky_base_status_highlights,
+        )
 
     def _set_target_from_coordinates(self, ra_hours, dec_degrees, label):
+        self.target_active = True
         alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta_ss = self._coordinates_to_fields(
             ra_hours,
             dec_degrees,
@@ -1246,7 +1485,8 @@ class AstroClocksApp:
                 label=label,
                 ra=self._format_ra(ra_hours),
                 dec=self._format_dec(dec_degrees),
-            )
+            ),
+            foreground=self.success,
         )
 
     def _on_sky_motion(self, event):
@@ -1258,7 +1498,7 @@ class AstroClocksApp:
         if self.sky_canvas is not None:
             self.sky_canvas.delete("sky-hover")
         if self.sky_status is not None:
-            self.sky_status.config(text=self.sky_base_status)
+            self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
 
     def _on_sky_click(self, event):
         self.sky_hover_position = (event.x, event.y)
@@ -1298,6 +1538,8 @@ class AstroClocksApp:
                 self.alpha_mm.get(),
                 self.alpha_ss.get(),
                 hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
+                timezone_name=self.timezone_name,
+                daylight_saving_enabled=self.daylight_saving_enabled,
             )
 
         self.sky_canvas.delete("all")
@@ -1312,15 +1554,22 @@ class AstroClocksApp:
             "radius": radius,
             "lst_hours": lst_hours,
         }
+        self._draw_sky_grid(self.sky_canvas, center_x, center_y, radius)
+        self._draw_star_catalog(self.sky_canvas, center_x, center_y, radius, lst_hours)
+
+        if not self.target_active:
+            self.sky_base_status = self._sky_inactive_status()
+            self.sky_base_status_highlights = ()
+            self._set_sky_status(self.sky_base_status)
+            self._update_sky_hover()
+            return
+
         target_ra_hours, target_declination = self._current_target_coordinates()
         target_altitude, target_azimuth, target_hour_angle = self._equatorial_to_horizontal(
             target_ra_hours,
             target_declination,
             lst_hours,
         )
-
-        self._draw_sky_grid(self.sky_canvas, center_x, center_y, radius)
-        self._draw_star_catalog(self.sky_canvas, center_x, center_y, radius, lst_hours)
         target_visible = self._draw_target_marker(
             self.sky_canvas,
             center_x,
@@ -1335,20 +1584,24 @@ class AstroClocksApp:
             if target_visible
             else self._tr("sky.below_horizon")
         )
+        altitude_text = f"{target_altitude:+.2f}"
         self.sky_base_status = self._tr(
             "sky.status",
-            lst=state["lst"],
-            hour_angle=target_hour_angle,
-            altitude=target_altitude,
-            azimuth=target_azimuth,
+            ha=self._format_signed_hms_compact(target_hour_angle),
+            dec=self._format_signed_dms_compact(target_declination),
+            altitude=altitude_text,
+            azimuth=f"{target_azimuth:05.1f}",
             note=chart_note,
             count=len(self.sky_star_points),
         )
-        self.sky_status.config(text=self.sky_base_status)
+        self.sky_base_status_highlights = (
+            () if target_visible else (f"Alt = {altitude_text}\N{DEGREE SIGN}", chart_note)
+        )
+        self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
         self._update_sky_hover()
 
-    def _set_result_text(self, text):
-        self.result_text.config(state=tk.NORMAL)
+    def _set_result_text(self, text, foreground=None):
+        self.result_text.config(state=tk.NORMAL, foreground=foreground or self.text)
         self.result_text.delete(1.0, tk.END)
         self.result_text.insert(1.0, text)
         self.result_text.config(state=tk.DISABLED)
@@ -1443,8 +1696,12 @@ class AstroClocksApp:
 """
 
     def show_sky_view(self):
+        if self.network_online is False:
+            self._set_result_text(self._tr("result.aladin_offline"), foreground=self.danger)
+            return
+
         self._sanitize_coordinate_values()
-        self.update_value()
+        self.update_value(activate_target=self.target_active)
 
         try:
             ra_deg, dec_deg = jnow_to_icrs_degrees(
@@ -1460,7 +1717,7 @@ class AstroClocksApp:
             output_file.write_text(html_content, encoding="utf-8")
             webbrowser.open_new_tab(output_file.as_uri())
         except Exception:
-            self._set_result_text(self._tr("result.aladin_unavailable"))
+            self._set_result_text(self._tr("result.aladin_unavailable"), foreground=self.danger)
             return
 
         self._set_result_text(
@@ -1472,7 +1729,12 @@ class AstroClocksApp:
             )
         )
 
-    def update_value(self):
+    def _activate_target_from_controls(self):
+        self.update_value(activate_target=True)
+
+    def update_value(self, activate_target=True):
+        if activate_target:
+            self.target_active = True
         self._sanitize_coordinate_values()
         self.lbl_alpha.config(text=self._alpha_text())
         self.lbl_delta.config(text=self._delta_text())
@@ -1488,11 +1750,29 @@ class AstroClocksApp:
 
     def update_site_labels(self):
         self.site_name_label.config(text=self.site_name)
+        self.country_label.config(
+            text=self._tr("site.country", value=self.country or self._tr("settings.custom_site"))
+        )
+        self.timezone_label.config(text=self._tr("site.timezone", value=self._timezone_label()))
         self.latlabel.config(
-            text=self._tr("site.latitude", value=format_latitude_display(self.latitude))
+            text=self._tr(
+                "site.latitude",
+                value=format_latitude_display(
+                    self.latitude,
+                    self._tr("direction.north_short"),
+                    self._tr("direction.south_short"),
+                ),
+            )
         )
         self.longlabel.config(
-            text=self._tr("site.longitude", value=format_longitude_display(self.longitude))
+            text=self._tr(
+                "site.longitude",
+                value=format_longitude_display(
+                    self.longitude,
+                    self._tr("direction.east_short"),
+                    self._tr("direction.west_short"),
+                ),
+            )
         )
         if self.aladin_button is not None:
             self.aladin_button.config(text=self._tr("button.aladin", value=self.aladin_fov_deg))
@@ -1503,6 +1783,12 @@ class AstroClocksApp:
         self.about_button.config(text=self._tr("button.about"))
         self.fullscreen_button.config(text=self._tr("button.fullscreen"))
         self.quit_button.config(text=self._tr("button.quit"))
+        if self.connectivity_label is not None:
+            if self.network_online is None:
+                self.connectivity_label.config(text=self._tr("network.checking"))
+            else:
+                text_key = "network.connected" if self.network_online else "network.offline"
+                self.connectivity_label.config(text=self._tr(text_key))
         self.search_button.config(text=self._tr("button.search"))
         self.alpha_set_button.config(text=self._tr("button.set"))
         self.delta_set_button.config(text=self._tr("button.set"))
@@ -1513,14 +1799,17 @@ class AstroClocksApp:
 
         self._set_object_type_values()
         self.update_site_labels()
-        self.update_value()
+        self.update_value(activate_target=self.target_active)
 
     def _save_current_settings(self):
         self.settings = AppSettings(
             site_name=self.site_name,
+            country=self.country,
             latitude=self.latitude,
             longitude=self.longitude,
             aladin_fov_deg=self.aladin_fov_deg,
+            timezone_name=self.timezone_name,
+            daylight_saving_enabled=self.daylight_saving_enabled,
             language=self.language,
             hour_angle_offset_enabled=self.hour_angle_offset_enabled,
             declination_offset_enabled=self.declination_offset_enabled,
@@ -1558,9 +1847,15 @@ class AstroClocksApp:
 
         preset_var = tk.StringVar(value="")
         site_var = tk.StringVar(value=self.site_name)
+        country_var = tk.StringVar(value=self.country)
         language_var = tk.StringVar(value=LANGUAGE_NAMES.get(self.language, LANGUAGE_NAMES["en"]))
         latitude_var = tk.StringVar(value=f"{self.latitude:.5f}")
         longitude_var = tk.StringVar(value=f"{self.longitude:.5f}")
+        timezone_options = self._timezone_options()
+        default_timezone = "Europe/Paris" if "Europe/Paris" in timezone_options else "UTC"
+        timezone_var = tk.StringVar(value=self.timezone_name or default_timezone)
+        timezone_auto_var = tk.BooleanVar(value=not bool(self.timezone_name))
+        daylight_saving_var = tk.BooleanVar(value=self.daylight_saving_enabled)
         fov_var = tk.StringVar(value=f"{self.aladin_fov_deg:.2f}")
         hour_angle_offset_var = tk.BooleanVar(value=self.hour_angle_offset_enabled)
         declination_offset_var = tk.BooleanVar(value=self.declination_offset_enabled)
@@ -1596,13 +1891,15 @@ class AstroClocksApp:
             entry.grid(column=1, row=row, pady=7, sticky="ew")
             return entry
 
-        def build_checkbutton(parent, variable, text):
+        def build_checkbutton(parent, variable, text, command=None):
             return tk.Checkbutton(
                 parent,
                 text=text,
                 variable=variable,
+                command=command,
                 bg=self.gbg,
                 fg=self.text,
+                disabledforeground=self.muted,
                 activebackground=self.gbg,
                 activeforeground=self.fg,
                 selectcolor=self.ebg,
@@ -1627,6 +1924,7 @@ class AstroClocksApp:
             if preset is None:
                 return
             site_var.set(preset["name"])
+            country_var.set(preset["country"])
             latitude_var.set(f"{preset['latitude']:.5f}")
             longitude_var.set(f"{preset['longitude']:.5f}")
 
@@ -1635,7 +1933,10 @@ class AstroClocksApp:
         add_label(1, self._tr("settings.site_name"))
         build_entry(1, site_var)
 
-        add_label(2, self._tr("settings.language"))
+        add_label(2, self._tr("settings.country"))
+        build_entry(2, country_var)
+
+        add_label(3, self._tr("settings.language"))
         language_combo = ttk.Combobox(
             body,
             textvariable=language_var,
@@ -1643,19 +1944,53 @@ class AstroClocksApp:
             font=Font(family="Segoe UI", size=10),
             width=42,
         )
-        language_combo.grid(column=1, row=2, pady=7, sticky="ew")
+        language_combo.grid(column=1, row=3, pady=7, sticky="ew")
         language_combo["state"] = "readonly"
 
-        add_label(3, self._tr("settings.latitude"))
-        build_entry(3, latitude_var)
-        add_label(4, self._tr("settings.longitude"))
-        build_entry(4, longitude_var)
-        add_label(5, self._tr("settings.aladin_fov"))
-        build_entry(5, fov_var)
+        add_label(4, self._tr("settings.latitude"))
+        build_entry(4, latitude_var)
+        add_label(5, self._tr("settings.longitude"))
+        build_entry(5, longitude_var)
+        add_label(6, self._tr("settings.timezone"))
+        timezone_options_frame = tk.Frame(body, bg=self.gbg)
+        timezone_options_frame.grid(column=1, row=6, pady=7, sticky="ew")
+        timezone_options_frame.grid_columnconfigure(0, weight=1)
+        timezone_combo = ttk.Combobox(
+            timezone_options_frame,
+            textvariable=timezone_var,
+            values=timezone_options,
+            font=Font(family="Segoe UI", size=10),
+            width=42,
+        )
+        daylight_saving_check = None
 
-        add_label(6, self._tr("settings.instrument"))
+        def sync_timezone_state():
+            is_auto_timezone = timezone_auto_var.get()
+            timezone_combo.config(state="disabled" if is_auto_timezone else "readonly")
+            if daylight_saving_check is not None:
+                daylight_saving_check.config(state=tk.DISABLED if is_auto_timezone else tk.NORMAL)
+
+        build_checkbutton(
+            timezone_options_frame,
+            timezone_auto_var,
+            self._tr("settings.timezone_auto"),
+            sync_timezone_state,
+        ).grid(column=0, row=0, sticky="w")
+        timezone_combo.grid(column=0, row=1, pady=(5, 0), sticky="ew")
+        daylight_saving_check = build_checkbutton(
+            timezone_options_frame,
+            daylight_saving_var,
+            self._tr("settings.daylight_saving"),
+        )
+        daylight_saving_check.grid(column=0, row=2, pady=(5, 0), sticky="w")
+        sync_timezone_state()
+
+        add_label(7, self._tr("settings.aladin_fov"))
+        build_entry(7, fov_var)
+
+        add_label(8, self._tr("settings.instrument"))
         instrument_options = tk.Frame(body, bg=self.gbg)
-        instrument_options.grid(column=1, row=6, pady=7, sticky="ew")
+        instrument_options.grid(column=1, row=8, pady=7, sticky="ew")
         build_checkbutton(
             instrument_options,
             hour_angle_offset_var,
@@ -1675,15 +2010,20 @@ class AstroClocksApp:
             font=Font(family="Segoe UI", size=9),
             anchor="w",
         )
-        hint.grid(column=0, row=7, columnspan=2, pady=(2, 12), sticky="ew")
+        hint.grid(column=0, row=9, columnspan=2, pady=(2, 12), sticky="ew")
 
         actions = tk.Frame(body, bg=self.gbg)
-        actions.grid(column=0, row=8, columnspan=2, sticky="e")
+        actions.grid(column=0, row=10, columnspan=2, sticky="e")
 
         def reset_defaults():
             site_var.set(DEFAULT_SITE_NAME)
+            country_var.set(DEFAULT_COUNTRY)
             latitude_var.set(f"{DEFAULT_LATITUDE:.5f}")
             longitude_var.set(f"{DEFAULT_LONGITUDE:.5f}")
+            timezone_auto_var.set(True)
+            timezone_var.set(default_timezone)
+            daylight_saving_var.set(DEFAULT_DAYLIGHT_SAVING_ENABLED)
+            sync_timezone_state()
             fov_var.set(f"{DEFAULT_ALADIN_FOV_DEG:.2f}")
             hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
             declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
@@ -1703,11 +2043,35 @@ class AstroClocksApp:
                 messagebox.showerror(self._tr("settings.invalid_title"), str(exc), parent=dialog)
                 return
 
+            timezone_name = DEFAULT_TIMEZONE_NAME
+            if not timezone_auto_var.get():
+                try:
+                    timezone_name = self._validate_timezone_name(timezone_var.get())
+                except ValueError:
+                    messagebox.showerror(
+                        self._tr("settings.invalid_title"),
+                        self._tr("settings.timezone_invalid", value=timezone_var.get()),
+                        parent=dialog,
+                    )
+                    return
+                if not timezone_name:
+                    messagebox.showerror(
+                        self._tr("settings.invalid_title"),
+                        self._tr("settings.timezone_invalid", value=timezone_var.get()),
+                        parent=dialog,
+                    )
+                    return
+
             selected_language = language_lookup.get(language_var.get(), self.language)
             self.language = selected_language
             self.site_name = site_var.get().strip() or self._tr("settings.custom_site")
+            self.country = country_var.get().strip() or DEFAULT_COUNTRY
             self.latitude = latitude
             self.longitude = longitude
+            self.timezone_name = timezone_name
+            self.daylight_saving_enabled = (
+                daylight_saving_var.get() if timezone_name else DEFAULT_DAYLIGHT_SAVING_ENABLED
+            )
             self.aladin_fov_deg = fov
             self.hour_angle_offset_enabled = hour_angle_offset_var.get()
             self.declination_offset_enabled = declination_offset_var.get()
@@ -1785,18 +2149,18 @@ class AstroClocksApp:
             try:
                 result = resolve_solar_system_coordinates(selected_type, object_name)
             except Exception:
-                self._set_result_text(self._tr("result.ephemerides_error"))
+                self._set_result_text(self._tr("result.ephemerides_error"), foreground=self.danger)
                 return
 
             self._apply_coordinate_result(result)
             return
 
         if object_name.lower() in solar_system:
-            self._set_result_text(self._tr("result.object_type_error"))
+            self._set_result_text(self._tr("result.object_type_error"), foreground=self.danger)
             return
 
         if not selected_type:
-            self._set_result_text(self._tr("result.no_object_type"))
+            self._set_result_text(self._tr("result.no_object_type"), foreground=self.danger)
             return
 
         if not object_name:
@@ -1806,7 +2170,7 @@ class AstroClocksApp:
         try:
             result = resolve_deep_sky_coordinates(object_name)
         except name_resolve.NameResolveError:
-            self._set_result_text(self._tr("result.object_not_found"))
+            self._set_result_text(self._tr("result.object_not_found"), foreground=self.danger)
             return
 
         self._apply_coordinate_result(result)
@@ -1819,6 +2183,8 @@ class AstroClocksApp:
             self.alpha_mm.get(),
             self.alpha_ss.get(),
             hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
+            timezone_name=self.timezone_name,
+            daylight_saving_enabled=self.daylight_saving_enabled,
         )
 
         self.label_local.config(text=state["local"])
@@ -1830,7 +2196,7 @@ class AstroClocksApp:
             self._update_sky_map(state)
         except Exception as exc:
             if self.sky_status is not None:
-                self.sky_status.config(text=self._tr("sky.unavailable", error=exc))
+                self._set_sky_status(self._tr("sky.unavailable", error=exc))
         finally:
             self.root.after(CLOCK_REFRESH_MS, self.clocks)
 

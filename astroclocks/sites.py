@@ -1,7 +1,8 @@
 """Preset observing locations used by the settings dialog."""
 
 OBSERVATORIES_FRANCE = [
-    ("France 92", "Télescope T1m - Observatoire de Meudon", 48.8050, 2.2301),
+    ("France 92", "Observatoire de Meudon - T1m", 48.8050, 2.2301),
+    ("France 92", "Observatoire de Meudon - T60", 48.80667, 2.23012),
     ("France 75", "Observatoire de Paris", 48.8366, 2.3369),
     ("France 06", "Observatoire de Nice", 43.7279, 7.2995),
     ("France 65", "Observatoire du Pic du Midi", 42.9369, 0.1426),
@@ -161,9 +162,14 @@ FRENCH_METROPOLITAN_PREFECTURES = [
 ]
 
 
+def preset_country(category):
+    return "France" if category.startswith("France") else category
+
+
 def _make_preset(category, name, latitude, longitude):
     return {
         "category": category,
+        "country": preset_country(category),
         "name": name,
         "latitude": latitude,
         "longitude": longitude,
