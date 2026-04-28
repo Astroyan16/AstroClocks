@@ -15,6 +15,7 @@ TRANSLATIONS = {
         "button.quit": "Quit",
         "button.fullscreen": "Full Screen (F11)",
         "button.search": "Search",
+        "button.searching": "Searching...",
         "button.set": "Set",
         "button.default": "Default",
         "button.cancel": "Cancel",
@@ -26,6 +27,9 @@ TRANSLATIONS = {
         "settings.instrument": "Instrument display",
         "settings.hour_angle_offset": "T1m hour angle (+6h East circle)",
         "settings.declination_offset": "T1m declination (+90°)",
+        "tab.main": "Clocks",
+        "tab.visibility": "Target visibility",
+        "tab.double_stars": "Double stars",
         "about.title": "About AstroClocks",
         "about.version": "Version",
         "about.year": "Year",
@@ -47,6 +51,8 @@ TRANSLATIONS = {
         "frame.site": "Observing site",
         "frame.search": "Find coordinates of an object",
         "frame.sky": "Local horizon",
+        "frame.visibility": "Target altitude from noon to noon",
+        "frame.double_stars": "Double star results",
         "frame.local_time": "Local Time ({timezone})",
         "frame.utc": "UTC",
         "frame.alpha": "Alpha JNow (h m s)",
@@ -81,7 +87,7 @@ TRANSLATIONS = {
         "settings.sky_show_equatorial_grid": "Show equatorial grid",
         "settings.sky_show_solar_system": "Show main solar system objects",
         "settings.hint": (
-            "Latitude [-90, 90], longitude [-180, 180]. Magnitude limit max: 15. "
+            "Latitude [-90, 90], longitude [-180, 180]. Magnitude limit max: 6.2. "
             "Automatic time zone uses Windows."
         ),
         "settings.invalid_title": "Invalid settings",
@@ -89,9 +95,11 @@ TRANSLATIONS = {
             "Invalid time zone: {value}. Use an IANA name such as Europe/Paris or an offset "
             "such as UTC+02:00."
         ),
-        "site.country": "Country   : {value}",
+        "site.country": "Country : {value}",
         "site.timezone": "Time zone : {value}",
-        "site.latitude": "Latitude  : {value}",
+        "timezone.daylight_saving_active": "daylight saving time",
+        "site.local_date": "Local date : {value}",
+        "site.latitude": "Latitude : {value}",
         "site.longitude": "Longitude : {value}",
         "button.aladin": "Aladin {value:.2f}\N{DEGREE SIGN}",
         "error.must_be_number": "{label} must be a number.",
@@ -114,6 +122,7 @@ TRANSLATIONS = {
         "sky.pointer": "Pointer",
         "sky.target_set": "Target set from map",
         "sky.target_set_star": "Target set from map: {name}",
+        "sky.target_set_body": "Target set from solar system object: {name}",
         "sky.above_horizon": "above horizon",
         "sky.low_horizon": "low above horizon",
         "sky.below_horizon": "below horizon",
@@ -124,6 +133,52 @@ TRANSLATIONS = {
             "Target visibility : {note} | {count} named stars visible"
         ),
         "sky.unavailable": "Sky map unavailable: {error}",
+        "visibility.title": "Altitude curve, noon to noon",
+        "visibility.axis": "Local time",
+        "visibility.hover": "{time} | Alt {altitude:+.2f}°",
+        "visibility.max_label": "Max {time}",
+        "visibility.sunrise": "Sunrise",
+        "visibility.sunset": "Sunset",
+        "visibility.dawn": "Dawn",
+        "visibility.twilight": "Twilight",
+        "visibility.phase.day": "Day",
+        "visibility.phase.civil": "Civil twilight",
+        "visibility.phase.nautical": "Nautical twilight",
+        "visibility.phase.astronomical": "Astronomical twilight",
+        "visibility.below_horizon": "Below horizon from noon to noon",
+        "visibility.no_target": "No active target. Select an object on the map or enter coordinates.",
+        "visibility.status": (
+            "Current altitude: {current:+.2f}°. Noon-to-noon maximum: {maximum:+.2f}° "
+            "at {maximum_time} local time."
+        ),
+        "double.filters": "Search filters",
+        "double.max_primary": "Primary max mag.",
+        "double.max_secondary": "Secondary max mag.",
+        "double.min_sep": "Min separation (\")",
+        "double.max_sep": "Max separation (\")",
+        "double.visible_night": "Visible at night",
+        "double.include_apparent": "Include apparent / uncertain doubles",
+        "double.use_online": "Use online WDS catalog",
+        "double.set_target": "Set as target",
+        "double.result_count": "{count} / {total} double stars ({source})",
+        "double.source.local": "local catalog",
+        "double.source.wds": "local + WDS/VizieR",
+        "double.searching_online": "Searching WDS/VizieR...",
+        "double.online_offline": "Online catalog unavailable: offline.",
+        "double.online_error": "WDS/VizieR unavailable: {error}",
+        "double.online_loaded": "{count} WDS entries loaded.",
+        "double.nature.binary": "Binary",
+        "double.nature.apparent": "Apparent",
+        "double.nature.unknown": "Unknown",
+        "double.no_selection": "Select a double star first.",
+        "double.target_set": "Double star selected: {name}",
+        "double.column.name": "Name",
+        "double.column.designation": "Designation",
+        "double.column.nature": "Nature",
+        "double.column.magnitudes": "Mag.",
+        "double.column.separation": "Sep.",
+        "double.column.pa": "PA",
+        "double.column.constellation": "Const.",
         "result.target_coordinates": "{label}\nRA JNow: {ra}\nDec JNow: {dec}",
         "result.aladin_offline": "Interactive sky view unavailable: offline.",
         "result.aladin_unavailable": "Interactive sky view unavailable. Check internet connection.",
@@ -135,22 +190,25 @@ TRANSLATIONS = {
         "result.object_type_error": "Please select the right object type!",
         "result.no_object_type": "Please select an object type.",
         "result.object_not_found": (
-            "Object not found!\nPlease enter a valid name\n(ex: M13, HIP114971, Sirius, ...)"
+            "Object not found!\nPlease enter a valid name\n(ex: M13, HIP114971, Betelgeuse, ...)"
         ),
+        "result.searching": "Searching {object_name}...",
+        "result.search_error": "Coordinate search unavailable: {error}",
         "result.imcce_coordinates": (
-            "ICRS coordinates from IMCCE:\nAlpha: {ra}\nDelta: {dec}"
+            "Apparent JNow coordinates from IMCCE:\nAlpha JNow: {ra}\nDelta JNow: {dec}"
         ),
         "result.sesame_coordinates": (
-            "ICRS coordinates from Sesame:\nRA (Alpha): {ra}\nDec (Delta): {dec}"
+            "ICRS coordinates from CDS Sesame:\nRA (Alpha): {ra}\nDec (Delta): {dec}"
         ),
     },
     "fr": {
-        "app.subtitle": "Temps civil, temps sidéral, coordonnées JNow et horizon local en temps réel",
+        "app.subtitle": "Temps légal et sidéral, coordonnées JNow et horizon local en temps réel",
         "button.settings": "Paramètres",
         "button.about": "À propos",
         "button.quit": "Quitter",
         "button.fullscreen": "Plein écran (F11)",
         "button.search": "Rechercher",
+        "button.searching": "Recherche...",
         "button.set": "Valider",
         "button.default": "Défaut",
         "button.cancel": "Annuler",
@@ -162,6 +220,9 @@ TRANSLATIONS = {
         "settings.instrument": "Affichage instrument",
         "settings.hour_angle_offset": "Angle horaire T1m (+6h cercle Est)",
         "settings.declination_offset": "Déclinaison T1m (+90°)",
+        "tab.main": "Horloges",
+        "tab.visibility": "Visibilité de la cible",
+        "tab.double_stars": "Étoiles doubles",
         "about.title": "À propos d'AstroClocks",
         "about.version": "Version",
         "about.year": "Année",
@@ -183,6 +244,8 @@ TRANSLATIONS = {
         "frame.site": "Site d'observation",
         "frame.search": "Trouver les coordonnées d'un objet",
         "frame.sky": "Horizon local",
+        "frame.visibility": "Altitude de la cible de 12h à 12h",
+        "frame.double_stars": "Résultats étoiles doubles",
         "frame.local_time": "Temps local ({timezone})",
         "frame.utc": "UTC",
         "frame.alpha": "Alpha JNow (h m s)",
@@ -217,7 +280,7 @@ TRANSLATIONS = {
         "settings.sky_show_equatorial_grid": "Afficher la grille équatoriale",
         "settings.sky_show_solar_system": "Afficher les principaux objets du système solaire",
         "settings.hint": (
-            "Latitude [-90, 90], longitude [-180, 180]. Magnitude limite max : 15. "
+            "Latitude [-90, 90], longitude [-180, 180]. Magnitude limite max : 6.2. "
             "Le fuseau automatique utilise Windows."
         ),
         "settings.invalid_title": "Paramètres invalides",
@@ -225,9 +288,11 @@ TRANSLATIONS = {
             "Fuseau horaire invalide : {value}. Utilisez un nom IANA comme Europe/Paris ou "
             "un décalage comme UTC+02:00."
         ),
-        "site.country": "Pays      : {value}",
+        "site.country": "Pays : {value}",
         "site.timezone": "Fuseau horaire : {value}",
-        "site.latitude": "Latitude  : {value}",
+        "timezone.daylight_saving_active": "heure d'été",
+        "site.local_date": "Date locale : {value}",
+        "site.latitude": "Latitude : {value}",
         "site.longitude": "Longitude : {value}",
         "button.aladin": "Aladin {value:.2f}\N{DEGREE SIGN}",
         "error.must_be_number": "{label} doit être un nombre.",
@@ -250,6 +315,7 @@ TRANSLATIONS = {
         "sky.pointer": "Pointeur",
         "sky.target_set": "Cible définie depuis la carte",
         "sky.target_set_star": "Cible définie depuis la carte : {name}",
+        "sky.target_set_body": "Cible définie depuis un objet du système solaire : {name}",
         "sky.above_horizon": "au-dessus de l'horizon",
         "sky.low_horizon": "basse sur l'horizon",
         "sky.below_horizon": "sous l'horizon",
@@ -260,6 +326,54 @@ TRANSLATIONS = {
             "Visibilité de la cible : {note} | {count} étoiles nommées visibles"
         ),
         "sky.unavailable": "Carte du ciel indisponible : {error}",
+        "visibility.title": "Courbe d'altitude 12h-12h",
+        "visibility.axis": "Temps local",
+        "visibility.hover": "{time} | Hauteur {altitude:+.2f}°",
+        "visibility.max_label": "Max {time}",
+        "visibility.sunrise": "Lever",
+        "visibility.sunset": "Coucher",
+        "visibility.dawn": "Aube",
+        "visibility.twilight": "Crépuscule",
+        "visibility.phase.day": "Jour",
+        "visibility.phase.civil": "Crépuscule civil",
+        "visibility.phase.nautical": "Crépuscule nautique",
+        "visibility.phase.astronomical": "Crépuscule astronomique",
+        "visibility.below_horizon": "Sous l'horizon de 12h à 12h",
+        "visibility.no_target": (
+            "Aucune cible active. Sélectionnez un objet sur la carte ou saisissez des coordonnées."
+        ),
+        "visibility.status": (
+            "Altitude actuelle : {current:+.2f}°. Maximum 12h-12h : {maximum:+.2f}° "
+            "à {maximum_time} en temps local."
+        ),
+        "double.filters": "Filtres de recherche",
+        "double.max_primary": "Magnitude max primaire",
+        "double.max_secondary": "Magnitude max secondaire",
+        "double.min_sep": "Séparation min (\")",
+        "double.max_sep": "Séparation max (\")",
+        "double.visible_night": "Visible de nuit",
+        "double.include_apparent": "Inclure doubles apparentes / incertaines",
+        "double.use_online": "Utiliser le catalogue WDS en ligne",
+        "double.set_target": "Définir comme cible",
+        "double.result_count": "{count} / {total} étoiles doubles ({source})",
+        "double.source.local": "catalogue local",
+        "double.source.wds": "local + WDS/VizieR",
+        "double.searching_online": "Recherche WDS/VizieR...",
+        "double.online_offline": "Catalogue en ligne indisponible : hors-ligne.",
+        "double.online_error": "WDS/VizieR indisponible : {error}",
+        "double.online_loaded": "{count} entrées WDS chargées.",
+        "double.nature.binary": "Binaire",
+        "double.nature.apparent": "Apparente",
+        "double.nature.unknown": "Inconnue",
+        "double.no_selection": "Sélectionnez d'abord une étoile double.",
+        "double.target_set": "Étoile double sélectionnée : {name}",
+        "double.column.name": "Nom",
+        "double.column.designation": "Désignation",
+        "double.column.nature": "Nature",
+        "double.column.magnitudes": "Mag.",
+        "double.column.separation": "Sép.",
+        "double.column.pa": "AP",
+        "double.column.constellation": "Const.",
         "result.target_coordinates": "{label}\nRA JNow : {ra}\nDéc JNow : {dec}",
         "result.aladin_offline": "Vue du ciel interactive indisponible : hors-ligne.",
         "result.aladin_unavailable": "Vue du ciel interactive indisponible. Vérifiez la connexion internet.",
@@ -271,13 +385,15 @@ TRANSLATIONS = {
         "result.object_type_error": "Veuillez sélectionner le bon type d'objet.",
         "result.no_object_type": "Veuillez sélectionner un type d'objet.",
         "result.object_not_found": (
-            "Objet introuvable !\nVeuillez saisir un nom valide\n(ex : M13, HIP114971, Sirius, ...)"
+            "Objet introuvable !\nVeuillez saisir un nom valide\n(ex : M13, HIP114971, Bételgeuse, ...)"
         ),
+        "result.searching": "Recherche de {object_name}...",
+        "result.search_error": "Recherche de coordonnées indisponible : {error}",
         "result.imcce_coordinates": (
-            "Coordonnées ICRS depuis IMCCE :\nAlpha : {ra}\nDelta : {dec}"
+            "Coordonnées apparentes JNow depuis IMCCE :\nAlpha JNow : {ra}\nDelta JNow : {dec}"
         ),
         "result.sesame_coordinates": (
-            "Coordonnées ICRS depuis Sesame :\nRA (Alpha) : {ra}\nDéc (Delta) : {dec}"
+            "Coordonnées ICRS depuis CDS Sesame :\nRA (Alpha) : {ra}\nDéc (Delta) : {dec}"
         ),
     },
 }

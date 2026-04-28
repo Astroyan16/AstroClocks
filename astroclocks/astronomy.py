@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import zeep
 from astropy import units as u
-from astropy.coordinates import AltAz, EarthLocation, FK5, SkyCoord, get_body, get_sun
+from astropy.coordinates import AltAz, EarthLocation, FK5, SkyCoord, TETE, get_body, get_sun
 from astropy.coordinates import solar_system_ephemeris
 from astropy.time import Time
 
@@ -93,16 +93,17 @@ def convert_j2000_to_now(coords):
 
 
 def convert_star_catalog_j2000_to_jnow(stars):
-    """Convert a J2000/ICRS star catalog to the current FK5 equinox."""
+    """Convert an FK5 J2000 star catalog to the current FK5 equinox."""
     if not stars:
         return []
 
     date_time = Time(Time(datetime.datetime.utcnow(), scale="utc").jd, format="jd", scale="utc")
+    fk5_j2000 = FK5(equinox=Time("J2000"))
     fk5_now = FK5(equinox=date_time)
     catalog = SkyCoord(
         ra=[star[1] for star in stars] * u.hourangle,
         dec=[star[2] for star in stars] * u.deg,
-        frame="icrs",
+        frame=fk5_j2000,
     ).transform_to(fk5_now)
 
     return [
@@ -112,7 +113,7 @@ def convert_star_catalog_j2000_to_jnow(stars):
 
 
 def get_planet_coord(object_type, planet_name):
-    """Retrieve ICRS coordinates from IMCCE Miriade."""
+    """Retrieve apparent coordinates of date from IMCCE Miriade."""
     wsdl_url = "https://ssp.imcce.fr/webservices/miriade/miriade.php?wsdl"
     client = zeep.Client(wsdl=wsdl_url)
 
@@ -160,9 +161,9 @@ def resolve_solar_system_coordinates(selected_type, object_name):
 
     return {
         "message": (
-            "ICRS Coordinates from IMCCE:\n"
-            f"Alpha : {coordinates[0]}\n"
-            f"Delta : {coordinates[1]}"
+            "Apparent JNow coordinates from IMCCE:\n"
+            f"Alpha JNow : {coordinates[0]}\n"
+            f"Delta JNow : {coordinates[1]}"
         ),
         "source": "imcce",
         "source_ra": coordinates[0],
@@ -223,7 +224,7 @@ def jnow_to_icrs_degrees(alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta
 
 
 def compute_solar_system_positions(latitude, longitude, now_utc=None):
-    """Return apparent local Alt/Az and current-equator coordinates for major bodies."""
+    """Return apparent local Alt/Az and true-equator/equinox coordinates."""
     utc_now = _coerce_utc_datetime(now_utc)
     observation_time = Time(utc_now, scale="utc")
     location = EarthLocation.from_geodetic(
@@ -231,7 +232,7 @@ def compute_solar_system_positions(latitude, longitude, now_utc=None):
         lat=float(latitude) * u.deg,
     )
     altaz_frame = AltAz(obstime=observation_time, location=location)
-    fk5_now = FK5(equinox=observation_time)
+    apparent_frame = TETE(obstime=observation_time, location=location)
 
     bodies = (
         ("Sun", "sun"),
@@ -253,18 +254,78 @@ def compute_solar_system_positions(latitude, longitude, now_utc=None):
                 location,
             )
             altaz = coordinates.transform_to(altaz_frame)
-            jnow = coordinates.transform_to(fk5_now)
+            apparent = coordinates.transform_to(apparent_frame)
             positions.append(
                 {
                     "name": label,
-                    "ra_hours": jnow.ra.hour,
-                    "declination": jnow.dec.deg,
+                    "ra_hours": apparent.ra.hour,
+                    "declination": apparent.dec.deg,
                     "altitude": altaz.alt.deg,
                     "azimuth": altaz.az.deg,
                 }
             )
 
     return positions
+
+
+def compute_solar_system_body_positions(body_label, latitude, longitude, utc_datetimes):
+    """Return apparent local Alt/Az and true-equator/equinox coordinates for one body."""
+    body_names = {
+        "Sun": "sun",
+        "Moon": "moon",
+        "Mercury": "mercury",
+        "Venus": "venus",
+        "Mars": "mars",
+        "Jupiter": "jupiter",
+        "Saturn": "saturn",
+        "Uranus": "uranus",
+        "Neptune": "neptune",
+    }
+    body_name = body_names.get(body_label)
+    if body_name is None:
+        return []
+
+    utc_times = [_coerce_utc_datetime(utc_datetime) for utc_datetime in utc_datetimes]
+    observation_times = Time(utc_times, scale="utc")
+    location = EarthLocation.from_geodetic(
+        lon=float(longitude) * u.deg,
+        lat=float(latitude) * u.deg,
+    )
+    altaz_frame = AltAz(obstime=observation_times, location=location)
+    apparent_frame = TETE(obstime=observation_times, location=location)
+
+    with solar_system_ephemeris.set("builtin"):
+        coordinates = (
+            get_sun(observation_times)
+            if body_name == "sun"
+            else get_body(body_name, observation_times, location)
+        )
+        altaz = coordinates.transform_to(altaz_frame)
+        apparent = coordinates.transform_to(apparent_frame)
+
+    return [
+        {
+            "name": body_label,
+            "ra_hours": apparent[index].ra.hour,
+            "declination": apparent[index].dec.deg,
+            "altitude": altaz[index].alt.deg,
+            "azimuth": altaz[index].az.deg,
+        }
+        for index in range(len(utc_times))
+    ]
+
+
+def compute_sun_altitudes(latitude, longitude, utc_datetimes):
+    """Return apparent solar altitude in degrees for one or more UTC datetimes."""
+    utc_times = [_coerce_utc_datetime(utc_datetime) for utc_datetime in utc_datetimes]
+    observation_times = Time(utc_times, scale="utc")
+    location = EarthLocation.from_geodetic(
+        lon=float(longitude) * u.deg,
+        lat=float(latitude) * u.deg,
+    )
+    altaz_frame = AltAz(obstime=observation_times, location=location)
+    altaz = get_sun(observation_times).transform_to(altaz_frame)
+    return [float(altitude) for altitude in altaz.alt.deg]
 
 
 def fetch_sky_area_png(

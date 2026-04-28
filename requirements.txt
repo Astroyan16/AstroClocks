@@ -1,4 +1,5 @@
 astropy>=6.0
 astroplan>=0.10
+Pillow>=10.0
 zeep>=4.2
 tzdata>=2024.1
