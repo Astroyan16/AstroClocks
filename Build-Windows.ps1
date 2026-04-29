@@ -2,6 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$Version = "3.2"
+$AppName = "AstroClocks-v$Version"
+$InstallerName = "Install_AstroClocks$Version.exe"
 
 function Remove-GeneratedPath {
     param(
@@ -33,14 +36,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Dependency installation failed with exit code $LASTEXITCODE"
 }
 
-Remove-GeneratedPath (Join-Path $ProjectRoot "build\AstroClocks-v3.1")
-Remove-GeneratedPath (Join-Path $ProjectRoot "output\AstroClocks-v3.1")
+Remove-GeneratedPath (Join-Path $ProjectRoot "build\$AppName")
+Remove-GeneratedPath (Join-Path $ProjectRoot "output\$AppName")
 
 & $Python -m PyInstaller `
     --noconfirm `
     --onedir `
     --windowed `
-    --name "AstroClocks-v3.1" `
+    --name $AppName `
     --distpath "output" `
     --workpath "build" `
     --icon "AppIcon.ico" `
@@ -49,12 +52,12 @@ Remove-GeneratedPath (Join-Path $ProjectRoot "output\AstroClocks-v3.1")
     --collect-all "astroplan" `
     --collect-all "zeep" `
     --collect-all "tzdata" `
-    ".\AstroClocks-v3.1.py"
+    ".\$AppName.py"
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Built output\AstroClocks-v3.1\AstroClocks-v3.1.exe"
+Write-Host "Built output\$AppName\$AppName.exe"
 
 $InnoCandidates = @()
 if (${env:ProgramFiles(x86)}) {
@@ -66,11 +69,11 @@ if ($env:ProgramFiles) {
 
 $InnoCompiler = $InnoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($InnoCompiler) {
-    & $InnoCompiler ".\AstroClocks-v3.1.iss"
+    & $InnoCompiler ".\$AppName.iss"
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup build failed with exit code $LASTEXITCODE"
     }
-    Write-Host "Built installer\Install_AstroClocks3.1.exe"
+    Write-Host "Built installer\$InstallerName"
 } else {
     Write-Warning "Inno Setup compiler not found. Install Inno Setup 6 to build the installer."
 }

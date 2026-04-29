@@ -1,12 +1,12 @@
 # AstroClocks
 
-AstroClocks v3.1 affiche les temps civil, UTC, sidéral, les coordonnées JNow,
+AstroClocks v3.2 affiche les temps civil, UTC, sidéral, les coordonnées JNow,
 l'angle horaire et une carte du ciel en temps réel avec grille AltAz, grille
 équatoriale, magnitude limite réglable, catalogue embarqué de 6000 étoiles
 brillantes et objets principaux du système solaire.
-La version 3.1 ajoute aussi un onglet de visibilité de la cible et un outil de
-recherche d'étoiles doubles/binaires avec catalogue WDS local et enrichissement
-en ligne quand la connexion est disponible.
+La version 3.2 affine la carte du ciel et conserve l'onglet de visibilité de la
+cible ainsi que l'outil de recherche d'étoiles doubles/binaires avec catalogue
+WDS local et enrichissement en ligne quand la connexion est disponible.
 
 ## Installation
 
@@ -22,7 +22,7 @@ python -m pip install -r requirements.txt
 Lancez ensuite l'application :
 
 ```powershell
-python AstroClocks-v3.1.py
+python AstroClocks-v3.2.py
 ```
 
 `tkinter` est fourni avec Python sous Windows. Les recherches d'objets, la vue

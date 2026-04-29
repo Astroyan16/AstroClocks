@@ -99,7 +99,7 @@ from astroclocks.windowing import (
 )
 
 
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 APP_RELEASE_MONTH = 4
 APP_YEAR = "2026"
 APP_AUTHOR = "Yannis Benazza"
@@ -110,6 +110,7 @@ CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
 SKY_MAP_CANVAS_REFRESH_SECONDS = 8
 SKY_STAR_SUBPIXEL_STEPS = 4
+SKY_STAR_BRIGHTNESS_MULTIPLIER = 1.27
 SOLAR_SYSTEM_CACHE_SECONDS = 10
 DEFAULT_WINDOW_WIDTH = 1440
 DEFAULT_WINDOW_HEIGHT = 900
@@ -2807,7 +2808,7 @@ class AstroClocksApp:
         normalized = max(0.0, min(1.0, (6.2 - magnitude) / magnitude_span))
         visual_intensity = normalized**0.48
         sigma = 0.32 + 1.05 * visual_intensity
-        peak_alpha = min(255, int((56 + 199 * visual_intensity) * 1.10))
+        peak_alpha = min(255, int((56 + 199 * visual_intensity) * SKY_STAR_BRIGHTNESS_MULTIPLIER))
         canvas_size = max(1.8, sigma * 1.9)
         return fill, self._hex_to_rgb(fill), sigma, peak_alpha, canvas_size
 

@@ -17,6 +17,7 @@ output/
 installer/
 *.egg-info/
 *.spec
+!AstroClocks-v3.2.spec
 
 *.log
 *.tmp
