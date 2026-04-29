@@ -25,6 +25,18 @@ DEFAULT_DAYLIGHT_SAVING_ENABLED = False
 DEFAULT_LANGUAGE = "en"
 DEFAULT_HOUR_ANGLE_OFFSET_ENABLED = True
 DEFAULT_DECLINATION_OFFSET_ENABLED = True
+DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE = 10.0
+DEFAULT_DOUBLE_MAX_SECONDARY_MAGNITUDE = 12.0
+DEFAULT_DOUBLE_MIN_SEPARATION = 0.14
+DEFAULT_DOUBLE_MAX_SEPARATION = 5.0
+DEFAULT_DOUBLE_MIN_MAX_ALTITUDE = 10.0
+DEFAULT_DOUBLE_VISIBLE_NIGHT = True
+DEFAULT_DOUBLE_INCLUDE_PHYSICAL = True
+DEFAULT_DOUBLE_INCLUDE_NOTED = True
+DEFAULT_DOUBLE_INCLUDE_APPARENT = False
+DEFAULT_DOUBLE_INCLUDE_UNCERTAIN = False
+DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE = False
+DEFAULT_DOUBLE_USE_ONLINE = True
 SUPPORTED_LANGUAGES = {"en", "fr"}
 
 LEGACY_LONGITUDE_FILE = resource_path("Longitude.ini")
@@ -57,6 +69,18 @@ class AppSettings:
     language: str = DEFAULT_LANGUAGE
     hour_angle_offset_enabled: bool = DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
     declination_offset_enabled: bool = DEFAULT_DECLINATION_OFFSET_ENABLED
+    double_max_primary_magnitude: float = DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE
+    double_max_secondary_magnitude: float = DEFAULT_DOUBLE_MAX_SECONDARY_MAGNITUDE
+    double_min_separation: float = DEFAULT_DOUBLE_MIN_SEPARATION
+    double_max_separation: float = DEFAULT_DOUBLE_MAX_SEPARATION
+    double_min_max_altitude: float = DEFAULT_DOUBLE_MIN_MAX_ALTITUDE
+    double_visible_night: bool = DEFAULT_DOUBLE_VISIBLE_NIGHT
+    double_include_physical: bool = DEFAULT_DOUBLE_INCLUDE_PHYSICAL
+    double_include_noted: bool = DEFAULT_DOUBLE_INCLUDE_NOTED
+    double_include_apparent: bool = DEFAULT_DOUBLE_INCLUDE_APPARENT
+    double_include_uncertain: bool = DEFAULT_DOUBLE_INCLUDE_UNCERTAIN
+    double_exclude_polar_circle: bool = DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE
+    double_use_online: bool = DEFAULT_DOUBLE_USE_ONLINE
 
 
 def _clamp(value, minimum, maximum):
@@ -137,6 +161,71 @@ def normalize_settings(settings):
             getattr(settings, "declination_offset_enabled", DEFAULT_DECLINATION_OFFSET_ENABLED),
             DEFAULT_DECLINATION_OFFSET_ENABLED,
         ),
+        double_max_primary_magnitude=_clamp(
+            float(
+                getattr(
+                    settings,
+                    "double_max_primary_magnitude",
+                    DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE,
+                )
+            ),
+            -2,
+            20,
+        ),
+        double_max_secondary_magnitude=_clamp(
+            float(
+                getattr(
+                    settings,
+                    "double_max_secondary_magnitude",
+                    DEFAULT_DOUBLE_MAX_SECONDARY_MAGNITUDE,
+                )
+            ),
+            -2,
+            20,
+        ),
+        double_min_separation=_clamp(
+            float(getattr(settings, "double_min_separation", DEFAULT_DOUBLE_MIN_SEPARATION)),
+            0,
+            10000,
+        ),
+        double_max_separation=_clamp(
+            float(getattr(settings, "double_max_separation", DEFAULT_DOUBLE_MAX_SEPARATION)),
+            0,
+            10000,
+        ),
+        double_min_max_altitude=_clamp(
+            float(getattr(settings, "double_min_max_altitude", DEFAULT_DOUBLE_MIN_MAX_ALTITUDE)),
+            -90,
+            90,
+        ),
+        double_visible_night=_coerce_bool(
+            getattr(settings, "double_visible_night", DEFAULT_DOUBLE_VISIBLE_NIGHT),
+            DEFAULT_DOUBLE_VISIBLE_NIGHT,
+        ),
+        double_include_physical=_coerce_bool(
+            getattr(settings, "double_include_physical", DEFAULT_DOUBLE_INCLUDE_PHYSICAL),
+            DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
+        ),
+        double_include_noted=_coerce_bool(
+            getattr(settings, "double_include_noted", DEFAULT_DOUBLE_INCLUDE_NOTED),
+            DEFAULT_DOUBLE_INCLUDE_NOTED,
+        ),
+        double_include_apparent=_coerce_bool(
+            getattr(settings, "double_include_apparent", DEFAULT_DOUBLE_INCLUDE_APPARENT),
+            DEFAULT_DOUBLE_INCLUDE_APPARENT,
+        ),
+        double_include_uncertain=_coerce_bool(
+            getattr(settings, "double_include_uncertain", DEFAULT_DOUBLE_INCLUDE_UNCERTAIN),
+            DEFAULT_DOUBLE_INCLUDE_UNCERTAIN,
+        ),
+        double_exclude_polar_circle=_coerce_bool(
+            getattr(settings, "double_exclude_polar_circle", DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE),
+            DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE,
+        ),
+        double_use_online=_coerce_bool(
+            getattr(settings, "double_use_online", DEFAULT_DOUBLE_USE_ONLINE),
+            DEFAULT_DOUBLE_USE_ONLINE,
+        ),
     )
 
 
@@ -193,6 +282,54 @@ def load_app_settings():
             ),
             declination_offset_enabled=data.get(
                 "declination_offset_enabled", DEFAULT_DECLINATION_OFFSET_ENABLED
+            ),
+            double_max_primary_magnitude=data.get(
+                "double_max_primary_magnitude",
+                DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE,
+            ),
+            double_max_secondary_magnitude=data.get(
+                "double_max_secondary_magnitude",
+                DEFAULT_DOUBLE_MAX_SECONDARY_MAGNITUDE,
+            ),
+            double_min_separation=data.get(
+                "double_min_separation",
+                DEFAULT_DOUBLE_MIN_SEPARATION,
+            ),
+            double_max_separation=data.get(
+                "double_max_separation",
+                DEFAULT_DOUBLE_MAX_SEPARATION,
+            ),
+            double_min_max_altitude=data.get(
+                "double_min_max_altitude",
+                DEFAULT_DOUBLE_MIN_MAX_ALTITUDE,
+            ),
+            double_visible_night=data.get(
+                "double_visible_night",
+                DEFAULT_DOUBLE_VISIBLE_NIGHT,
+            ),
+            double_include_physical=data.get(
+                "double_include_physical",
+                DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
+            ),
+            double_include_noted=data.get(
+                "double_include_noted",
+                DEFAULT_DOUBLE_INCLUDE_NOTED,
+            ),
+            double_include_apparent=data.get(
+                "double_include_apparent",
+                DEFAULT_DOUBLE_INCLUDE_APPARENT,
+            ),
+            double_include_uncertain=data.get(
+                "double_include_uncertain",
+                DEFAULT_DOUBLE_INCLUDE_UNCERTAIN,
+            ),
+            double_exclude_polar_circle=data.get(
+                "double_exclude_polar_circle",
+                DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE,
+            ),
+            double_use_online=data.get(
+                "double_use_online",
+                DEFAULT_DOUBLE_USE_ONLINE,
             ),
         )
     )

@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter.font import Font
 
 from astroclocks.utils import resource_path
+from astroclocks.windowing import center_window_on_pointer_monitor
 
 
 def apply_loading_icon(window, default=False):
@@ -20,6 +21,7 @@ def create_loading_window():
     apply_loading_icon(root, default=True)
 
     window = tk.Toplevel(root)
+    window.withdraw()
     window.title("AstroClocks")
     apply_loading_icon(window)
     window.configure(bg="#101419")
@@ -27,11 +29,6 @@ def create_loading_window():
 
     width = 440
     height = 170
-    screen_width = window.winfo_screenwidth()
-    screen_height = window.winfo_screenheight()
-    x = max(0, (screen_width - width) // 2)
-    y = max(0, (screen_height - height) // 2)
-    window.geometry(f"{width}x{height}+{x}+{y}")
 
     tk.Label(
         window,
@@ -58,6 +55,15 @@ def create_loading_window():
         font=Font(family="Segoe UI", size=9),
     ).pack()
 
+    startup_monitor_geometry = center_window_on_pointer_monitor(
+        window,
+        width,
+        height,
+        use_work_area=True,
+    )
+    root._astroclocks_startup_monitor_geometry = startup_monitor_geometry
+    window.deiconify()
+    window.lift()
     window.update()
     return root, window, status_var
 

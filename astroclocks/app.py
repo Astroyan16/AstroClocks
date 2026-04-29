@@ -1,4 +1,3 @@
-import ctypes
 import datetime
 import math
 import socket
@@ -34,14 +33,42 @@ from astroclocks.astronomy import (
     resolve_solar_system_coordinates,
     resolve_timezone,
 )
-from astroclocks.double_star_catalog import DOUBLE_STARS, fetch_wds_double_stars
+from astroclocks.double_star_catalog import (
+    DOUBLE_STARS,
+    build_wds_notes_url,
+    fetch_wds_double_stars,
+    fetch_wds_notes,
+    load_cached_wds_double_stars,
+    merge_cached_wds_double_stars,
+)
 from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS, translate
+from astroclocks.orbit_catalog import (
+    enrich_double_stars_with_orb6,
+    fetch_orb6_ephemerides,
+    fetch_orb6_orbits,
+    load_cached_orb6_ephemerides,
+    load_cached_orb6_orbits,
+    orbit_position_at_year,
+    sample_orbit_points,
+)
 from astroclocks.settings import (
     AppSettings,
     DEFAULT_ALADIN_FOV_DEG,
     DEFAULT_COUNTRY,
     DEFAULT_DAYLIGHT_SAVING_ENABLED,
     DEFAULT_DECLINATION_OFFSET_ENABLED,
+    DEFAULT_DOUBLE_INCLUDE_APPARENT,
+    DEFAULT_DOUBLE_INCLUDE_NOTED,
+    DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
+    DEFAULT_DOUBLE_INCLUDE_UNCERTAIN,
+    DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE,
+    DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE,
+    DEFAULT_DOUBLE_MAX_SECONDARY_MAGNITUDE,
+    DEFAULT_DOUBLE_MAX_SEPARATION,
+    DEFAULT_DOUBLE_MIN_MAX_ALTITUDE,
+    DEFAULT_DOUBLE_MIN_SEPARATION,
+    DEFAULT_DOUBLE_USE_ONLINE,
+    DEFAULT_DOUBLE_VISIBLE_NIGHT,
     DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
@@ -60,6 +87,16 @@ from astroclocks.settings import (
 from astroclocks.sites import LOCATION_PRESETS, preset_label
 from astroclocks.star_catalog import SKY_STARS_J2000
 from astroclocks.utils import is_float, resource_path
+from astroclocks.windowing import (
+    center_window_on_pointer_monitor,
+    current_monitor_geometry as window_current_monitor_geometry,
+    fallback_screen_geometry as window_fallback_screen_geometry,
+    monitor_geometry as window_monitor_geometry,
+    monitor_geometry_from_handle as window_monitor_geometry_from_handle,
+    monitor_geometry_from_point as window_monitor_geometry_from_point,
+    move_window_to as window_move_window_to,
+    pointer_monitor_geometry as window_pointer_monitor_geometry,
+)
 
 
 APP_VERSION = "3.1"
@@ -76,15 +113,11 @@ SKY_STAR_SUBPIXEL_STEPS = 4
 SOLAR_SYSTEM_CACHE_SECONDS = 10
 DEFAULT_WINDOW_WIDTH = 1440
 DEFAULT_WINDOW_HEIGHT = 900
-MIN_WINDOW_WIDTH = 1180
-MIN_WINDOW_HEIGHT = 760
+MIN_WINDOW_WIDTH = 1234
+MIN_WINDOW_HEIGHT = 844
 INITIAL_WINDOW_SCREEN_WIDTH_RATIO = 0.92
 INITIAL_WINDOW_SCREEN_HEIGHT_RATIO = 0.90
 WINDOW_SCREEN_MARGIN = 32
-SWP_NOSIZE = 0x0001
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-MONITOR_DEFAULTTONEAREST = 2
 SKY_STAR_LABEL_MAX_MAGNITUDE = 1.25
 TARGET_LOW_ALTITUDE_COLOR = "#f6c451"
 NAMED_STAR_COLORS = {
@@ -149,6 +182,10 @@ TWILIGHT_PHASE_COLORS = {
 }
 DOUBLE_NIGHT_SUN_MAX_ALTITUDE = -6
 DOUBLE_NIGHT_TARGET_MIN_ALTITUDE = 10
+DOUBLE_PHYSICAL_NOTE_FLAGS = frozenset({"O", "C", "Z", "T", "V"})
+DOUBLE_NOTED_NOTE_FLAGS = frozenset({"N"})
+DOUBLE_APPARENT_NOTE_FLAGS = frozenset({"Y", "S", "U"})
+DOUBLE_UNCERTAIN_NOTE_FLAGS = frozenset({"I", "X"})
 SOLAR_SYSTEM_BODY_COLORS = {
     "Sun": "#ffd166",
     "Moon": "#dce6ef",
@@ -181,36 +218,16 @@ def apply_app_icon(window, default=False):
         pass
 
 
-class WinRect(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
-
-
-class WinMonitorInfo(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", ctypes.c_ulong),
-        ("rcMonitor", WinRect),
-        ("rcWork", WinRect),
-        ("dwFlags", ctypes.c_ulong),
-    ]
-
-
-class WinPoint(ctypes.Structure):
-    _fields_ = [
-        ("x", ctypes.c_long),
-        ("y", ctypes.c_long),
-    ]
-
-
 class AstroClocksApp:
     def __init__(self, root=None, loading_window=None, loading_status_var=None):
         self.root = root or tk.Tk()
         self.loading_window = loading_window
         self.loading_status_var = loading_status_var
+        self.startup_monitor_geometry = getattr(
+            self.root,
+            "_astroclocks_startup_monitor_geometry",
+            None,
+        )
         self.root.withdraw()
         self.root.title(f"AstroClocks v{APP_VERSION}")
         apply_app_icon(self.root, default=True)
@@ -281,6 +298,8 @@ class AstroClocksApp:
         self.angle_labels = []
         self.clock_labels = []
         self.site_info_lines = None
+        self.site_info_font = None
+        self.site_info_name_font = None
         self.notebook = None
         self.main_tab = None
         self.visibility_tab = None
@@ -293,11 +312,24 @@ class AstroClocksApp:
         self.visibility_hover_position = None
         self.double_star_results = []
         self.double_star_tree = None
+        self.double_reset_button = None
+        self.double_tree_separators = []
+        self.double_sort_column = "name"
+        self.double_sort_reverse = False
         self.double_search_generation = 0
         self.double_remote_search_pending = False
+        self.double_orb6_index = None
+        self.double_orb6_orbit_index = None
+        self.double_wds_note_cache = {}
+        self.double_wds_cached_stars = []
         self.coordinate_search_generation = 0
         self.coordinate_search_pending = False
         self.translated_widgets = []
+
+        self._set_loading_status("Chargement du cache ORB6...")
+        self.double_orb6_index = load_cached_orb6_ephemerides()
+        self.double_orb6_orbit_index = load_cached_orb6_orbits()
+        self.double_wds_cached_stars = load_cached_wds_double_stars()
 
         self._set_loading_status("Préparation de l'interface...")
         self._configure_styles()
@@ -467,21 +499,46 @@ class AstroClocksApp:
             fieldbackground=self.ebg,
             foreground=self.text,
             rowheight=27,
-            borderwidth=0,
+            borderwidth=1,
+            relief="solid",
             font=("Segoe UI", 10),
         )
         style.configure(
             "Treeview.Heading",
             background=self.button_bg,
             foreground=self.text,
-            borderwidth=0,
+            borderwidth=1,
+            relief="solid",
             font=("Segoe UI", 10, "bold"),
+        )
+        style.map(
+            "Treeview.Heading",
+            background=[("pressed", self.text), ("active", self.accent)],
+            foreground=[("pressed", self.ebg), ("active", self.ebg)],
         )
         style.map(
             "Treeview",
             background=[("selected", self.accent)],
             foreground=[("selected", self.ebg)],
         )
+        for scrollbar_style in ("Dark.Vertical.TScrollbar", "Dark.Horizontal.TScrollbar"):
+            style.configure(
+                scrollbar_style,
+                background=self.button_bg,
+                darkcolor=self.button_bg,
+                lightcolor=self.button_bg,
+                troughcolor=self.ebg,
+                bordercolor=self.card_edge,
+                arrowcolor=self.text,
+                relief="flat",
+                borderwidth=0,
+                arrowsize=13,
+            )
+            style.map(
+                scrollbar_style,
+                background=[("pressed", self.card_edge), ("active", self.accent)],
+                arrowcolor=[("pressed", self.text), ("active", self.ebg)],
+            )
 
     def _configure_root(self):
         self.root.attributes("-fullscreen", False)
@@ -493,80 +550,33 @@ class AstroClocksApp:
         self.root.grid_rowconfigure(1, weight=1)
 
     def _monitor_geometry_from_handle(self, hwnd, use_work_area=False):
-        monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
-        return self._monitor_geometry(monitor, use_work_area=use_work_area)
+        return window_monitor_geometry_from_handle(hwnd, use_work_area=use_work_area)
 
     def _monitor_geometry_from_point(self, x, y, use_work_area=False):
-        ctypes.windll.user32.MonitorFromPoint.argtypes = [WinPoint, ctypes.c_ulong]
-        ctypes.windll.user32.MonitorFromPoint.restype = ctypes.c_void_p
-        monitor = ctypes.windll.user32.MonitorFromPoint(
-            WinPoint(int(x), int(y)),
-            MONITOR_DEFAULTTONEAREST,
-        )
-        return self._monitor_geometry(monitor, use_work_area=use_work_area)
+        return window_monitor_geometry_from_point(x, y, use_work_area=use_work_area)
 
     def _monitor_geometry(self, monitor, use_work_area=False):
-        monitor_info = WinMonitorInfo()
-        monitor_info.cbSize = ctypes.sizeof(WinMonitorInfo)
-        if not ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
-            raise RuntimeError("Unable to read monitor geometry")
-
-        rect = monitor_info.rcWork if use_work_area else monitor_info.rcMonitor
-        return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+        return window_monitor_geometry(monitor, use_work_area=use_work_area)
 
     def _fallback_screen_geometry(self):
-        return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        return window_fallback_screen_geometry(self.root)
 
     def _current_monitor_geometry(self, use_work_area=False):
-        try:
-            self.root.update_idletasks()
-            return self._monitor_geometry_from_handle(
-                self.root.winfo_id(),
-                use_work_area=use_work_area,
-            )
-        except Exception:
-            return self._fallback_screen_geometry()
+        return window_current_monitor_geometry(self.root, use_work_area=use_work_area)
 
     def _pointer_monitor_geometry(self, use_work_area=False):
-        try:
-            pointer_x, pointer_y = self.root.winfo_pointerxy()
-            return self._monitor_geometry_from_point(
-                pointer_x,
-                pointer_y,
-                use_work_area=use_work_area,
-            )
-        except Exception:
-            return self._fallback_screen_geometry()
+        return window_pointer_monitor_geometry(self.root, use_work_area=use_work_area)
 
     def _move_window_to(self, window, x, y):
-        try:
-            hwnd = window.winfo_id()
-            # Tk exposes the client HWND; moving the wrapper preserves virtual-screen coordinates.
-            parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
-            ctypes.windll.user32.SetWindowPos(
-                parent_hwnd or hwnd,
-                0,
-                int(x),
-                int(y),
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-        except Exception:
-            window.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
+        window_move_window_to(window, x, y)
 
     def _place_initial_window(self):
-        monitor_x, monitor_y, monitor_width, monitor_height = self._pointer_monitor_geometry(
-            use_work_area=True
+        monitor_x, monitor_y, monitor_width, monitor_height = (
+            self.startup_monitor_geometry
+            or self._pointer_monitor_geometry(use_work_area=True)
         )
-        tk_screen_width = self.root.winfo_screenwidth()
-        tk_screen_height = self.root.winfo_screenheight()
-        width_scale = tk_screen_width / monitor_width if monitor_width else 1
-        height_scale = tk_screen_height / monitor_height if monitor_height else 1
-        screen_width = monitor_width * width_scale
-        screen_height = monitor_height * height_scale
-        screen_x = monitor_x * width_scale
-        screen_y = monitor_y * height_scale
+        screen_width = monitor_width
+        screen_height = monitor_height
 
         available_width = max(1, screen_width - WINDOW_SCREEN_MARGIN)
         available_height = max(1, screen_height - WINDOW_SCREEN_MARGIN)
@@ -582,16 +592,18 @@ class AstroClocksApp:
         window_height = max(MIN_WINDOW_HEIGHT, target_height)
 
         self.root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-        x = screen_x + max(0, (screen_width - window_width) // 2)
-        y = screen_y + max(0, (screen_height - window_height) // 2)
+        x = monitor_x + max(0, (screen_width - window_width) // 2)
+        y = monitor_y + max(0, (screen_height - window_height) // 2)
 
         try:
             self.root.attributes("-alpha", 0.0)
         except (tk.TclError, RuntimeError):
             pass
-        self.root.geometry(f"{int(window_width)}x{int(window_height)}+{int(x)}+{int(y)}")
+        self.root.geometry(f"{int(window_width)}x{int(window_height)}")
         self.root.update_idletasks()
         self.root.deiconify()
+        self.root.update_idletasks()
+        self._move_window_to(self.root, x, y)
         try:
             self.root.attributes("-alpha", 1.0)
         except (tk.TclError, RuntimeError):
@@ -1051,6 +1063,7 @@ class AstroClocksApp:
         self.notebook.add(self.main_tab, text=self._tr("tab.main"))
         self.notebook.add(self.visibility_tab, text=self._tr("tab.visibility"))
         self.notebook.add(self.double_star_tab, text=self._tr("tab.double_stars"))
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         for column in range(3):
             self.main_tab.grid_columnconfigure(column, weight=1, uniform="main")
@@ -1063,13 +1076,21 @@ class AstroClocksApp:
         self.double_star_tab.grid_columnconfigure(1, weight=1)
         self.double_star_tab.grid_rowconfigure(0, weight=1)
 
+    def _on_tab_changed(self, _event=None):
+        if self.notebook is None or self.double_star_tree is None:
+            return
+        if self.notebook.select() == str(self.double_star_tab):
+            self.root.after_idle(self._update_double_tree_separators)
+
     def _create_site_widgets(self):
+        self.site_info_font = Font(family="Segoe UI", size=10)
+        self.site_info_name_font = Font(family="Segoe UI", size=10, weight="bold")
         self.site_info_text = tk.Text(
             self.lf_long,
             height=6,
             bg=self.ebg,
             fg=self.fg,
-            font=Font(family="Segoe UI", size=10),
+            font=self.site_info_font,
             relief="flat",
             bd=0,
             padx=8,
@@ -1081,13 +1102,32 @@ class AstroClocksApp:
         self.site_info_text.tag_configure(
             "site-name",
             foreground=self.text,
-            font=Font(family="Segoe UI", size=10, weight="bold"),
+            font=self.site_info_name_font,
         )
         self.site_info_text.config(state=tk.DISABLED)
         self.site_info_text.grid(column=0, row=0, columnspan=2, padx=8, pady=(4, 6), sticky="nsew")
+        self.site_info_text.bind("<Configure>", self._resize_site_info_text)
         self.lf_long.grid_columnconfigure(0, weight=1)
         self.lf_long.grid_columnconfigure(1, weight=1)
         self.lf_long.grid_rowconfigure(0, weight=1)
+
+    def _resize_site_info_text(self, _event=None):
+        if self.site_info_text is None or self.site_info_font is None:
+            return
+
+        lines = self.site_info_lines or ("Observing Site",) * 6
+        max_line_length = max(32, *(len(str(line)) for line in lines))
+        available_width = max(1, self.site_info_text.winfo_width() - 24)
+        available_height = max(1, self.site_info_text.winfo_height() - 14)
+        width_limited_size = available_width / (max_line_length * 0.55)
+        height_limited_size = available_height / (max(1, len(lines)) * 1.55)
+        target_size = int(max(9, min(17, width_limited_size, height_limited_size)))
+
+        if self.site_info_font.cget("size") == target_size:
+            return
+        self.site_info_font.configure(size=target_size)
+        if self.site_info_name_font is not None:
+            self.site_info_name_font.configure(size=target_size)
 
     def _object_type_display(self, object_type_code):
         return self._tr(f"object_type.{object_type_code}")
@@ -1512,13 +1552,36 @@ class AstroClocksApp:
             "double.filters",
         ).grid(column=0, row=0, pady=(0, 10), sticky="ew")
 
-        self.double_mag_primary_var = tk.StringVar(value="10.0")
-        self.double_mag_secondary_var = tk.StringVar(value="12.0")
-        self.double_min_sep_var = tk.StringVar(value="0.0")
-        self.double_max_sep_var = tk.StringVar(value="60.0")
-        self.double_visible_night_var = tk.BooleanVar(value=False)
-        self.double_include_apparent_var = tk.BooleanVar(value=False)
-        self.double_online_var = tk.BooleanVar(value=True)
+        self.double_mag_primary_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.double_max_primary_magnitude)
+        )
+        self.double_mag_secondary_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.double_max_secondary_magnitude)
+        )
+        self.double_min_sep_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.double_min_separation)
+        )
+        self.double_max_sep_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.double_max_separation)
+        )
+        self.double_min_altitude_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.double_min_max_altitude)
+        )
+        self.double_visible_night_var = tk.BooleanVar(value=self.settings.double_visible_night)
+        self.double_include_physical_var = tk.BooleanVar(
+            value=self.settings.double_include_physical
+        )
+        self.double_include_noted_var = tk.BooleanVar(value=self.settings.double_include_noted)
+        self.double_include_apparent_var = tk.BooleanVar(
+            value=self.settings.double_include_apparent
+        )
+        self.double_include_uncertain_var = tk.BooleanVar(
+            value=self.settings.double_include_uncertain
+        )
+        self.double_exclude_polar_circle_var = tk.BooleanVar(
+            value=self.settings.double_exclude_polar_circle
+        )
+        self.double_online_var = tk.BooleanVar(value=self.settings.double_use_online)
 
         def add_filter(row, key, variable):
             label = tk.Label(
@@ -1530,7 +1593,7 @@ class AstroClocksApp:
             )
             self._register_translated_widget(label, key)
             label.grid(column=0, row=row, sticky="ew", pady=(6, 2))
-            tk.Entry(
+            entry = tk.Entry(
                 controls,
                 textvariable=variable,
                 bg=self.ebg,
@@ -1542,12 +1605,16 @@ class AstroClocksApp:
                 highlightcolor=self.accent,
                 highlightthickness=1,
                 width=16,
-            ).grid(column=0, row=row + 1, sticky="ew")
+            )
+            entry.grid(column=0, row=row + 1, sticky="ew")
+            entry.bind("<Return>", lambda _event: self.search_double_stars())
+            entry.bind("<FocusOut>", self._save_double_filters_if_valid)
 
         add_filter(1, "double.max_primary", self.double_mag_primary_var)
         add_filter(3, "double.max_secondary", self.double_mag_secondary_var)
         add_filter(5, "double.min_sep", self.double_min_sep_var)
         add_filter(7, "double.max_sep", self.double_max_sep_var)
+        add_filter(9, "double.min_max_altitude", self.double_min_altitude_var)
 
         self._register_translated_widget(
             self._build_inline_checkbutton(
@@ -1557,7 +1624,25 @@ class AstroClocksApp:
                 self.search_double_stars,
             ),
             "double.visible_night",
-        ).grid(column=0, row=9, pady=(12, 0), sticky="ew")
+        ).grid(column=0, row=11, pady=(12, 0), sticky="ew")
+        self._register_translated_widget(
+            self._build_inline_checkbutton(
+                controls,
+                self.double_include_physical_var,
+                self._tr("double.include_physical"),
+                self.search_double_stars,
+            ),
+            "double.include_physical",
+        ).grid(column=0, row=12, pady=(4, 0), sticky="ew")
+        self._register_translated_widget(
+            self._build_inline_checkbutton(
+                controls,
+                self.double_include_noted_var,
+                self._tr("double.include_noted"),
+                self.search_double_stars,
+            ),
+            "double.include_noted",
+        ).grid(column=0, row=13, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 controls,
@@ -1566,7 +1651,25 @@ class AstroClocksApp:
                 self.search_double_stars,
             ),
             "double.include_apparent",
-        ).grid(column=0, row=10, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=14, pady=(4, 0), sticky="ew")
+        self._register_translated_widget(
+            self._build_inline_checkbutton(
+                controls,
+                self.double_include_uncertain_var,
+                self._tr("double.include_uncertain"),
+                self.search_double_stars,
+            ),
+            "double.include_uncertain",
+        ).grid(column=0, row=15, pady=(4, 0), sticky="ew")
+        self._register_translated_widget(
+            self._build_inline_checkbutton(
+                controls,
+                self.double_exclude_polar_circle_var,
+                self._tr("double.exclude_polar_circle"),
+                self.search_double_stars,
+            ),
+            "double.exclude_polar_circle",
+        ).grid(column=0, row=16, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 controls,
@@ -1575,21 +1678,28 @@ class AstroClocksApp:
                 self.search_double_stars,
             ),
             "double.use_online",
-        ).grid(column=0, row=11, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=17, pady=(4, 0), sticky="ew")
 
         self.double_search_button = self._build_button(
             controls,
             self._tr("button.search"),
             self.search_double_stars,
         )
-        self.double_search_button.grid(column=0, row=12, pady=(14, 8), sticky="ew")
+        self.double_search_button.grid(column=0, row=18, pady=(14, 8), sticky="ew")
 
         self.double_set_button = self._build_button(
             controls,
             self._tr("double.set_target"),
             self.set_selected_double_star_target,
         )
-        self.double_set_button.grid(column=0, row=13, pady=(0, 12), sticky="ew")
+        self.double_set_button.grid(column=0, row=19, pady=(0, 12), sticky="ew")
+
+        self.double_reset_button = self._build_button(
+            controls,
+            self._tr("double.reset_filters"),
+            self.reset_double_star_filters,
+        )
+        self.double_reset_button.grid(column=0, row=20, pady=(0, 12), sticky="ew")
 
         self.double_status_label = tk.Label(
             controls,
@@ -1600,7 +1710,7 @@ class AstroClocksApp:
             wraplength=220,
             anchor="nw",
         )
-        self.double_status_label.grid(column=0, row=14, sticky="ew")
+        self.double_status_label.grid(column=0, row=21, sticky="ew")
 
         results_frame = self._build_labelframe(
             "frame.double_stars",
@@ -1613,7 +1723,21 @@ class AstroClocksApp:
         results_frame.grid_columnconfigure(0, weight=1)
         results_frame.grid_rowconfigure(0, weight=1)
 
-        columns = ("name", "designation", "nature", "magnitudes", "separation", "pa", "constellation")
+        columns = (
+            "name",
+            "designation",
+            "nature",
+            "magnitudes",
+            "separation",
+            "pa",
+            "orb6_separation",
+            "orb6_pa",
+            "max_altitude",
+            "last_observation_year",
+            "observation_count",
+            "wds_note",
+            "orbit",
+        )
         self.double_star_tree = ttk.Treeview(
             results_frame,
             columns=columns,
@@ -1625,24 +1749,76 @@ class AstroClocksApp:
             results_frame,
             orient="vertical",
             command=self.double_star_tree.yview,
+            style="Dark.Vertical.TScrollbar",
         )
         scrollbar.grid(column=1, row=0, sticky="ns", padx=(0, 8), pady=8)
-        self.double_star_tree.configure(yscrollcommand=scrollbar.set)
-        self.double_star_tree.bind("<Double-1>", lambda _event: self.set_selected_double_star_target())
+        horizontal_scrollbar = ttk.Scrollbar(
+            results_frame,
+            orient="horizontal",
+            command=self._double_tree_xview,
+            style="Dark.Horizontal.TScrollbar",
+        )
+        horizontal_scrollbar.grid(column=0, row=1, sticky="ew", padx=(8, 0), pady=(0, 8))
+        self.double_star_tree.configure(
+            yscrollcommand=scrollbar.set,
+            xscrollcommand=lambda first, last: self._on_double_tree_xscroll(
+                horizontal_scrollbar,
+                first,
+                last,
+            ),
+        )
+        self.double_star_tree.bind("<Double-1>", self._on_double_tree_double_click)
+        self.double_star_tree.bind(
+            "<Configure>",
+            lambda _event: self.root.after_idle(self._update_double_tree_separators),
+        )
+        self.double_star_tree.bind("<ButtonRelease-1>", self._on_double_tree_click)
+        self.double_star_tree.bind("<Motion>", self._on_double_tree_motion)
+        self.double_star_tree.bind("<Leave>", self._on_double_tree_leave)
+        self.double_star_tree.tag_configure("odd", background="#0e151b")
+        self.double_star_tree.tag_configure("even", background=self.ebg)
 
         column_widths = {
-            "name": 180,
-            "designation": 210,
+            "name": 155,
+            "designation": 320,
             "nature": 110,
-            "magnitudes": 110,
-            "separation": 110,
-            "pa": 90,
-            "constellation": 90,
+            "magnitudes": 100,
+            "separation": 74,
+            "pa": 64,
+            "orb6_separation": 78,
+            "orb6_pa": 68,
+            "max_altitude": 90,
+            "last_observation_year": 75,
+            "observation_count": 75,
+            "wds_note": 110,
+            "orbit": 95,
+        }
+        column_min_widths = {
+            "name": 130,
+            "designation": 260,
+            "nature": 95,
+            "magnitudes": 90,
+            "separation": 68,
+            "pa": 58,
+            "orb6_separation": 72,
+            "orb6_pa": 62,
+            "max_altitude": 85,
+            "last_observation_year": 65,
+            "observation_count": 65,
+            "wds_note": 95,
+            "orbit": 85,
         }
         for column, width in column_widths.items():
-            self.double_star_tree.column(column, width=width, minwidth=70, anchor="w")
+            anchor = "center" if column in {"orbit", "wds_note"} else "w"
+            self.double_star_tree.column(
+                column,
+                width=width,
+                minwidth=column_min_widths[column],
+                anchor=anchor,
+            )
 
         self._refresh_double_star_headings()
+        self._update_double_tree_separators()
         self.search_double_stars(allow_online=False)
 
     def _parse_clock_hours(self, value):
@@ -3507,6 +3683,7 @@ class AstroClocksApp:
         self.site_info_text.insert("1.0", f"{lines[0]}\n", "site-name")
         self.site_info_text.insert(tk.END, "\n".join(lines[1:]))
         self.site_info_text.config(state=tk.DISABLED)
+        self._resize_site_info_text()
         if self.aladin_button is not None:
             self.aladin_button.config(text=self._tr("button.aladin", value=self.aladin_fov_deg))
 
@@ -3540,6 +3717,8 @@ class AstroClocksApp:
         self.delta_set_button.config(text=self._tr("button.set"))
         self.double_search_button.config(text=self._tr("button.search"))
         self.double_set_button.config(text=self._tr("double.set_target"))
+        if self.double_reset_button is not None:
+            self.double_reset_button.config(text=self._tr("double.reset_filters"))
         for widget, key, kwargs in self.translated_widgets:
             widget.config(text=self._tr(key, **kwargs))
         self._refresh_double_star_headings()
@@ -3556,6 +3735,7 @@ class AstroClocksApp:
         )
 
     def _save_current_settings(self):
+        double_filter_settings = self._current_double_filter_settings()
         self.settings = AppSettings(
             site_name=self.site_name,
             country=self.country,
@@ -3571,8 +3751,92 @@ class AstroClocksApp:
             language=self.language,
             hour_angle_offset_enabled=self.hour_angle_offset_enabled,
             declination_offset_enabled=self.declination_offset_enabled,
+            **double_filter_settings,
         )
         save_app_settings(self.settings)
+
+    def _current_double_filter_settings(self):
+        def read_float(variable_name, current_value):
+            variable = getattr(self, variable_name, None)
+            if variable is None or not is_float(variable.get()):
+                return current_value
+            return float(variable.get())
+
+        visible_night_var = getattr(self, "double_visible_night_var", None)
+        include_physical_var = getattr(self, "double_include_physical_var", None)
+        include_noted_var = getattr(self, "double_include_noted_var", None)
+        include_apparent_var = getattr(self, "double_include_apparent_var", None)
+        include_uncertain_var = getattr(self, "double_include_uncertain_var", None)
+        exclude_polar_circle_var = getattr(self, "double_exclude_polar_circle_var", None)
+        online_var = getattr(self, "double_online_var", None)
+
+        return {
+            "double_max_primary_magnitude": read_float(
+                "double_mag_primary_var",
+                self.settings.double_max_primary_magnitude,
+            ),
+            "double_max_secondary_magnitude": read_float(
+                "double_mag_secondary_var",
+                self.settings.double_max_secondary_magnitude,
+            ),
+            "double_min_separation": read_float(
+                "double_min_sep_var",
+                self.settings.double_min_separation,
+            ),
+            "double_max_separation": read_float(
+                "double_max_sep_var",
+                self.settings.double_max_separation,
+            ),
+            "double_min_max_altitude": read_float(
+                "double_min_altitude_var",
+                self.settings.double_min_max_altitude,
+            ),
+            "double_visible_night": (
+                visible_night_var.get()
+                if visible_night_var is not None
+                else self.settings.double_visible_night
+            ),
+            "double_include_physical": (
+                include_physical_var.get()
+                if include_physical_var is not None
+                else self.settings.double_include_physical
+            ),
+            "double_include_noted": (
+                include_noted_var.get()
+                if include_noted_var is not None
+                else self.settings.double_include_noted
+            ),
+            "double_include_apparent": (
+                include_apparent_var.get()
+                if include_apparent_var is not None
+                else self.settings.double_include_apparent
+            ),
+            "double_include_uncertain": (
+                include_uncertain_var.get()
+                if include_uncertain_var is not None
+                else self.settings.double_include_uncertain
+            ),
+            "double_exclude_polar_circle": (
+                exclude_polar_circle_var.get()
+                if exclude_polar_circle_var is not None
+                else self.settings.double_exclude_polar_circle
+            ),
+            "double_use_online": (
+                online_var.get() if online_var is not None else self.settings.double_use_online
+            ),
+        }
+
+    def _save_double_filters_if_valid(self, _event=None):
+        variables = (
+            self.double_mag_primary_var,
+            self.double_mag_secondary_var,
+            self.double_min_sep_var,
+            self.double_max_sep_var,
+            self.double_min_altitude_var,
+        )
+        if not all(is_float(variable.get()) for variable in variables):
+            return
+        self._save_current_settings()
 
     def _parse_float_setting(self, value, label, minimum, maximum):
         if not is_float(value):
@@ -3913,10 +4177,7 @@ class AstroClocksApp:
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
         self._center_dialog_on_root(dialog)
 
-    def _refresh_double_star_headings(self):
-        if self.double_star_tree is None:
-            return
-
+    def _double_star_heading_keys(self):
         headings = {
             "name": "double.column.name",
             "designation": "double.column.designation",
@@ -3924,10 +4185,161 @@ class AstroClocksApp:
             "magnitudes": "double.column.magnitudes",
             "separation": "double.column.separation",
             "pa": "double.column.pa",
-            "constellation": "double.column.constellation",
+            "orb6_separation": "double.column.orb6_separation",
+            "orb6_pa": "double.column.orb6_pa",
+            "max_altitude": "double.column.max_altitude",
+            "last_observation_year": "double.column.last_observation_year",
+            "observation_count": "double.column.observation_count",
+            "wds_note": "double.column.wds_note",
+            "orbit": "double.column.orbit",
         }
+        return headings
+
+    def _refresh_double_star_headings(self):
+        if self.double_star_tree is None:
+            return
+
+        headings = self._double_star_heading_keys()
         for column, key in headings.items():
-            self.double_star_tree.heading(column, text=self._tr(key))
+            label = self._tr(key)
+            if column == self.double_sort_column:
+                label = f"{label} {'v' if self.double_sort_reverse else '^'}"
+            self.double_star_tree.heading(
+                column,
+                text=label,
+                command=lambda selected_column=column: self._sort_double_star_table(
+                    selected_column
+                ),
+            )
+
+    def _format_double_filter_number(self, value):
+        return f"{float(value):g}"
+
+    def _default_double_filters(self):
+        return {
+            "max_primary": DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE,
+            "max_secondary": DEFAULT_DOUBLE_MAX_SECONDARY_MAGNITUDE,
+            "min_sep": DEFAULT_DOUBLE_MIN_SEPARATION,
+            "max_sep": DEFAULT_DOUBLE_MAX_SEPARATION,
+            "min_altitude": DEFAULT_DOUBLE_MIN_MAX_ALTITUDE,
+            "visible_night": DEFAULT_DOUBLE_VISIBLE_NIGHT,
+            "include_physical": DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
+            "include_noted": DEFAULT_DOUBLE_INCLUDE_NOTED,
+            "include_apparent": DEFAULT_DOUBLE_INCLUDE_APPARENT,
+            "include_uncertain": DEFAULT_DOUBLE_INCLUDE_UNCERTAIN,
+            "exclude_polar_circle": DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE,
+            "use_online": DEFAULT_DOUBLE_USE_ONLINE,
+        }
+
+    def _apply_double_filter_controls(self, filters):
+        self.double_mag_primary_var.set(self._format_double_filter_number(filters["max_primary"]))
+        self.double_mag_secondary_var.set(
+            self._format_double_filter_number(filters["max_secondary"])
+        )
+        self.double_min_sep_var.set(self._format_double_filter_number(filters["min_sep"]))
+        self.double_max_sep_var.set(self._format_double_filter_number(filters["max_sep"]))
+        self.double_min_altitude_var.set(
+            self._format_double_filter_number(filters["min_altitude"])
+        )
+        self.double_visible_night_var.set(filters["visible_night"])
+        self.double_include_physical_var.set(filters["include_physical"])
+        self.double_include_noted_var.set(filters["include_noted"])
+        self.double_include_apparent_var.set(filters["include_apparent"])
+        self.double_include_uncertain_var.set(filters["include_uncertain"])
+        self.double_exclude_polar_circle_var.set(filters["exclude_polar_circle"])
+        self.double_online_var.set(filters["use_online"])
+
+    def reset_double_star_filters(self):
+        self._apply_double_filter_controls(self._default_double_filters())
+        self._save_current_settings()
+        self.search_double_stars()
+
+    def _sort_double_star_table(self, column):
+        if column == self.double_sort_column:
+            self.double_sort_reverse = not self.double_sort_reverse
+        else:
+            self.double_sort_column = column
+            self.double_sort_reverse = False
+        self._refresh_double_star_headings()
+        self._populate_double_star_tree()
+
+    def _double_sort_value(self, star):
+        column = self.double_sort_column
+        if column == "name":
+            return str(star.get("name", "")).casefold()
+        if column == "designation":
+            return str(star.get("designation", "")).casefold()
+        if column == "nature":
+            return self._double_star_nature_label(star).casefold()
+        if column == "magnitudes":
+            return (star["mag_primary"], star["mag_secondary"])
+        if column == "separation":
+            return star["separation"]
+        if column == "pa":
+            return star["position_angle"]
+        if column == "orb6_separation":
+            return star.get("orb6_current_separation")
+        if column == "orb6_pa":
+            return star.get("orb6_current_pa")
+        if column == "max_altitude":
+            return star.get("max_altitude")
+        if column == "last_observation_year":
+            return star.get("last_observation_year")
+        if column == "observation_count":
+            return star.get("observation_count")
+        if column == "wds_note":
+            return 0 if self._double_has_wds_note(star) else 1
+        if column == "orbit":
+            return 0 if star.get("orb6_has_orbit") else 1
+        return str(star.get("name", "")).casefold()
+
+    def _double_tree_xview(self, *args):
+        if self.double_star_tree is None:
+            return
+        self.double_star_tree.xview(*args)
+        self.root.after_idle(self._update_double_tree_separators)
+
+    def _on_double_tree_xscroll(self, scrollbar, first, last):
+        scrollbar.set(first, last)
+        self.root.after_idle(self._update_double_tree_separators)
+
+    def _update_double_tree_separators(self):
+        if self.double_star_tree is None:
+            return
+
+        for separator in self.double_tree_separators:
+            separator.destroy()
+        self.double_tree_separators = []
+
+        tree_height = self.double_star_tree.winfo_height()
+        if tree_height <= 1:
+            return
+
+        total_width = sum(
+            self.double_star_tree.column(column, "width")
+            for column in self.double_star_tree["columns"]
+        )
+        if total_width <= 0:
+            return
+
+        visible_width = self.double_star_tree.winfo_width()
+        first_fraction = self.double_star_tree.xview()[0]
+        scroll_offset = total_width * first_fraction
+        x_position = -scroll_offset
+        for column in self.double_star_tree["columns"][:-1]:
+            x_position += self.double_star_tree.column(column, "width")
+            if x_position <= 0 or x_position >= visible_width:
+                continue
+            separator = tk.Frame(
+                self.double_star_tree,
+                bg=self.card_edge,
+                width=1,
+                bd=0,
+                highlightthickness=0,
+            )
+            separator.place(x=x_position, y=0, width=1, height=tree_height)
+            separator.lift()
+            self.double_tree_separators.append(separator)
 
     def _double_filter_value(self, variable, label_key, minimum, maximum):
         return self._parse_float_setting(
@@ -3963,22 +4375,33 @@ class AstroClocksApp:
                 0,
                 10000,
             )
+            min_altitude = self._double_filter_value(
+                self.double_min_altitude_var,
+                "double.min_max_altitude",
+                -90,
+                90,
+            )
         except ValueError as exc:
             messagebox.showerror(self._tr("settings.invalid_title"), str(exc), parent=self.root)
             return None
 
         if min_sep > max_sep:
             min_sep, max_sep = max_sep, min_sep
-            self.double_min_sep_var.set(f"{min_sep:.1f}")
-            self.double_max_sep_var.set(f"{max_sep:.1f}")
+            self.double_min_sep_var.set(self._format_double_filter_number(min_sep))
+            self.double_max_sep_var.set(self._format_double_filter_number(max_sep))
 
         return {
             "max_primary": max_primary,
             "max_secondary": max_secondary,
             "min_sep": min_sep,
             "max_sep": max_sep,
+            "min_altitude": min_altitude,
             "visible_night": self.double_visible_night_var.get(),
+            "include_physical": self.double_include_physical_var.get(),
+            "include_noted": self.double_include_noted_var.get(),
             "include_apparent": self.double_include_apparent_var.get(),
+            "include_uncertain": self.double_include_uncertain_var.get(),
+            "exclude_polar_circle": self.double_exclude_polar_circle_var.get(),
             "use_online": self.double_online_var.get(),
         }
 
@@ -4030,41 +4453,111 @@ class AstroClocksApp:
             )
         return context
 
-    def _double_star_visible_at_night(self, star, visibility_context):
-        for sample in visibility_context:
-            if sample["sun_altitude"] > DOUBLE_NIGHT_SUN_MAX_ALTITUDE:
-                continue
+    def _double_star_visibility_metrics(self, star, visibility_context):
+        if not visibility_context:
+            return {
+                "max_altitude": None,
+                "max_night_altitude": None,
+                "visible_at_night": False,
+            }
 
+        max_altitude = None
+        max_night_altitude = None
+        visible_at_night = False
+        for sample in visibility_context:
             altitude, _azimuth, _hour_angle = self._equatorial_to_horizontal(
                 star["ra_hours"],
                 star["declination"],
                 sample["lst_hours"],
             )
+            if max_altitude is None or altitude > max_altitude:
+                max_altitude = altitude
+            if sample["sun_altitude"] > DOUBLE_NIGHT_SUN_MAX_ALTITUDE:
+                continue
+            if max_night_altitude is None or altitude > max_night_altitude:
+                max_night_altitude = altitude
             if altitude >= DOUBLE_NIGHT_TARGET_MIN_ALTITUDE:
-                return True
+                visible_at_night = True
+
+        return {
+            "max_altitude": max_altitude,
+            "max_night_altitude": max_night_altitude,
+            "visible_at_night": visible_at_night,
+        }
+
+    def _double_note_flags(self, star):
+        return set(str(star.get("notes", "") or "").strip().upper())
+
+    def _double_has_wds_note(self, star):
+        wds = str(star.get("wds", "")).strip()
+        if not wds or "N" not in self._double_note_flags(star):
+            return False
+        cached_notes = self.double_wds_note_cache.get(wds)
+        if cached_notes == []:
+            return False
+        return True
+
+    def _double_filter_group(self, star):
+        note_flags = self._double_note_flags(star)
+        if note_flags & DOUBLE_UNCERTAIN_NOTE_FLAGS:
+            return "uncertain"
+        if note_flags & DOUBLE_APPARENT_NOTE_FLAGS:
+            return "apparent"
+        if note_flags & DOUBLE_PHYSICAL_NOTE_FLAGS:
+            return "physical"
+
+        status = star.get("physical_status", "unknown")
+        if status == "binary":
+            return "physical"
+        if status == "apparent":
+            return "apparent"
+        if note_flags & DOUBLE_NOTED_NOTE_FLAGS:
+            return "noted"
+        return "unknown"
+
+    def _double_group_allowed(self, star, filters):
+        group = self._double_filter_group(star)
+        if group == "physical":
+            return filters["include_physical"]
+        if group == "noted":
+            return filters["include_noted"]
+        if group == "apparent":
+            return filters["include_apparent"]
+        if group == "uncertain":
+            return filters["include_uncertain"]
+        if group == "unknown":
+            return filters["include_uncertain"]
         return False
 
+    def _double_filter_separation(self, star):
+        current_separation = star.get("orb6_current_separation")
+        if current_separation is not None:
+            return current_separation
+        return star["separation"]
+
     def _filter_double_star_list(self, stars, filters, visibility_context=None):
-        if filters["visible_night"] and visibility_context is None:
+        if visibility_context is None:
             visibility_context = self._double_visibility_context()
 
         filtered = []
         for star in self._double_stars_to_jnow(stars):
-            if (
-                not filters["include_apparent"]
-                and star.get("physical_status", "binary") != "binary"
-            ):
+            star.update(self._double_star_visibility_metrics(star, visibility_context))
+            if not self._double_group_allowed(star, filters):
+                continue
+            if filters["exclude_polar_circle"] and star["declination"] > 60:
                 continue
             if star["mag_primary"] > filters["max_primary"]:
                 continue
             if star["mag_secondary"] > filters["max_secondary"]:
                 continue
-            if not filters["min_sep"] <= star["separation"] <= filters["max_sep"]:
-                continue
-            if filters["visible_night"] and not self._double_star_visible_at_night(
-                star,
-                visibility_context,
+            if not (
+                filters["min_sep"] <= self._double_filter_separation(star) <= filters["max_sep"]
             ):
+                continue
+            max_altitude = star.get("max_altitude")
+            if max_altitude is None or max_altitude < filters["min_altitude"]:
+                continue
+            if filters["visible_night"] and not star.get("visible_at_night"):
                 continue
             filtered.append(star)
         return filtered
@@ -4086,17 +4579,141 @@ class AstroClocksApp:
                 merged[self._double_star_key(star)] = star
         return list(merged.values())
 
-    def _double_star_nature_label(self, star):
-        status = star.get("physical_status", "unknown")
-        if status not in {"binary", "apparent", "unknown"}:
-            status = "unknown"
-        return self._tr(f"double.nature.{status}")
+    def _double_local_catalog(self):
+        return self._merge_double_star_results(DOUBLE_STARS, self.double_wds_cached_stars)
 
-    def _render_double_star_results(self, stars, total, source_key, note=None):
-        self.double_star_results = list(stars)
-        self.double_star_results.sort(
-            key=lambda star: (star["mag_secondary"], star["separation"], star["name"])
-        )
+    def _enrich_double_star_orbits(self, stars, orb6_index):
+        if not orb6_index and not self.double_orb6_orbit_index:
+            return list(stars), 0
+        try:
+            return enrich_double_stars_with_orb6(
+                stars,
+                orb6_index,
+                datetime.datetime.now(datetime.timezone.utc),
+                orbit_index=self.double_orb6_orbit_index,
+            )
+        except Exception:
+            return list(stars), 0
+
+    def _double_orb6_status_note(self, count, orb6_index):
+        if not count:
+            return None
+        if orb6_index and orb6_index.get("from_cache"):
+            return self._tr("double.orb6_cached", count=count)
+        return self._tr("double.orb6_loaded", count=count)
+
+    def _double_star_nature_label(self, star):
+        group = self._double_filter_group(star)
+        if group == "physical":
+            return self._tr("double.nature.binary")
+        if group == "noted":
+            return self._tr("double.nature.noted")
+        if group == "apparent":
+            return self._tr("double.nature.apparent")
+        if group == "uncertain":
+            return self._tr("double.nature.uncertain")
+        return self._tr("double.nature.unknown")
+
+    def _format_double_separation(self, star):
+        separation = float(star["separation"])
+        if star.get("separation_precision") is not None:
+            decimals = int(star["separation_precision"])
+        elif star.get("wds") or str(star.get("source", "")).startswith("WDS"):
+            decimals = 1
+        elif abs(separation * 10 - round(separation * 10)) > 1e-9:
+            decimals = 2
+        else:
+            decimals = 1
+        decimals = max(0, min(3, decimals))
+        return f"{separation:.{decimals}f}\""
+
+    def _format_double_orb6_separation(self, star):
+        separation = star.get("orb6_current_separation")
+        if separation is None:
+            return ""
+        decimals = int(star.get("orb6_separation_precision", 3))
+        decimals = max(1, min(4, decimals))
+        return f"{float(separation):.{decimals}f}\""
+
+    def _format_double_orb6_pa(self, star):
+        position_angle = star.get("orb6_current_pa")
+        if position_angle is None:
+            return ""
+        return f"{float(position_angle):.1f}\N{DEGREE SIGN}"
+
+    def _format_double_max_altitude(self, star):
+        altitude = star.get("max_altitude")
+        if altitude is None:
+            return ""
+        return f"{float(altitude):+.1f}\N{DEGREE SIGN}"
+
+    def _format_double_optional_int(self, value):
+        if value is None:
+            return ""
+        return str(value)
+
+    def _format_double_magnitudes(self, star):
+        return f"{star['mag_primary']:.2f} / {star['mag_secondary']:.2f}"
+
+    def _format_double_designation(self, star):
+        parts = []
+        designation = str(star.get("designation", "")).strip()
+        if designation:
+            parts.append(designation)
+
+        aliases = []
+        for key in ("proper_name", "common_name"):
+            value = str(star.get(key, "")).strip()
+            if value and value not in aliases:
+                aliases.append(value)
+        if aliases:
+            parts.append(" / ".join(aliases))
+
+        for key, label in (("hd", "HD"), ("hip", "HIP"), ("hr", "HR")):
+            value = star.get(key)
+            if value:
+                parts.append(f"{label} {value}")
+        return " | ".join(parts)
+
+    def _double_orbit_cell_text(self, star):
+        if not star.get("orb6_has_orbit"):
+            return ""
+        return f"[{self._tr('double.orbit.open')}]"
+
+    def _double_wds_note_cell_text(self, star):
+        if not self._double_has_wds_note(star):
+            return ""
+        return f"[{self._tr('double.wds_note.open')}]"
+
+    def _double_optional_numeric_sort_key(self, star):
+        value = self._double_sort_value(star)
+        name = str(star.get("name", "")).casefold()
+        if value is None:
+            return (1, 0, name)
+        value = float(value)
+        if self.double_sort_reverse:
+            value = -value
+        return (0, value, name)
+
+    def _populate_double_star_tree(self):
+        if self.double_sort_column in {
+            "orb6_separation",
+            "orb6_pa",
+            "max_altitude",
+            "last_observation_year",
+            "observation_count",
+            "wds_note",
+            "orbit",
+        }:
+            self.double_star_results.sort(key=self._double_optional_numeric_sort_key)
+        else:
+            self.double_star_results.sort(
+                key=lambda star: (
+                    self._double_sort_value(star),
+                    str(star.get("name", "")).casefold(),
+                ),
+                reverse=self.double_sort_reverse,
+            )
 
         for item in self.double_star_tree.get_children():
             self.double_star_tree.delete(item)
@@ -4108,14 +4725,90 @@ class AstroClocksApp:
                 iid=str(index),
                 values=(
                     star["name"],
-                    star["designation"],
+                    self._format_double_designation(star),
                     self._double_star_nature_label(star),
-                    f"{star['mag_primary']:.1f} / {star['mag_secondary']:.1f}",
-                    f"{star['separation']:.2f}\"",
+                    self._format_double_magnitudes(star),
+                    self._format_double_separation(star),
                     f"{star['position_angle']:.0f}\N{DEGREE SIGN}",
-                    star["constellation"],
+                    self._format_double_orb6_separation(star),
+                    self._format_double_orb6_pa(star),
+                    self._format_double_max_altitude(star),
+                    self._format_double_optional_int(star.get("last_observation_year")),
+                    self._format_double_optional_int(star.get("observation_count")),
+                    self._double_wds_note_cell_text(star),
+                    self._double_orbit_cell_text(star),
                 ),
+                tags=("even" if index % 2 == 0 else "odd",),
             )
+        self._update_double_tree_separators()
+
+    def _double_tree_column_at(self, event):
+        if self.double_star_tree is None:
+            return None
+        column_id = self.double_star_tree.identify_column(event.x)
+        if not column_id or not column_id.startswith("#"):
+            return None
+        try:
+            index = int(column_id[1:]) - 1
+        except ValueError:
+            return None
+        columns = tuple(self.double_star_tree["columns"])
+        if index < 0 or index >= len(columns):
+            return None
+        return columns[index]
+
+    def _double_star_from_tree_row(self, row_id):
+        if not row_id:
+            return None
+        try:
+            index = int(row_id)
+        except ValueError:
+            return None
+        if index < 0 or index >= len(self.double_star_results):
+            return None
+        return self.double_star_results[index]
+
+    def _on_double_tree_click(self, event):
+        self.root.after_idle(self._update_double_tree_separators)
+        if self.double_star_tree.identify_region(event.x, event.y) != "cell":
+            return
+        column = self._double_tree_column_at(event)
+        star = self._double_star_from_tree_row(self.double_star_tree.identify_row(event.y))
+        if column == "orbit" and star is not None and star.get("orb6_has_orbit"):
+            self.open_double_star_orbit_window(star)
+            return
+        if column == "wds_note" and star is not None and self._double_has_wds_note(star):
+            self.open_double_star_wds_note_window(star)
+
+    def _on_double_tree_double_click(self, event):
+        if self._double_tree_column_at(event) in {"orbit", "wds_note"}:
+            return "break"
+        self.set_selected_double_star_target()
+        return "break"
+
+    def _on_double_tree_motion(self, event):
+        if self.double_star_tree is None:
+            return
+        row_id = self.double_star_tree.identify_row(event.y)
+        star = self._double_star_from_tree_row(row_id)
+        column = self._double_tree_column_at(event)
+        is_clickable_cell = (
+            self.double_star_tree.identify_region(event.x, event.y) == "cell"
+            and star is not None
+            and (
+                (column == "orbit" and star.get("orb6_has_orbit"))
+                or (column == "wds_note" and self._double_has_wds_note(star))
+            )
+        )
+        self.double_star_tree.configure(cursor="hand2" if is_clickable_cell else "")
+
+    def _on_double_tree_leave(self, _event=None):
+        if self.double_star_tree is not None:
+            self.double_star_tree.configure(cursor="")
+
+    def _render_double_star_results(self, stars, total, source_key, note=None):
+        self.double_star_results = list(stars)
+        self._populate_double_star_tree()
 
         status = self._tr(
             "double.result_count",
@@ -4133,20 +4826,24 @@ class AstroClocksApp:
         filters = self._read_double_star_filters()
         if filters is None:
             return
+        self._save_current_settings()
 
         self.double_search_generation += 1
         generation = self.double_search_generation
-        visibility_context = (
-            self._double_visibility_context() if filters["visible_night"] else None
+        visibility_context = self._double_visibility_context()
+        local_catalog = self._double_local_catalog()
+        local_source, _local_orb6_matches = self._enrich_double_star_orbits(
+            local_catalog,
+            self.double_orb6_index,
         )
         local_results = self._filter_double_star_list(
-            DOUBLE_STARS,
+            local_source,
             filters,
             visibility_context,
         )
         self._render_double_star_results(
             local_results,
-            len(DOUBLE_STARS),
+            len(local_catalog),
             "double.source.local",
         )
 
@@ -4154,11 +4851,21 @@ class AstroClocksApp:
             return
 
         if self.network_online is False:
+            notes = [self._tr("double.online_offline")]
+            local_orb6_count = sum(
+                1 for star in local_results if star.get("orb6_current_separation") is not None
+            )
+            orb6_note = self._double_orb6_status_note(
+                local_orb6_count,
+                self.double_orb6_index,
+            )
+            if orb6_note:
+                notes.append(orb6_note)
             self._render_double_star_results(
                 local_results,
-                len(DOUBLE_STARS),
+                len(local_catalog),
                 "double.source.local",
-                self._tr("double.online_offline"),
+                "\n".join(notes),
             )
             return
 
@@ -4182,13 +4889,30 @@ class AstroClocksApp:
                 filters["max_secondary"],
                 filters["min_sep"],
                 filters["max_sep"],
+                include_physical=filters["include_physical"],
+                include_noted=filters["include_noted"],
                 include_apparent=filters["include_apparent"],
+                include_uncertain=filters["include_uncertain"],
                 timeout=5,
             )
             error = None
         except Exception as exc:
             remote_results = []
             error = str(exc)
+
+        try:
+            orb6_index = fetch_orb6_ephemerides(timeout=5)
+            orb6_error = orb6_index.get("fetch_error")
+        except Exception as exc:
+            orb6_index = None
+            orb6_error = str(exc)
+
+        try:
+            orb6_orbit_index = fetch_orb6_orbits(timeout=5)
+            orb6_orbit_error = orb6_orbit_index.get("fetch_error")
+        except Exception as exc:
+            orb6_orbit_index = None
+            orb6_orbit_error = str(exc)
 
         try:
             self.root.after(
@@ -4198,45 +4922,99 @@ class AstroClocksApp:
                     filters,
                     remote_results,
                     error,
+                    orb6_index,
+                    orb6_error,
+                    orb6_orbit_index,
+                    orb6_orbit_error,
                 ),
             )
         except (tk.TclError, RuntimeError):
             self.double_remote_search_pending = False
 
-    def _apply_double_star_online_results(self, generation, filters, remote_results, error):
+    def _apply_double_star_online_results(
+        self,
+        generation,
+        filters,
+        remote_results,
+        error,
+        orb6_index=None,
+        orb6_error=None,
+        orb6_orbit_index=None,
+        orb6_orbit_error=None,
+    ):
         if generation != self.double_search_generation:
             return
 
         self.double_remote_search_pending = False
-        visibility_context = (
-            self._double_visibility_context() if filters["visible_night"] else None
+        if orb6_index is not None:
+            self.double_orb6_index = orb6_index
+        if orb6_orbit_index is not None:
+            self.double_orb6_orbit_index = orb6_orbit_index
+        active_orb6_index = orb6_index or self.double_orb6_index
+        visibility_context = self._double_visibility_context()
+        if not error:
+            self.double_wds_cached_stars = merge_cached_wds_double_stars(remote_results)
+        local_catalog = self._double_local_catalog()
+        local_source, _local_orb6_matches = self._enrich_double_star_orbits(
+            local_catalog,
+            active_orb6_index,
         )
         local_results = self._filter_double_star_list(
-            DOUBLE_STARS,
+            local_source,
             filters,
             visibility_context,
         )
         if error:
+            notes = [self._tr("double.online_error", error=error)]
+            local_orb6_count = sum(
+                1 for star in local_results if star.get("orb6_current_separation") is not None
+            )
+            if local_orb6_count:
+                orb6_note = self._double_orb6_status_note(
+                    local_orb6_count,
+                    active_orb6_index,
+                )
+                if orb6_note:
+                    notes.append(orb6_note)
+            elif orb6_error:
+                notes.append(self._tr("double.orb6_error", error=orb6_error))
             self._render_double_star_results(
                 local_results,
-                len(DOUBLE_STARS),
+                len(local_catalog),
                 "double.source.local",
-                self._tr("double.online_error", error=error),
+                "\n".join(notes),
             )
             return
 
-        remote_filtered = self._filter_double_star_list(
+        remote_source, _remote_orb6_matches = self._enrich_double_star_orbits(
             remote_results,
+            active_orb6_index,
+        )
+        remote_filtered = self._filter_double_star_list(
+            remote_source,
             filters,
             visibility_context,
         )
         combined = self._merge_double_star_results(local_results, remote_filtered)
-        combined_catalog_total = len(self._merge_double_star_results(DOUBLE_STARS, remote_results))
+        combined_catalog_total = len(self._merge_double_star_results(local_catalog, remote_source))
+        notes = [
+            self._tr("double.online_loaded", count=len(remote_filtered)),
+            self._tr("double.wds_cache_updated", count=len(self.double_wds_cached_stars)),
+        ]
+        orb6_count = sum(
+            1 for star in combined if star.get("orb6_current_separation") is not None
+        )
+        if orb6_count:
+            orb6_note = self._double_orb6_status_note(orb6_count, active_orb6_index)
+            if orb6_note:
+                notes.append(orb6_note)
+        elif orb6_error:
+            notes.append(self._tr("double.orb6_error", error=orb6_error))
         self._render_double_star_results(
             combined,
             combined_catalog_total,
             "double.source.wds",
-            self._tr("double.online_loaded", count=len(remote_filtered)),
+            "\n".join(notes),
         )
 
     def _selected_double_star(self):
@@ -4264,6 +5042,479 @@ class AstroClocksApp:
             self._tr("double.target_set", name=star["name"]),
         )
         self.notebook.select(self.main_tab)
+
+    def _current_decimal_year(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        start = datetime.datetime(now.year, 1, 1, tzinfo=datetime.timezone.utc)
+        end = datetime.datetime(now.year + 1, 1, 1, tzinfo=datetime.timezone.utc)
+        return now.year + (now - start).total_seconds() / (end - start).total_seconds()
+
+    def _decimal_year_to_datetime(self, decimal_year):
+        year = int(math.floor(decimal_year))
+        if year < 1 or year > 9998:
+            return None
+        fraction = decimal_year - year
+        start = datetime.datetime(year, 1, 1, tzinfo=datetime.timezone.utc)
+        end = datetime.datetime(year + 1, 1, 1, tzinfo=datetime.timezone.utc)
+        return start + (end - start) * fraction
+
+    def _format_orbit_epoch_label(self, orbit, decimal_year):
+        date = self._decimal_year_to_datetime(decimal_year)
+        if date is None:
+            return f"{decimal_year:.1f}"
+        if orbit["period_years"] > 5:
+            return str(date.year)
+        return f"{date.month:02d}/{date.year}"
+
+    def _format_orbit_hover_date(self, decimal_year):
+        date = self._decimal_year_to_datetime(decimal_year)
+        if date is None:
+            return f"{decimal_year:.3f}"
+        return date.strftime("%Y-%m-%d")
+
+    def _orbit_plot_position(self, point, center_x, center_y, scale):
+        return center_x + point["east"] * scale, center_y + point["north"] * scale
+
+    def open_double_star_orbit_window(self, star):
+        orbit = star.get("orb6_orbit")
+        if not orbit:
+            self.double_status_label.config(text=self._tr("double.orbit.unavailable"))
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(self._tr("double.orbit.title", name=star["name"]))
+        dialog.configure(bg=self.gbg)
+        dialog.transient(self.root)
+        apply_app_icon(dialog)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+
+        header = tk.Frame(dialog, bg=self.gbg)
+        header.grid(column=0, row=0, padx=14, pady=(12, 4), sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            header,
+            text=f"{star['name']} - {star['designation']}",
+            bg=self.gbg,
+            fg=self.fg,
+            font=Font(family="Segoe UI", size=14, weight="bold"),
+            anchor="w",
+        ).grid(column=0, row=0, sticky="ew")
+        tk.Label(
+            header,
+            text=self._tr(
+                "double.orbit.elements",
+                period=orbit["period_years"],
+                semimajor=orbit["semimajor_arcsec"],
+                eccentricity=orbit["eccentricity"],
+                grade=orbit["grade"],
+                reference=orbit.get("reference", ""),
+            ),
+            bg=self.gbg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=10),
+            anchor="w",
+        ).grid(column=0, row=1, sticky="ew")
+
+        canvas = tk.Canvas(
+            dialog,
+            bg=self.ebg,
+            highlightthickness=1,
+            highlightbackground=self.card_edge,
+            bd=0,
+            width=620,
+            height=560,
+        )
+        canvas.grid(column=0, row=1, padx=14, pady=8, sticky="nsew")
+
+        footer = tk.Frame(dialog, bg=self.gbg)
+        footer.grid(column=0, row=2, padx=14, pady=(0, 12), sticky="ew")
+        footer.grid_columnconfigure(0, weight=1)
+        status_label = tk.Label(
+            footer,
+            text="",
+            bg=self.gbg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=10),
+            anchor="w",
+        )
+        status_label.grid(column=0, row=0, sticky="ew")
+        self._build_button(footer, self._tr("button.close"), dialog.destroy).grid(
+            column=1,
+            row=0,
+            padx=(10, 0),
+        )
+
+        state = {
+            "canvas": canvas,
+            "status_label": status_label,
+            "star": star,
+            "orbit": orbit,
+            "screen_points": [],
+        }
+        canvas.bind("<Configure>", lambda _event: self._draw_double_star_orbit(state))
+        canvas.bind("<Motion>", lambda event: self._on_double_orbit_motion(event, state))
+        canvas.bind("<Leave>", lambda _event: self._clear_double_orbit_hover(state))
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        self._center_dialog_on_root(dialog)
+        self._draw_double_star_orbit(state)
+
+    def _set_wds_note_text(self, text_widget, content):
+        text_widget.config(state=tk.NORMAL)
+        text_widget.delete(1.0, tk.END)
+        text_widget.insert(tk.END, content)
+        text_widget.config(state=tk.DISABLED)
+
+    def _format_wds_note_rows(self, notes):
+        if not notes:
+            return self._tr("double.wds_note.empty")
+
+        groups = []
+        current_designation = None
+        current_lines = []
+        for note in notes:
+            designation = note.get("designation", "")
+            reference = note.get("reference", "")
+            if designation != current_designation:
+                if current_lines:
+                    groups.append((current_designation, current_lines))
+                current_designation = designation
+                current_lines = []
+            text = note.get("text", "")
+            if reference:
+                text = f"[{reference}] {text}"
+            current_lines.append(text)
+        if current_lines:
+            groups.append((current_designation, current_lines))
+
+        blocks = []
+        for designation, lines in groups:
+            content = "\n".join(line for line in lines if line)
+            blocks.append(f"{designation}\n{content}" if designation else content)
+        return "\n\n".join(blocks)
+
+    def _load_wds_note_rows(self, dialog, text_widget, wds):
+        try:
+            notes = fetch_wds_notes(wds, timeout=10)
+            error = None
+        except Exception as exc:
+            notes = []
+            error = str(exc)
+
+        def apply_result():
+            if not dialog.winfo_exists():
+                return
+            if error:
+                self._set_wds_note_text(
+                    text_widget,
+                    self._tr("double.wds_note.error", error=error),
+                )
+                return
+            self.double_wds_note_cache[wds] = notes
+            self._set_wds_note_text(text_widget, self._format_wds_note_rows(notes))
+            if not notes:
+                self._populate_double_star_tree()
+
+        try:
+            self.root.after(0, apply_result)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def open_double_star_wds_note_window(self, star):
+        wds = str(star.get("wds", "")).strip()
+        if not wds:
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(self._tr("double.wds_note.title", name=star["name"]))
+        dialog.configure(bg=self.gbg)
+        dialog.transient(self.root)
+        apply_app_icon(dialog)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+
+        header = tk.Frame(dialog, bg=self.gbg)
+        header.grid(column=0, row=0, padx=14, pady=(14, 8), sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            header,
+            text=f"{star['name']} - {self._format_double_designation(star)}",
+            bg=self.gbg,
+            fg=self.fg,
+            font=Font(family="Segoe UI", size=13, weight="bold"),
+            anchor="w",
+        ).grid(column=0, row=0, sticky="ew")
+        tk.Label(
+            header,
+            text=self._tr("double.wds_note.source", wds=wds),
+            bg=self.gbg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=10),
+            anchor="w",
+        ).grid(column=0, row=1, sticky="ew", pady=(3, 0))
+
+        body = tk.Frame(dialog, bg=self.gbg)
+        body.grid(column=0, row=1, padx=14, pady=8, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+        text_widget = tk.Text(
+            body,
+            bg=self.ebg,
+            fg=self.text,
+            insertbackground=self.fg,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=self.card_edge,
+            highlightcolor=self.accent,
+            wrap=tk.WORD,
+            width=78,
+            height=14,
+            font=Font(family="Segoe UI", size=10),
+        )
+        text_widget.grid(column=0, row=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(
+            body,
+            orient="vertical",
+            command=text_widget.yview,
+            style="Dark.Vertical.TScrollbar",
+        )
+        scrollbar.grid(column=1, row=0, sticky="ns")
+        text_widget.configure(yscrollcommand=scrollbar.set)
+
+        footer = tk.Frame(dialog, bg=self.gbg)
+        footer.grid(column=0, row=2, padx=14, pady=(0, 12), sticky="ew")
+        footer.grid_columnconfigure(0, weight=1)
+        self._build_button(
+            footer,
+            self._tr("double.wds_note.open_url"),
+            lambda: webbrowser.open_new_tab(build_wds_notes_url(wds)),
+        ).grid(column=1, row=0, padx=(0, 8))
+        self._build_button(footer, self._tr("button.close"), dialog.destroy).grid(
+            column=2,
+            row=0,
+        )
+
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        self._center_dialog_on_root(dialog)
+
+        cached_notes = self.double_wds_note_cache.get(wds)
+        if cached_notes is not None:
+            self._set_wds_note_text(text_widget, self._format_wds_note_rows(cached_notes))
+        else:
+            self._set_wds_note_text(text_widget, self._tr("double.wds_note.loading"))
+            threading.Thread(
+                target=self._load_wds_note_rows,
+                args=(dialog, text_widget, wds),
+                daemon=True,
+            ).start()
+
+    def _draw_double_star_orbit(self, state):
+        canvas = state["canvas"]
+        orbit = state["orbit"]
+        status_label = state["status_label"]
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        canvas.delete("all")
+
+        points = sample_orbit_points(orbit, count=720)
+        current_year = self._current_decimal_year()
+        current = orbit_position_at_year(orbit, current_year)
+        max_extent = max(
+            0.001,
+            *(abs(point["east"]) for point in points),
+            *(abs(point["north"]) for point in points),
+            abs(current["east"]),
+            abs(current["north"]),
+        )
+        margin = 58
+        scale = min((width - margin * 2) / (2 * max_extent), (height - margin * 2) / (2 * max_extent))
+        center_x = width / 2
+        center_y = height / 2
+
+        canvas.create_line(
+            center_x,
+            margin / 2,
+            center_x,
+            height - margin / 2,
+            fill=self.card_edge,
+            dash=(4, 4),
+        )
+        canvas.create_line(
+            margin / 2,
+            center_y,
+            width - margin / 2,
+            center_y,
+            fill=self.card_edge,
+            dash=(4, 4),
+        )
+        canvas.create_text(
+            center_x,
+            height - 18,
+            text=self._tr("direction.north_short"),
+            fill=self.muted,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+        )
+        canvas.create_text(
+            width - 20,
+            center_y,
+            text=self._tr("direction.east_short"),
+            fill=self.muted,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+        )
+
+        coordinates = []
+        screen_points = []
+        for point in points:
+            x_position, y_position = self._orbit_plot_position(point, center_x, center_y, scale)
+            coordinates.extend((x_position, y_position))
+            screen_points.append((x_position, y_position, point))
+        if len(coordinates) >= 4:
+            canvas.create_line(
+                *coordinates,
+                fill=self.accent,
+                width=2,
+                smooth=True,
+            )
+
+        canvas.create_oval(
+            center_x - 4,
+            center_y - 4,
+            center_x + 4,
+            center_y + 4,
+            fill=self.text,
+            outline=self.ebg,
+        )
+
+        marker_count = 8 if orbit["period_years"] > 5 else 10
+        start_year = points[0]["year"]
+        for index in range(marker_count):
+            marker_year = start_year + orbit["period_years"] * index / marker_count
+            marker = orbit_position_at_year(orbit, marker_year)
+            marker_x, marker_y = self._orbit_plot_position(marker, center_x, center_y, scale)
+            canvas.create_oval(
+                marker_x - 3,
+                marker_y - 3,
+                marker_x + 3,
+                marker_y + 3,
+                fill=self.fg,
+                outline=self.ebg,
+            )
+            canvas.create_text(
+                marker_x + 6,
+                marker_y - 6,
+                text=self._format_orbit_epoch_label(orbit, marker_year),
+                fill=self.text,
+                font=Font(family="Segoe UI", size=8),
+                anchor="sw",
+            )
+
+        current_x, current_y = self._orbit_plot_position(current, center_x, center_y, scale)
+        canvas.create_oval(
+            current_x - 6,
+            current_y - 6,
+            current_x + 6,
+            current_y + 6,
+            fill=self.fg,
+            outline=self.text,
+            width=2,
+        )
+        canvas.create_text(
+            current_x + 8,
+            current_y + 8,
+            text=self._tr("double.orbit.now"),
+            fill=self.fg,
+            font=Font(family="Segoe UI", size=9, weight="bold"),
+            anchor="nw",
+        )
+        status_label.config(
+            text=self._tr(
+                "double.orbit.status",
+                date=self._format_orbit_hover_date(current_year),
+                rho=current["rho"],
+                theta=current["theta"],
+            )
+        )
+        state["screen_points"] = screen_points
+
+    def _on_double_orbit_motion(self, event, state):
+        canvas = state["canvas"]
+        points = state.get("screen_points", [])
+        if not points:
+            return
+        nearest = min(
+            points,
+            key=lambda item: (item[0] - event.x) ** 2 + (item[1] - event.y) ** 2,
+        )
+        distance_squared = (nearest[0] - event.x) ** 2 + (nearest[1] - event.y) ** 2
+        if distance_squared > 16 ** 2:
+            self._clear_double_orbit_hover(state)
+            return
+
+        x_position, y_position, point = nearest
+        text = self._tr(
+            "double.orbit.hover",
+            date=self._format_orbit_hover_date(point["year"]),
+            rho=point["rho"],
+            theta=point["theta"],
+        )
+        canvas.delete("orbit_hover")
+        canvas.create_oval(
+            x_position - 5,
+            y_position - 5,
+            x_position + 5,
+            y_position + 5,
+            fill=self.success,
+            outline=self.text,
+            tags=("orbit_hover",),
+        )
+        padding = 8
+        text_x = x_position + 12
+        text_y = y_position - 28
+        text_item = canvas.create_text(
+            text_x,
+            text_y,
+            text=text,
+            anchor="nw",
+            fill=self.ebg,
+            font=Font(family="Segoe UI", size=9, weight="bold"),
+            tags=("orbit_hover",),
+        )
+        bbox = canvas.bbox(text_item)
+        if bbox is not None:
+            rect_padding_x = 5
+            rect_padding_y = 3
+            canvas_width = canvas.winfo_width()
+            canvas_height = canvas.winfo_height()
+            dx = 0
+            dy = 0
+            if bbox[2] + rect_padding_x > canvas_width - padding:
+                dx = canvas_width - padding - rect_padding_x - bbox[2]
+            if bbox[0] - rect_padding_x + dx < padding:
+                dx += padding - (bbox[0] - rect_padding_x + dx)
+            if bbox[3] + rect_padding_y > canvas_height - padding:
+                dy = canvas_height - padding - rect_padding_y - bbox[3]
+            if bbox[1] - rect_padding_y + dy < padding:
+                dy += padding - (bbox[1] - rect_padding_y + dy)
+            if dx or dy:
+                canvas.move(text_item, dx, dy)
+                bbox = canvas.bbox(text_item)
+            if bbox is None:
+                state["status_label"].config(text=text)
+                return
+            rect = canvas.create_rectangle(
+                bbox[0] - rect_padding_x,
+                bbox[1] - rect_padding_y,
+                bbox[2] + rect_padding_x,
+                bbox[3] + rect_padding_y,
+                fill=self.accent,
+                outline=self.accent,
+                tags=("orbit_hover",),
+            )
+            canvas.tag_lower(rect, text_item)
+        state["status_label"].config(text=text)
+
+    def _clear_double_orbit_hover(self, state):
+        state["canvas"].delete("orbit_hover")
 
     def _coordinate_result_message(self, result):
         if result.get("source") == "imcce":
@@ -4456,15 +5707,13 @@ def _create_loading_window():
     root.withdraw()
     apply_app_icon(root, default=True)
     window = tk.Toplevel(root)
+    window.withdraw()
     window.title("AstroClocks")
     apply_app_icon(window)
     window.configure(bg="#101419")
     window.resizable(False, False)
     width = 440
     height = 170
-    x = max(0, (window.winfo_screenwidth() - width) // 2)
-    y = max(0, (window.winfo_screenheight() - height) // 2)
-    window.geometry(f"{width}x{height}+{x}+{y}")
     tk.Label(
         window,
         text=f"AstroClocks v{APP_VERSION}",
@@ -4487,6 +5736,15 @@ def _create_loading_window():
         fg="#93a6b7",
         font=Font(family="Segoe UI", size=9),
     ).pack()
+    startup_monitor_geometry = center_window_on_pointer_monitor(
+        window,
+        width,
+        height,
+        use_work_area=True,
+    )
+    root._astroclocks_startup_monitor_geometry = startup_monitor_geometry
+    window.deiconify()
+    window.lift()
     window.update()
     return root, window, status_var
 
