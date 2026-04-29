@@ -241,8 +241,9 @@ TRANSLATIONS = {
             "grade {grade} | {reference}"
         ),
         "double.orbit.now": "Now",
-        "double.orbit.status": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
-        "double.orbit.hover": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
+        "double.orbit.status": "Today: {date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
+        "double.orbit.hover": "Cursor: {date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
+        "double.orbit.cursor_empty": "Cursor: -",
         "result.target_coordinates": (
             "{label}\nRA ICRS/J2000: {ra}\nDec ICRS/J2000: {dec}\n"
             "RA JNow: {jnow_ra}\nDec JNow: {jnow_dec}"
@@ -516,8 +517,9 @@ TRANSLATIONS = {
             "grade {grade} | {reference}"
         ),
         "double.orbit.now": "Maintenant",
-        "double.orbit.status": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
-        "double.orbit.hover": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
+        "double.orbit.status": "Aujourd'hui : {date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
+        "double.orbit.hover": "Curseur : {date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
+        "double.orbit.cursor_empty": "Curseur : -",
         "result.target_coordinates": (
             "{label}\nRA ICRS/J2000 : {ra}\nDéc ICRS/J2000 : {dec}\n"
             "RA JNow : {jnow_ra}\nDéc JNow : {jnow_dec}"

@@ -18,7 +18,7 @@ ORB6_ORBIT_URLS = (
 )
 ORB6_CACHE_FILENAME = "ORB6_ephemerides_cache.json"
 ORB6_ORBIT_CACHE_FILENAME = "ORB6_orbits_cache.json"
-ORB6_CACHE_VERSION = 3
+ORB6_CACHE_VERSION = 4
 
 _YEAR_PATTERN = re.compile(r"\b\d{4}\.\d\b")
 _DESIGNATION_CLEANUP_PATTERN = re.compile(r"[^A-Z0-9]")
@@ -244,7 +244,7 @@ def _parse_orbit_line(line):
     if not wds or not designation or grade is None or grade not in {1, 2, 3, 4, 5}:
         return None
 
-    period_value = _parse_float(_field(line, 82, 92))
+    period_value = _parse_float(_field(line, 81, 92))
     period_unit = _field(line, 93, 93).strip() or "y"
     semimajor_value = _parse_float(_field(line, 106, 114))
     semimajor_unit = _field(line, 115, 115).strip() or "a"
@@ -535,7 +535,19 @@ def _find_orb6_entry(star, orb6_index):
     return None
 
 
-def _interpolate_entry(entry, when=None):
+def _scaled_rho_precision(precision, separation_scale):
+    if separation_scale == 60.0:
+        return max(0, precision - 1)
+    return precision
+
+
+def _ephemeris_separation_scale(orbit_entry):
+    if orbit_entry is not None and orbit_entry.get("semimajor_unit") == "M":
+        return 60.0
+    return 1.0
+
+
+def _interpolate_entry(entry, when=None, separation_scale=1.0):
     predictions = sorted(entry["predictions"], key=lambda item: item["year"])
     if not predictions:
         return None
@@ -556,23 +568,61 @@ def _interpolate_entry(entry, when=None):
 
     if left["year"] == right["year"]:
         theta = left["theta"]
-        rho = left["rho"]
+        rho = left["rho"] * separation_scale
         precision = left["rho_precision"]
     else:
         fraction = (target_year - left["year"]) / (right["year"] - left["year"])
         theta = _interpolate_angle_degrees(left["theta"], right["theta"], fraction)
-        rho = left["rho"] + (right["rho"] - left["rho"]) * fraction
+        rho = (
+            left["rho"] + (right["rho"] - left["rho"]) * fraction
+        ) * separation_scale
         precision = max(left["rho_precision"], right["rho_precision"])
 
     return {
         "orb6_current_pa": theta,
         "orb6_current_separation": rho,
-        "orb6_separation_precision": precision,
+        "orb6_separation_precision": _scaled_rho_precision(
+            precision,
+            separation_scale,
+        ),
         "orb6_epoch": target_year,
         "orb6_reference": entry["reference"],
         "orb6_grade": entry["grade"],
         "orb6_note": entry["notes"],
     }
+
+
+def _solve_eccentric_anomaly(mean_anomaly, eccentricity):
+    import math
+
+    two_pi = 2.0 * math.pi
+    mean_anomaly = mean_anomaly % two_pi
+    eccentric_anomaly = mean_anomaly if eccentricity < 0.8 else math.pi
+    for _iteration in range(60):
+        denominator = 1.0 - eccentricity * math.cos(eccentric_anomaly)
+        if abs(denominator) < 1e-14:
+            break
+        delta = (
+            eccentric_anomaly
+            - eccentricity * math.sin(eccentric_anomaly)
+            - mean_anomaly
+        ) / denominator
+        eccentric_anomaly -= delta
+        if abs(delta) < 1e-12:
+            return eccentric_anomaly % two_pi
+        if not math.isfinite(eccentric_anomaly):
+            break
+
+    low = 0.0
+    high = two_pi
+    for _iteration in range(80):
+        midpoint = (low + high) / 2.0
+        value = midpoint - eccentricity * math.sin(midpoint) - mean_anomaly
+        if value < 0:
+            low = midpoint
+        else:
+            high = midpoint
+    return ((low + high) / 2.0) % two_pi
 
 
 def orbit_position_at_year(orbit, year):
@@ -584,19 +634,7 @@ def orbit_position_at_year(orbit, year):
     mean_anomaly = (2.0 * math.pi * ((year - orbit["periastron_year"]) / period)) % (
         2.0 * math.pi
     )
-    eccentric_anomaly = mean_anomaly
-    for _iteration in range(60):
-        denominator = 1.0 - eccentricity * math.cos(eccentric_anomaly)
-        if abs(denominator) < 1e-12:
-            break
-        delta = (
-            eccentric_anomaly
-            - eccentricity * math.sin(eccentric_anomaly)
-            - mean_anomaly
-        ) / denominator
-        eccentric_anomaly -= delta
-        if abs(delta) < 1e-12:
-            break
+    eccentric_anomaly = _solve_eccentric_anomaly(mean_anomaly, eccentricity)
 
     semimajor = orbit["semimajor_arcsec"]
     x_orbit = semimajor * (math.cos(eccentric_anomaly) - eccentricity)
@@ -657,11 +695,16 @@ def enrich_double_stars_with_orb6(stars, orb6_index, when=None, orbit_index=None
     for star in stars:
         enriched_star = dict(star)
         entry = _find_orb6_entry(enriched_star, orb6_index)
-        ephemeris = _interpolate_entry(entry, when) if entry is not None else None
+        orbit_entry = _find_orb6_entry(enriched_star, orbit_index)
+        separation_scale = _ephemeris_separation_scale(orbit_entry)
+        ephemeris = (
+            _interpolate_entry(entry, when, separation_scale)
+            if entry is not None
+            else None
+        )
         if ephemeris is not None:
             enriched_star.update(ephemeris)
             matched += 1
-        orbit_entry = _find_orb6_entry(enriched_star, orbit_index)
         if orbit_entry is not None:
             enriched_star["orb6_orbit"] = orbit_entry
             enriched_star["orb6_has_orbit"] = True

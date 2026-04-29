@@ -6203,24 +6203,35 @@ class AstroClocksApp:
         footer = tk.Frame(dialog, bg=self.gbg)
         footer.grid(column=0, row=2, padx=14, pady=(0, 12), sticky="ew")
         footer.grid_columnconfigure(0, weight=1)
-        status_label = tk.Label(
+        today_label = tk.Label(
             footer,
             text="",
+            bg=self.gbg,
+            fg=self.fg,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+            anchor="w",
+        )
+        today_label.grid(column=0, row=0, sticky="ew")
+        hover_label = tk.Label(
+            footer,
+            text=self._tr("double.orbit.cursor_empty"),
             bg=self.gbg,
             fg=self.muted,
             font=Font(family="Segoe UI", size=10),
             anchor="w",
         )
-        status_label.grid(column=0, row=0, sticky="ew")
+        hover_label.grid(column=0, row=1, sticky="ew", pady=(2, 0))
         self._build_button(footer, self._tr("button.close"), dialog.destroy).grid(
             column=1,
             row=0,
+            rowspan=2,
             padx=(10, 0),
         )
 
         state = {
             "canvas": canvas,
-            "status_label": status_label,
+            "today_label": today_label,
+            "hover_label": hover_label,
             "star": star,
             "orbit": orbit,
             "screen_points": [],
@@ -6384,7 +6395,7 @@ class AstroClocksApp:
     def _draw_double_star_orbit(self, state):
         canvas = state["canvas"]
         orbit = state["orbit"]
-        status_label = state["status_label"]
+        today_label = state["today_label"]
         width = max(1, canvas.winfo_width())
         height = max(1, canvas.winfo_height())
         canvas.delete("all")
@@ -6499,7 +6510,7 @@ class AstroClocksApp:
             font=Font(family="Segoe UI", size=9, weight="bold"),
             anchor="nw",
         )
-        status_label.config(
+        today_label.config(
             text=self._tr(
                 "double.orbit.status",
                 date=self._format_orbit_hover_date(current_year),
@@ -6572,7 +6583,7 @@ class AstroClocksApp:
                 canvas.move(text_item, dx, dy)
                 bbox = canvas.bbox(text_item)
             if bbox is None:
-                state["status_label"].config(text=text)
+                state["hover_label"].config(text=text)
                 return
             rect = canvas.create_rectangle(
                 bbox[0] - rect_padding_x,
@@ -6584,10 +6595,11 @@ class AstroClocksApp:
                 tags=("orbit_hover",),
             )
             canvas.tag_lower(rect, text_item)
-        state["status_label"].config(text=text)
+        state["hover_label"].config(text=text)
 
     def _clear_double_orbit_hover(self, state):
         state["canvas"].delete("orbit_hover")
+        state["hover_label"].config(text=self._tr("double.orbit.cursor_empty"))
 
     def _coordinate_result_message(self, result):
         if result.get("source") == "imcce":
