@@ -1,5 +1,6 @@
 import datetime
 import json
+import unicodedata
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -112,6 +113,30 @@ def convert_star_catalog_j2000_to_jnow(stars):
     ]
 
 
+def j2000_to_jnow_coordinates(ra_hours, dec_degrees, now_utc=None):
+    """Convert FK5 J2000/ICRS-like coordinates to the current FK5 equinox."""
+    current_equinox = Time(_coerce_utc_datetime(now_utc), scale="utc")
+    j2000 = SkyCoord(
+        ra=float(ra_hours) * u.hourangle,
+        dec=float(dec_degrees) * u.deg,
+        frame=FK5(equinox=Time("J2000")),
+    )
+    jnow = j2000.transform_to(FK5(equinox=current_equinox))
+    return jnow.ra.hour, jnow.dec.deg
+
+
+def jnow_to_j2000_coordinates(ra_hours, dec_degrees, now_utc=None):
+    """Convert current FK5 equinox coordinates to FK5 J2000 input coordinates."""
+    current_equinox = Time(_coerce_utc_datetime(now_utc), scale="utc")
+    jnow = SkyCoord(
+        ra=float(ra_hours) * u.hourangle,
+        dec=float(dec_degrees) * u.deg,
+        frame=FK5(equinox=current_equinox),
+    )
+    j2000 = jnow.transform_to(FK5(equinox=Time("J2000")))
+    return j2000.ra.hour, j2000.dec.deg
+
+
 def get_planet_coord(object_type, planet_name):
     """Retrieve apparent coordinates of date from IMCCE Miriade."""
     wsdl_url = "https://ssp.imcce.fr/webservices/miriade/miriade.php?wsdl"
@@ -146,6 +171,39 @@ def get_planet_coord(object_type, planet_name):
     return ra, dec
 
 
+def normalize_miriade_object_name(object_name):
+    """Normalize common French/English Solar System names for IMCCE Miriade."""
+    normalized = unicodedata.normalize("NFKD", str(object_name).strip())
+    ascii_name = "".join(char for char in normalized if not unicodedata.combining(char))
+    compact = ascii_name.casefold()
+    aliases = {
+        "soleil": "Sun",
+        "sun": "Sun",
+        "mercure": "Mercury",
+        "mercury": "Mercury",
+        "venus": "Venus",
+        "terre": "Earth",
+        "earth": "Earth",
+        "lune": "Moon",
+        "moon": "Moon",
+        "mars": "Mars",
+        "jupiter": "Jupiter",
+        "saturne": "Saturn",
+        "saturn": "Saturn",
+        "uranus": "Uranus",
+        "neptune": "Neptune",
+        "pluton": "Pluto",
+        "pluto": "Pluto",
+    }
+    return aliases.get(compact, str(object_name).strip())
+
+
+def normalize_sesame_object_name(object_name):
+    """Normalize object names before asking CDS Sesame."""
+    normalized = unicodedata.normalize("NFKD", str(object_name).strip())
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
 def resolve_solar_system_coordinates(selected_type, object_name):
     prefix_mapping = {
         "Asteroid": "a",
@@ -155,9 +213,21 @@ def resolve_solar_system_coordinates(selected_type, object_name):
         "Natural Satellite": "s",
     }
 
+    object_name = normalize_miriade_object_name(object_name)
     coordinates = get_planet_coord(prefix_mapping[selected_type], object_name)
     alpha_hh, alpha_mm, alpha_ss = coordinates[0][1:].split(":")
     delta_dd, delta_mm, delta_ss = coordinates[1].split(":")
+    local_solar_names = {
+        "Sun",
+        "Moon",
+        "Mercury",
+        "Venus",
+        "Mars",
+        "Jupiter",
+        "Saturn",
+        "Uranus",
+        "Neptune",
+    }
 
     return {
         "message": (
@@ -166,6 +236,8 @@ def resolve_solar_system_coordinates(selected_type, object_name):
             f"Delta JNow : {coordinates[1]}"
         ),
         "source": "imcce",
+        "display_name": object_name,
+        "solar_system_name": object_name if object_name in local_solar_names else None,
         "source_ra": coordinates[0],
         "source_dec": coordinates[1],
         "alpha_hh": int(alpha_hh),
@@ -177,15 +249,80 @@ def resolve_solar_system_coordinates(selected_type, object_name):
     }
 
 
-def resolve_deep_sky_coordinates(object_name):
-    coordinates = SkyCoord.from_name(object_name)
-    j2000 = coordinates.to_string("hmsdms")
-    coord = convert_j2000_to_now(j2000)
-    alpha2000, delta2000 = j2000.split(" ")
-    alpha, delta = coord.split(" ")
+def resolve_local_solar_system_coordinates(object_name, now_utc=None, latitude=None, longitude=None):
+    """Resolve major Solar System objects with Astropy's built-in ephemerides."""
+    label = normalize_miriade_object_name(object_name)
+    body_names = {
+        "Sun": "sun",
+        "Moon": "moon",
+        "Mercury": "mercury",
+        "Venus": "venus",
+        "Mars": "mars",
+        "Jupiter": "jupiter",
+        "Saturn": "saturn",
+        "Uranus": "uranus",
+        "Neptune": "neptune",
+    }
+    body_name = body_names.get(label)
+    if body_name is None:
+        return None
 
-    alpha_digits = "".join(char for char in alpha if char == "." or char.isdigit())
-    delta_dd, delta_mm, delta_ss = separate_dms_coordinates(delta)
+    observation_time = Time(_coerce_utc_datetime(now_utc), scale="utc")
+    location = None
+    if latitude is not None and longitude is not None:
+        location = EarthLocation.from_geodetic(
+            lon=float(longitude) * u.deg,
+            lat=float(latitude) * u.deg,
+        )
+    apparent_frame = TETE(obstime=observation_time, location=location)
+    with solar_system_ephemeris.set("builtin"):
+        coordinates = get_sun(observation_time) if body_name == "sun" else get_body(
+            body_name,
+            observation_time,
+            location,
+        )
+        apparent = coordinates.transform_to(apparent_frame)
+
+    ra_text = str(apparent.ra.to_string(unit=u.hour, sep=":", precision=2, pad=True))
+    dec_text = str(apparent.dec.to_string(unit=u.deg, sep=":", precision=1, alwayssign=True, pad=True))
+    total_ra_seconds = int(round(apparent.ra.hour * 3600)) % (24 * 3600)
+    alpha_hh = total_ra_seconds // 3600
+    alpha_mm = (total_ra_seconds % 3600) // 60
+    alpha_ss = total_ra_seconds % 60
+    total_dec_seconds = int(round(abs(apparent.dec.deg) * 3600))
+    delta_dd = total_dec_seconds // 3600
+    delta_mm = (total_dec_seconds % 3600) // 60
+    delta_ss = total_dec_seconds % 60
+    if apparent.dec.deg < 0:
+        delta_dd = "-0" if delta_dd == 0 else -delta_dd
+
+    return {
+        "message": (
+            "Apparent JNow coordinates from local ephemerides:\n"
+            f"Alpha JNow : {ra_text}\n"
+            f"Delta JNow : {dec_text}"
+        ),
+        "source": "local_solar",
+        "display_name": label,
+        "solar_system_name": label,
+        "source_ra": ra_text,
+        "source_dec": dec_text,
+        "alpha_hh": alpha_hh,
+        "alpha_mm": alpha_mm,
+        "alpha_ss": f"{alpha_ss:02d}",
+        "delta_dd": delta_dd,
+        "delta_mm": delta_mm,
+        "delta_ss": f"{delta_ss:02d}",
+    }
+
+
+def resolve_deep_sky_coordinates(object_name):
+    coordinates = SkyCoord.from_name(normalize_sesame_object_name(object_name))
+    j2000 = coordinates.to_string("hmsdms")
+    alpha2000, delta2000 = j2000.split(" ")
+
+    alpha_digits = "".join(char for char in alpha2000 if char == "." or char.isdigit())
+    delta_dd, delta_mm, delta_ss = separate_dms_coordinates(delta2000)
     alpha_value = alpha_digits[0:9]
 
     return {

@@ -1,5 +1,7 @@
+import calendar
 import datetime
 import math
+import os
 import socket
 import tempfile
 import threading
@@ -14,10 +16,9 @@ from zoneinfo import available_timezones
 from astroplan import download_IERS_A
 from astropy.coordinates import name_resolve
 try:
-    from PIL import Image, ImageDraw, ImageTk
+    from PIL import Image, ImageTk
 except ImportError:
     Image = None
-    ImageDraw = None
     ImageTk = None
 
 from astroclocks.astronomy import (
@@ -28,8 +29,10 @@ from astroclocks.astronomy import (
     compute_solar_system_positions,
     convert_star_catalog_j2000_to_jnow,
     format_timezone_label,
-    jnow_to_icrs_degrees,
+    j2000_to_jnow_coordinates,
+    jnow_to_j2000_coordinates,
     resolve_deep_sky_coordinates,
+    resolve_local_solar_system_coordinates,
     resolve_solar_system_coordinates,
     resolve_timezone,
 )
@@ -42,6 +45,7 @@ from astroclocks.double_star_catalog import (
     merge_cached_wds_double_stars,
 )
 from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS, translate
+from astroclocks.local_object_catalog import resolve_local_object_coordinates
 from astroclocks.orbit_catalog import (
     enrich_double_stars_with_orb6,
     fetch_orb6_ephemerides,
@@ -85,6 +89,7 @@ from astroclocks.settings import (
     save_app_settings,
 )
 from astroclocks.sites import LOCATION_PRESETS, preset_label
+from astroclocks.star_sprites import StarRenderStats, StarSpriteCache
 from astroclocks.star_catalog import SKY_STARS_J2000
 from astroclocks.utils import is_float, resource_path
 from astroclocks.windowing import (
@@ -109,8 +114,8 @@ CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
 SKY_MAP_CANVAS_REFRESH_SECONDS = 8
-SKY_STAR_SUBPIXEL_STEPS = 4
 SKY_STAR_BRIGHTNESS_MULTIPLIER = 1.27
+SKY_RENDER_DEBUG = os.environ.get("ASTROCLOCKS_SKY_RENDER_DEBUG") == "1"
 SOLAR_SYSTEM_CACHE_SECONDS = 10
 DEFAULT_WINDOW_WIDTH = 1440
 DEFAULT_WINDOW_HEIGHT = 900
@@ -206,6 +211,8 @@ OBJECT_TYPE_CODES = (
     "Natural Satellite",
     "Star, Deep Sky Object",
 )
+OFFLINE_OBJECT_TYPE_CODES = ("Star, Deep Sky Object",)
+LOCAL_SOLAR_SYSTEM_OBJECT_TYPE_CODES = ("Planet", "Natural Satellite")
 
 
 def apply_app_icon(window, default=False):
@@ -279,7 +286,12 @@ class AstroClocksApp:
         self.sky_geometry = None
         self.sky_map_cache_key = None
         self.sky_star_image = None
-        self.sky_star_stamp_cache = {}
+        self.sky_sprite_cache = (
+            StarSpriteCache(Image, brightness_multiplier=SKY_STAR_BRIGHTNESS_MULTIPLIER)
+            if Image is not None
+            else None
+        )
+        self.sky_render_stats = StarRenderStats()
         self.sky_star_points = []
         self.sky_solar_system_points = []
         self.sky_hover_position = None
@@ -287,10 +299,13 @@ class AstroClocksApp:
         self.sky_last_status_update_time = 0
         self.sky_base_status = ""
         self.sky_base_status_highlights = ()
+        self.target_jnow_cache_key = None
+        self.target_jnow_cache = None
         self.solar_system_cache_key = None
         self.solar_system_cache = []
         self.target_active = False
         self.target_solar_system_name = None
+        self.target_display_name = ""
         self.is_fullscreen = False
         self.windowed_geometry = None
         self.windowed_state = "normal"
@@ -301,6 +316,10 @@ class AstroClocksApp:
         self.site_info_lines = None
         self.site_info_font = None
         self.site_info_name_font = None
+        self.site_info_resize_job = None
+        self.dynamic_font_update_job = None
+        self.sky_map_resize_job = None
+        self.visibility_chart_resize_job = None
         self.notebook = None
         self.main_tab = None
         self.visibility_tab = None
@@ -311,9 +330,21 @@ class AstroClocksApp:
         self.visibility_curve_points = []
         self.visibility_chart_geometry = None
         self.visibility_hover_position = None
+        self.visibility_start_date = None
+        self.visibility_compute_generation = 0
+        self.visibility_compute_pending = False
+        self.visibility_date_var = None
+        self.visibility_previous_button = None
+        self.visibility_next_button = None
+        self.visibility_calendar_button = None
         self.double_star_results = []
         self.double_star_tree = None
+        self.double_apply_button = None
+        self.double_orbit_recompute_button = None
         self.double_reset_button = None
+        self.double_advanced_button = None
+        self.double_advanced_frame = None
+        self.double_advanced_options_visible = False
         self.double_tree_separators = []
         self.double_sort_column = "name"
         self.double_sort_reverse = False
@@ -352,7 +383,7 @@ class AstroClocksApp:
         self._close_loading_window()
 
         self.root.bind("<Return>", lambda event: self.search_coordinates())
-        self.root.bind("<Configure>", self._update_dynamic_fonts)
+        self.root.bind("<Configure>", self._schedule_dynamic_font_update)
         self._update_dynamic_fonts()
 
     def _tr(self, key, **values):
@@ -983,6 +1014,7 @@ class AstroClocksApp:
             )
 
         self._update_aladin_button_state()
+        self._update_online_controls_state()
         self._schedule_connectivity_check()
 
     def _update_aladin_button_state(self):
@@ -994,6 +1026,18 @@ class AstroClocksApp:
             state=tk.DISABLED if is_offline else tk.NORMAL,
             cursor="arrow" if is_offline else "hand2",
         )
+
+    def _update_online_controls_state(self):
+        is_offline = self.network_online is False
+        if self.combo_box is not None:
+            self._set_object_type_values()
+        for button in (self.double_search_button, self.double_orbit_recompute_button):
+            if button is None:
+                continue
+            button.config(
+                state=tk.DISABLED if is_offline else tk.NORMAL,
+                cursor="arrow" if is_offline else "hand2",
+            )
 
     def _hour_angle_title_kwargs(self):
         suffix = self._tr("frame.hour_angle_offset_suffix") if self.hour_angle_offset_enabled else ""
@@ -1107,28 +1151,90 @@ class AstroClocksApp:
         )
         self.site_info_text.config(state=tk.DISABLED)
         self.site_info_text.grid(column=0, row=0, columnspan=2, padx=8, pady=(4, 6), sticky="nsew")
-        self.site_info_text.bind("<Configure>", self._resize_site_info_text)
+        self.site_info_text.bind("<Configure>", self._schedule_site_info_resize)
         self.lf_long.grid_columnconfigure(0, weight=1)
         self.lf_long.grid_columnconfigure(1, weight=1)
         self.lf_long.grid_rowconfigure(0, weight=1)
 
-    def _resize_site_info_text(self, _event=None):
+    def _schedule_site_info_resize(self, _event=None, delay=90):
+        if self.site_info_text is None:
+            return
+        if self.site_info_resize_job is not None:
+            try:
+                self.root.after_cancel(self.site_info_resize_job)
+            except (tk.TclError, RuntimeError):
+                pass
+        try:
+            self.site_info_resize_job = self.root.after(delay, self._resize_site_info_text)
+        except (tk.TclError, RuntimeError):
+            self.site_info_resize_job = None
+
+    def _site_info_required_visual_lines(self, lines, font, bold_font, available_width):
+        visual_lines = 0
+        for index, line in enumerate(lines):
+            line_font = bold_font if index == 0 else font
+            words = str(line).split(" ")
+            if not words:
+                visual_lines += 1
+                continue
+
+            current_width = 0
+            wrapped_lines = 1
+            space_width = line_font.measure(" ")
+            for word in words:
+                word_width = line_font.measure(word)
+                if current_width and current_width + space_width + word_width > available_width:
+                    wrapped_lines += 1
+                    current_width = word_width
+                else:
+                    current_width += word_width if current_width == 0 else space_width + word_width
+            visual_lines += wrapped_lines
+        return visual_lines
+
+    def _resize_site_info_text(self):
+        self.site_info_resize_job = None
         if self.site_info_text is None or self.site_info_font is None:
             return
 
-        lines = self.site_info_lines or ("Observing Site",) * 6
-        max_line_length = max(32, *(len(str(line)) for line in lines))
-        available_width = max(1, self.site_info_text.winfo_width() - 24)
-        available_height = max(1, self.site_info_text.winfo_height() - 14)
-        width_limited_size = available_width / (max_line_length * 0.55)
-        height_limited_size = available_height / (max(1, len(lines)) * 1.55)
-        target_size = int(max(9, min(17, width_limited_size, height_limited_size)))
+        try:
+            lines = self.site_info_lines or ("Observing Site",) * 6
+            pad_x = int(self.site_info_text.cget("padx"))
+            pad_y = int(self.site_info_text.cget("pady"))
+            available_width = self.site_info_text.winfo_width() - (pad_x * 2) - 8
+            available_height = self.site_info_text.winfo_height() - (pad_y * 2) - 8
+        except (tk.TclError, RuntimeError, ValueError):
+            return
+
+        if available_width < 40 or available_height < 30:
+            return
+
+        target_size = 5
+        for candidate_size in range(19, 4, -1):
+            candidate_font = Font(family="Segoe UI", size=candidate_size)
+            candidate_name_font = Font(family="Segoe UI", size=candidate_size, weight="bold")
+            visual_line_count = self._site_info_required_visual_lines(
+                lines,
+                candidate_font,
+                candidate_name_font,
+                available_width,
+            )
+            line_height = max(
+                candidate_font.metrics("linespace"),
+                candidate_name_font.metrics("linespace"),
+            )
+            needed_height = visual_line_count * (line_height + 1)
+            if needed_height <= available_height:
+                target_size = candidate_size
+                break
 
         if self.site_info_font.cget("size") == target_size:
             return
-        self.site_info_font.configure(size=target_size)
-        if self.site_info_name_font is not None:
-            self.site_info_name_font.configure(size=target_size)
+        try:
+            self.site_info_font.configure(size=target_size)
+            if self.site_info_name_font is not None:
+                self.site_info_name_font.configure(size=target_size)
+        except (tk.TclError, RuntimeError):
+            return
 
     def _object_type_display(self, object_type_code):
         return self._tr(f"object_type.{object_type_code}")
@@ -1140,11 +1246,16 @@ class AstroClocksApp:
     def _set_object_type_values(self, selected_code=None):
         if selected_code is None and hasattr(self, "combo_box"):
             selected_code = self._selected_object_type_code()
-        if selected_code not in OBJECT_TYPE_CODES:
+        available_codes = (
+            (*LOCAL_SOLAR_SYSTEM_OBJECT_TYPE_CODES, *OFFLINE_OBJECT_TYPE_CODES)
+            if self.network_online is False
+            else OBJECT_TYPE_CODES
+        )
+        if selected_code not in available_codes:
             selected_code = "Star, Deep Sky Object"
 
-        values = [self._object_type_display(code) for code in OBJECT_TYPE_CODES]
-        self.object_type_label_to_code = dict(zip(values, OBJECT_TYPE_CODES))
+        values = [self._object_type_display(code) for code in available_codes]
+        self.object_type_label_to_code = dict(zip(values, available_codes))
         self.combo_box["values"] = values
         self.combo_box.set(self._object_type_display(selected_code))
 
@@ -1250,7 +1361,7 @@ class AstroClocksApp:
         self._build_spinbox(self.lf_alpha, self.alpha_ss, 0, 59, 4)
         self._build_coordinate_unit_label(self.lf_alpha, "s", 5)
 
-        self._build_spinbox(self.lf_delta, self.delta_dd, -90, 90, 0)
+        self._build_spinbox(self.lf_delta, self.delta_dd, -89, 89, 0)
         self._build_coordinate_unit_label(self.lf_delta, "d", 1)
         self._build_spinbox(self.lf_delta, self.delta_mm, 0, 59, 2)
         self._build_coordinate_unit_label(self.lf_delta, "m", 3)
@@ -1319,7 +1430,19 @@ class AstroClocksApp:
         self.coordinate_unit_labels.append(label)
         return label
 
-    def _update_dynamic_fonts(self, _event=None):
+    def _schedule_dynamic_font_update(self, _event=None, delay=90):
+        if self.dynamic_font_update_job is not None:
+            try:
+                self.root.after_cancel(self.dynamic_font_update_job)
+            except (tk.TclError, RuntimeError):
+                pass
+        try:
+            self.dynamic_font_update_job = self.root.after(delay, self._update_dynamic_fonts)
+        except (tk.TclError, RuntimeError):
+            self.dynamic_font_update_job = None
+
+    def _update_dynamic_fonts(self):
+        self.dynamic_font_update_job = None
         try:
             self._update_header_layout()
             self._update_coordinate_font_size()
@@ -1473,7 +1596,7 @@ class AstroClocksApp:
             cursor="crosshair",
         )
         self.sky_canvas.grid(column=0, row=0, padx=8, pady=8, sticky="nsew")
-        self.sky_canvas.bind("<Configure>", lambda _event: self._update_sky_map())
+        self.sky_canvas.bind("<Configure>", self._schedule_sky_map_resize)
         self.sky_canvas.bind("<Motion>", self._on_sky_motion)
         self.sky_canvas.bind("<Leave>", self._on_sky_leave)
         self.sky_canvas.bind("<Button-1>", self._on_sky_click)
@@ -1506,8 +1629,41 @@ class AstroClocksApp:
             pady=12,
         )
         self.lf_visibility.grid_columnconfigure(0, weight=1)
-        self.lf_visibility.grid_rowconfigure(0, weight=1)
-        self.lf_visibility.grid_rowconfigure(1, weight=0)
+        self.lf_visibility.grid_rowconfigure(0, weight=0)
+        self.lf_visibility.grid_rowconfigure(1, weight=1)
+        self.lf_visibility.grid_rowconfigure(2, weight=0)
+
+        visibility_controls = tk.Frame(self.lf_visibility, bg=self.card_bg)
+        visibility_controls.grid(column=0, row=0, padx=8, pady=(6, 0), sticky="ew")
+        visibility_controls.grid_columnconfigure(4, weight=1)
+
+        self.visibility_date_var = tk.StringVar(value="")
+        self.visibility_previous_button = self._build_button(
+            visibility_controls,
+            self._tr("visibility.previous_day"),
+            lambda: self._shift_visibility_window(-1),
+        )
+        self.visibility_previous_button.grid(column=0, row=0, padx=(0, 6), sticky="w")
+        self.visibility_next_button = self._build_button(
+            visibility_controls,
+            self._tr("visibility.next_day"),
+            lambda: self._shift_visibility_window(1),
+        )
+        self.visibility_next_button.grid(column=1, row=0, padx=(0, 12), sticky="w")
+        self.visibility_calendar_button = self._build_button(
+            visibility_controls,
+            self._tr("visibility.pick_date"),
+            self._open_visibility_calendar,
+        )
+        self.visibility_calendar_button.grid(column=2, row=0, padx=(0, 8), sticky="w")
+        tk.Label(
+            visibility_controls,
+            textvariable=self.visibility_date_var,
+            bg=self.card_bg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=10, weight="bold"),
+            anchor="w",
+        ).grid(column=3, row=0, sticky="w")
 
         self.visibility_canvas = tk.Canvas(
             self.lf_visibility,
@@ -1515,8 +1671,8 @@ class AstroClocksApp:
             highlightthickness=0,
             bd=0,
         )
-        self.visibility_canvas.grid(column=0, row=0, padx=8, pady=8, sticky="nsew")
-        self.visibility_canvas.bind("<Configure>", lambda _event: self._update_visibility_chart())
+        self.visibility_canvas.grid(column=0, row=1, padx=8, pady=8, sticky="nsew")
+        self.visibility_canvas.bind("<Configure>", self._schedule_visibility_chart_resize)
         self.visibility_canvas.bind("<Motion>", self._on_visibility_motion)
         self.visibility_canvas.bind("<Leave>", self._clear_visibility_hover)
 
@@ -1535,7 +1691,46 @@ class AstroClocksApp:
             takefocus=0,
         )
         self.visibility_status.config(state=tk.DISABLED)
-        self.visibility_status.grid(column=0, row=1, padx=8, pady=(2, 8), sticky="ew")
+        self.visibility_status.grid(column=0, row=2, padx=8, pady=(2, 8), sticky="ew")
+
+    def _schedule_sky_map_resize(self, _event=None, delay=110):
+        if self.sky_map_resize_job is not None:
+            try:
+                self.root.after_cancel(self.sky_map_resize_job)
+            except (tk.TclError, RuntimeError):
+                pass
+        try:
+            self.sky_map_resize_job = self.root.after(delay, self._update_sky_map_from_resize)
+        except (tk.TclError, RuntimeError):
+            self.sky_map_resize_job = None
+
+    def _update_sky_map_from_resize(self):
+        self.sky_map_resize_job = None
+        try:
+            self._update_sky_map()
+        except (tk.TclError, RuntimeError):
+            return
+
+    def _schedule_visibility_chart_resize(self, _event=None, delay=110):
+        if self.visibility_chart_resize_job is not None:
+            try:
+                self.root.after_cancel(self.visibility_chart_resize_job)
+            except (tk.TclError, RuntimeError):
+                pass
+        try:
+            self.visibility_chart_resize_job = self.root.after(
+                delay,
+                self._update_visibility_chart_from_resize,
+            )
+        except (tk.TclError, RuntimeError):
+            self.visibility_chart_resize_job = None
+
+    def _update_visibility_chart_from_resize(self):
+        self.visibility_chart_resize_job = None
+        try:
+            self._update_visibility_chart()
+        except (tk.TclError, RuntimeError):
+            return
 
     def _create_double_star_widgets(self):
         controls = tk.Frame(self.double_star_tab, bg=self.card_bg)
@@ -1584,18 +1779,18 @@ class AstroClocksApp:
         )
         self.double_online_var = tk.BooleanVar(value=self.settings.double_use_online)
 
-        def add_filter(row, key, variable):
+        def add_filter(parent, row, key, variable, column=0, columnspan=1):
             label = tk.Label(
-                controls,
+                parent,
                 bg=self.card_bg,
                 fg=self.text,
                 font=Font(family="Segoe UI", size=10),
                 anchor="w",
             )
             self._register_translated_widget(label, key)
-            label.grid(column=0, row=row, sticky="ew", pady=(6, 2))
+            label.grid(column=column, row=row, columnspan=columnspan, sticky="ew", pady=(6, 2))
             entry = tk.Entry(
-                controls,
+                parent,
                 textvariable=variable,
                 bg=self.ebg,
                 fg=self.text,
@@ -1607,100 +1802,122 @@ class AstroClocksApp:
                 highlightthickness=1,
                 width=16,
             )
-            entry.grid(column=0, row=row + 1, sticky="ew")
-            entry.bind("<Return>", lambda _event: self.search_double_stars())
+            entry.grid(column=column, row=row + 1, columnspan=columnspan, sticky="ew")
+            entry.bind("<Return>", lambda _event: self.search_double_stars(allow_online=False))
             entry.bind("<FocusOut>", self._save_double_filters_if_valid)
+            return entry
 
-        add_filter(1, "double.max_primary", self.double_mag_primary_var)
-        add_filter(3, "double.max_secondary", self.double_mag_secondary_var)
-        add_filter(5, "double.min_sep", self.double_min_sep_var)
-        add_filter(7, "double.max_sep", self.double_max_sep_var)
-        add_filter(9, "double.min_max_altitude", self.double_min_altitude_var)
+        add_filter(controls, 1, "double.max_primary", self.double_mag_primary_var)
+        add_filter(controls, 3, "double.max_secondary", self.double_mag_secondary_var)
+
+        separation_frame = tk.Frame(controls, bg=self.card_bg)
+        separation_frame.grid(column=0, row=5, sticky="ew")
+        separation_frame.grid_columnconfigure(0, weight=1)
+        separation_frame.grid_columnconfigure(1, weight=1)
+        add_filter(separation_frame, 0, "double.min_sep", self.double_min_sep_var, column=0)
+        add_filter(separation_frame, 0, "double.max_sep", self.double_max_sep_var, column=1)
+
+        add_filter(controls, 6, "double.min_max_altitude", self.double_min_altitude_var)
 
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 controls,
                 self.double_visible_night_var,
                 self._tr("double.visible_night"),
-                self.search_double_stars,
+                self._save_double_filters_if_valid,
             ),
             "double.visible_night",
-        ).grid(column=0, row=11, pady=(12, 0), sticky="ew")
+        ).grid(column=0, row=8, pady=(12, 0), sticky="ew")
+
+        self.double_advanced_button = self._build_button(
+            controls,
+            self._double_advanced_button_text(),
+            self._toggle_double_advanced_options,
+        )
+        self.double_advanced_button.grid(column=0, row=9, pady=(10, 0), sticky="ew")
+
+        self.double_advanced_frame = tk.Frame(controls, bg=self.card_bg)
+        self.double_advanced_frame.grid_columnconfigure(0, weight=1)
         self._register_translated_widget(
             self._build_inline_checkbutton(
-                controls,
+                self.double_advanced_frame,
                 self.double_include_physical_var,
                 self._tr("double.include_physical"),
-                self.search_double_stars,
+                self._save_double_filters_if_valid,
             ),
             "double.include_physical",
-        ).grid(column=0, row=12, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=0, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
-                controls,
+                self.double_advanced_frame,
                 self.double_include_noted_var,
                 self._tr("double.include_noted"),
-                self.search_double_stars,
+                self._save_double_filters_if_valid,
             ),
             "double.include_noted",
-        ).grid(column=0, row=13, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=1, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
-                controls,
+                self.double_advanced_frame,
                 self.double_include_apparent_var,
                 self._tr("double.include_apparent"),
-                self.search_double_stars,
+                self._save_double_filters_if_valid,
             ),
             "double.include_apparent",
-        ).grid(column=0, row=14, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=2, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
-                controls,
+                self.double_advanced_frame,
                 self.double_include_uncertain_var,
                 self._tr("double.include_uncertain"),
-                self.search_double_stars,
+                self._save_double_filters_if_valid,
             ),
             "double.include_uncertain",
-        ).grid(column=0, row=15, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=3, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
-                controls,
+                self.double_advanced_frame,
                 self.double_exclude_polar_circle_var,
                 self._tr("double.exclude_polar_circle"),
-                self.search_double_stars,
+                self._save_double_filters_if_valid,
             ),
             "double.exclude_polar_circle",
-        ).grid(column=0, row=16, pady=(4, 0), sticky="ew")
-        self._register_translated_widget(
-            self._build_inline_checkbutton(
-                controls,
-                self.double_online_var,
-                self._tr("double.use_online"),
-                self.search_double_stars,
-            ),
-            "double.use_online",
-        ).grid(column=0, row=17, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=4, pady=(4, 0), sticky="ew")
+
+        self.double_apply_button = self._build_button(
+            controls,
+            self._tr("double.apply_filters"),
+            lambda: self.search_double_stars(allow_online=False),
+        )
+        self.double_apply_button.grid(column=0, row=11, pady=(14, 6), sticky="ew")
 
         self.double_search_button = self._build_button(
             controls,
-            self._tr("button.search"),
-            self.search_double_stars,
+            self._tr("double.online_search"),
+            lambda: self.search_double_stars(allow_online=True),
         )
-        self.double_search_button.grid(column=0, row=18, pady=(14, 8), sticky="ew")
+        self.double_search_button.grid(column=0, row=12, pady=(0, 6), sticky="ew")
+
+        self.double_orbit_recompute_button = self._build_button(
+            controls,
+            self._tr("double.recalculate_orbits"),
+            lambda: self.search_double_stars(allow_online=False, refresh_orbits=True),
+        )
+        self.double_orbit_recompute_button.grid(column=0, row=13, pady=(0, 8), sticky="ew")
 
         self.double_set_button = self._build_button(
             controls,
             self._tr("double.set_target"),
             self.set_selected_double_star_target,
         )
-        self.double_set_button.grid(column=0, row=19, pady=(0, 12), sticky="ew")
+        self.double_set_button.grid(column=0, row=14, pady=(0, 12), sticky="ew")
 
         self.double_reset_button = self._build_button(
             controls,
             self._tr("double.reset_filters"),
             self.reset_double_star_filters,
         )
-        self.double_reset_button.grid(column=0, row=20, pady=(0, 12), sticky="ew")
+        self.double_reset_button.grid(column=0, row=15, pady=(0, 12), sticky="ew")
 
         self.double_status_label = tk.Label(
             controls,
@@ -1711,7 +1928,7 @@ class AstroClocksApp:
             wraplength=220,
             anchor="nw",
         )
-        self.double_status_label.grid(column=0, row=21, sticky="ew")
+        self.double_status_label.grid(column=0, row=16, sticky="ew")
 
         results_frame = self._build_labelframe(
             "frame.double_stars",
@@ -1820,7 +2037,38 @@ class AstroClocksApp:
 
         self._refresh_double_star_headings()
         self._update_double_tree_separators()
-        self.search_double_stars(allow_online=False)
+        self._restore_double_star_cached_results()
+
+    def _double_advanced_button_text(self):
+        key = (
+            "double.advanced_options_hide"
+            if self.double_advanced_options_visible
+            else "double.advanced_options_show"
+        )
+        return self._tr(key)
+
+    def _toggle_double_advanced_options(self):
+        self.double_advanced_options_visible = not self.double_advanced_options_visible
+        if self.double_advanced_frame is not None:
+            if self.double_advanced_options_visible:
+                self.double_advanced_frame.grid(column=0, row=10, sticky="ew", pady=(4, 0))
+            else:
+                self.double_advanced_frame.grid_remove()
+        if self.double_advanced_button is not None:
+            self.double_advanced_button.config(text=self._double_advanced_button_text())
+
+    def _restore_double_star_cached_results(self):
+        stars = []
+        for star in self._double_local_catalog():
+            cached_star = dict(star)
+            cached_star["coordinate_frame"] = "j2000"
+            stars.append(cached_star)
+        source_key = "double.source.wds" if self.double_wds_cached_stars else "double.source.local"
+        note = self._tr(
+            "double.cache_restored",
+            count=len(self.double_wds_cached_stars),
+        )
+        self._render_double_star_results(stars, len(stars), source_key, note)
 
     def _parse_clock_hours(self, value):
         hours, minutes, seconds = value.split(":")
@@ -1856,25 +2104,210 @@ class AstroClocksApp:
             return utc_time.astimezone()
         return (utc_time + offset).replace(tzinfo=datetime.timezone(offset))
 
-    def _visibility_window_context(self):
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
+    def _format_local_date(self, date_value):
+        return date_value.strftime("%d/%m/%Y" if self.language == "fr" else "%Y-%m-%d")
+
+    def _target_display_label(self):
+        return self.target_display_name or self._tr("sky.target")
+
+    def _default_visibility_start_date(self, now_utc=None):
+        now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
         local_now = self._local_datetime_from_utc(now_utc)
         local_noon = local_now.replace(hour=12, minute=0, second=0, microsecond=0)
         if local_now < local_noon:
             local_noon -= datetime.timedelta(days=1)
-        start_utc = local_noon.astimezone(datetime.timezone.utc)
-        current_offset_hours = (now_utc - start_utc).total_seconds() / 3600
-        return start_utc, max(0, min(24, current_offset_hours)), local_noon.date()
+        return local_noon.date()
+
+    def _visibility_start_utc_for_date(self, start_date):
+        approximate_noon_utc = datetime.datetime.combine(
+            start_date,
+            datetime.time(12, 0),
+            tzinfo=datetime.timezone.utc,
+        )
+        try:
+            offset = self._configured_timezone_offset(approximate_noon_utc)
+        except ValueError:
+            offset = None
+        if offset is None:
+            offset = self._local_datetime_from_utc(approximate_noon_utc).utcoffset()
+        offset = offset or datetime.timedelta()
+        local_noon = datetime.datetime.combine(
+            start_date,
+            datetime.time(12, 0),
+            tzinfo=datetime.timezone(offset),
+        )
+        return local_noon.astimezone(datetime.timezone.utc)
+
+    def _set_visibility_start_date(self, start_date):
+        self.visibility_start_date = start_date
+        self.visibility_cache_key = None
+        self._update_visibility_date_label()
+        self._update_visibility_chart()
+
+    def _shift_visibility_window(self, days):
+        start_date = self.visibility_start_date or self._default_visibility_start_date()
+        self._set_visibility_start_date(start_date + datetime.timedelta(days=days))
+
+    def _update_visibility_date_label(self, start_date=None):
+        if self.visibility_date_var is None:
+            return
+        start_date = start_date or self.visibility_start_date or self._default_visibility_start_date()
+        end_date = start_date + datetime.timedelta(days=1)
+        self.visibility_date_var.set(
+            self._tr(
+                "visibility.date_range",
+                start_date=self._format_local_date(start_date),
+                end_date=self._format_local_date(end_date),
+            )
+        )
+
+    def _open_visibility_calendar(self):
+        selected_date = self.visibility_start_date or self._default_visibility_start_date()
+        dialog = tk.Toplevel(self.root)
+        dialog.title(self._tr("visibility.calendar_title"))
+        apply_app_icon(dialog)
+        dialog.configure(bg=self.gbg)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        state = {"year": selected_date.year, "month": selected_date.month}
+        header_var = tk.StringVar()
+        grid_frame = tk.Frame(dialog, bg=self.gbg)
+
+        def choose(day):
+            self._set_visibility_start_date(datetime.date(state["year"], state["month"], day))
+            dialog.destroy()
+
+        def choose_today():
+            self._set_visibility_start_date(self._default_visibility_start_date())
+            dialog.destroy()
+
+        def render_month():
+            for child in grid_frame.winfo_children():
+                child.destroy()
+            month_name = self._tr(f"about.month.{state['month']}")
+            header_var.set(f"{month_name} {state['year']}")
+            day_names = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"] if self.language == "fr" else [
+                "Mo",
+                "Tu",
+                "We",
+                "Th",
+                "Fr",
+                "Sa",
+                "Su",
+            ]
+            for column, day_name in enumerate(day_names):
+                tk.Label(
+                    grid_frame,
+                    text=day_name,
+                    bg=self.gbg,
+                    fg=self.muted,
+                    font=Font(family="Segoe UI", size=9, weight="bold"),
+                    width=4,
+                ).grid(column=column, row=0, padx=2, pady=(0, 3))
+
+            month_days = calendar.Calendar(firstweekday=0).monthdayscalendar(
+                state["year"],
+                state["month"],
+            )
+            for row, week in enumerate(month_days, start=1):
+                for column, day in enumerate(week):
+                    if day == 0:
+                        tk.Label(grid_frame, text="", bg=self.gbg, width=4).grid(
+                            column=column,
+                            row=row,
+                            padx=2,
+                            pady=2,
+                        )
+                        continue
+                    active = (
+                        state["year"] == selected_date.year
+                        and state["month"] == selected_date.month
+                        and day == selected_date.day
+                    )
+                    tk.Button(
+                        grid_frame,
+                        text=str(day),
+                        bg=self.accent if active else self.button_bg,
+                        fg=self.ebg if active else self.text,
+                        activebackground=self.accent,
+                        activeforeground=self.ebg,
+                        relief="flat",
+                        bd=0,
+                        width=4,
+                        command=lambda selected_day=day: choose(selected_day),
+                    ).grid(column=column, row=row, padx=2, pady=2)
+
+        def shift_month(delta):
+            month_index = state["month"] - 1 + delta
+            state["year"] += month_index // 12
+            state["month"] = (month_index % 12) + 1
+            render_month()
+
+        header = tk.Frame(dialog, bg=self.gbg)
+        header.grid(column=0, row=0, padx=14, pady=(14, 8), sticky="ew")
+        tk.Button(
+            header,
+            text="<",
+            bg=self.button_bg,
+            fg=self.text,
+            activebackground=self.accent,
+            activeforeground=self.ebg,
+            relief="flat",
+            bd=0,
+            width=4,
+            command=lambda: shift_month(-1),
+        ).grid(column=0, row=0)
+        tk.Label(
+            header,
+            textvariable=header_var,
+            bg=self.gbg,
+            fg=self.text,
+            font=Font(family="Segoe UI", size=11, weight="bold"),
+            width=18,
+        ).grid(column=1, row=0, padx=8)
+        tk.Button(
+            header,
+            text=">",
+            bg=self.button_bg,
+            fg=self.text,
+            activebackground=self.accent,
+            activeforeground=self.ebg,
+            relief="flat",
+            bd=0,
+            width=4,
+            command=lambda: shift_month(1),
+        ).grid(column=2, row=0)
+        grid_frame.grid(column=0, row=1, padx=14, pady=(0, 10))
+        footer = tk.Frame(dialog, bg=self.gbg)
+        footer.grid(column=0, row=2, padx=14, pady=(0, 14), sticky="ew")
+        footer.grid_columnconfigure(0, weight=1)
+        footer.grid_columnconfigure(1, weight=1)
+        self._build_button(footer, self._tr("visibility.today"), choose_today).grid(
+            column=0,
+            row=0,
+            padx=(0, 4),
+            sticky="ew",
+        )
+        self._build_button(footer, self._tr("button.cancel"), dialog.destroy).grid(
+            column=1,
+            row=0,
+            padx=(4, 0),
+            sticky="ew",
+        )
+        render_month()
+
+    def _visibility_window_context(self):
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        local_date = self.visibility_start_date or self._default_visibility_start_date(now_utc)
+        start_utc = self._visibility_start_utc_for_date(local_date)
+        raw_offset_hours = (now_utc - start_utc).total_seconds() / 3600
+        self._update_visibility_date_label(local_date)
+        return start_utc, max(0, min(24, raw_offset_hours)), local_date, 0 <= raw_offset_hours <= 24
 
     def _visibility_time_label(self, start_utc, offset_hours):
-        state = compute_clock_state(
-            self.longitude,
-            self.alpha_hh.get(),
-            self.alpha_mm.get(),
-            self.alpha_ss.get(),
-            hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
-            timezone_name=self.timezone_name,
-            daylight_saving_enabled=self.daylight_saving_enabled,
+        state = self._clock_state_at_time(
             now_utc=start_utc + datetime.timedelta(hours=offset_hours),
         )
         return state["local"][:5]
@@ -1889,16 +2322,7 @@ class AstroClocksApp:
         self.visibility_status.config(state=tk.DISABLED)
 
     def _visibility_state_at_time(self, sample_time):
-        state = compute_clock_state(
-            self.longitude,
-            self.alpha_hh.get(),
-            self.alpha_mm.get(),
-            self.alpha_ss.get(),
-            hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
-            timezone_name=self.timezone_name,
-            daylight_saving_enabled=self.daylight_saving_enabled,
-            now_utc=sample_time,
-        )
+        state = self._clock_state_at_time(now_utc=sample_time)
         return state, self._parse_clock_hours(state["lst"])
 
     def _visibility_sample_from_position(self, position, sample_time, offset_hours):
@@ -1968,6 +2392,109 @@ class AstroClocksApp:
             for offset in offsets
         ]
 
+    def _visibility_samples_for_solar_body(self, body_name, start_utc):
+        offsets = [step / 12 for step in range(289)]
+        utc_datetimes = [
+            start_utc + datetime.timedelta(hours=offset)
+            for offset in offsets
+        ]
+        positions = compute_solar_system_body_positions(
+            body_name,
+            self.latitude,
+            self.longitude,
+            utc_datetimes,
+        )
+        if not positions:
+            return []
+        return [
+            self._visibility_sample_from_position(position, sample_time, offset)
+            for position, sample_time, offset in zip(positions, utc_datetimes, offsets)
+        ]
+
+    def _curve_extreme_sample(self, samples, start_utc, find_max=True):
+        if not samples:
+            return None
+
+        selector = max if find_max else min
+        best_index = selector(
+            range(len(samples)),
+            key=lambda index: samples[index]["altitude"],
+        )
+        if best_index == 0 or best_index == len(samples) - 1:
+            return samples[best_index]
+
+        previous_sample = samples[best_index - 1]
+        best_sample = samples[best_index]
+        next_sample = samples[best_index + 1]
+        y_previous = previous_sample["altitude"]
+        y_best = best_sample["altitude"]
+        y_next = next_sample["altitude"]
+        curvature = y_previous - (2 * y_best) + y_next
+        if abs(curvature) < 1e-9:
+            return best_sample
+        if (find_max and curvature >= 0) or (not find_max and curvature <= 0):
+            return best_sample
+
+        relative_offset = 0.5 * (y_previous - y_next) / curvature
+        if not -1 <= relative_offset <= 1:
+            return best_sample
+
+        step_hours = best_sample["offset_hours"] - previous_sample["offset_hours"]
+        peak_offset = best_sample["offset_hours"] + (relative_offset * step_hours)
+        peak_sample = self._interpolated_visibility_sample(samples, start_utc, peak_offset)
+        if peak_sample is None:
+            return best_sample
+        peak_sample["altitude"] = y_best - (0.25 * (y_previous - y_next) * relative_offset)
+        return peak_sample
+
+    def _interpolated_visibility_sample(self, samples, start_utc, offset_hours):
+        if not samples:
+            return None
+
+        bounded_offset = max(0, min(24, offset_hours))
+        if bounded_offset <= samples[0]["offset_hours"]:
+            base = dict(samples[0])
+            base["offset_hours"] = bounded_offset
+            base["utc"] = start_utc + datetime.timedelta(hours=bounded_offset)
+            return base
+        if bounded_offset >= samples[-1]["offset_hours"]:
+            base = dict(samples[-1])
+            base["offset_hours"] = bounded_offset
+            base["utc"] = start_utc + datetime.timedelta(hours=bounded_offset)
+            return base
+
+        previous_sample = samples[0]
+        next_sample = samples[-1]
+        for first, second in zip(samples, samples[1:]):
+            if first["offset_hours"] <= bounded_offset <= second["offset_hours"]:
+                previous_sample = first
+                next_sample = second
+                break
+
+        span = next_sample["offset_hours"] - previous_sample["offset_hours"]
+        ratio = 0 if span == 0 else (bounded_offset - previous_sample["offset_hours"]) / span
+
+        def interpolate(key):
+            return previous_sample[key] + (next_sample[key] - previous_sample[key]) * ratio
+
+        sample_time = start_utc + datetime.timedelta(hours=bounded_offset)
+        result = {
+            "offset_hours": bounded_offset,
+            "altitude": interpolate("altitude"),
+            "azimuth": interpolate("azimuth"),
+            "utc": sample_time,
+        }
+        if "ra_hours" in previous_sample and "ra_hours" in next_sample:
+            ra_hours = interpolate("ra_hours")
+            declination = interpolate("declination")
+            _state, lst_hours = self._visibility_state_at_time(sample_time)
+            result["ra_hours"] = ra_hours
+            result["declination"] = declination
+            result["hour_angle"] = self._normalize_hour_angle(lst_hours - ra_hours)
+        else:
+            result["hour_angle"] = interpolate("hour_angle")
+        return result
+
     def _refine_visibility_extreme(self, ra_hours, declination, samples, find_max=True):
         if not samples:
             return None
@@ -1977,6 +2504,9 @@ class AstroClocksApp:
             range(len(samples)),
             key=lambda index: samples[index]["altitude"],
         )
+        if self.target_solar_system_name:
+            return samples[best_index]
+
         left_index = max(0, best_index - 1)
         right_index = min(len(samples) - 1, best_index + 1)
         left = samples[left_index]["offset_hours"]
@@ -2366,70 +2896,178 @@ class AstroClocksApp:
             tags="visibility-hover",
         )
 
-    def _update_visibility_chart(self, state=None):
-        if self.visibility_canvas is None or self.visibility_status is None:
-            return
-
-        width = self.visibility_canvas.winfo_width()
-        height = self.visibility_canvas.winfo_height()
-        if width < 120 or height < 120:
-            return
-
-        if not self.target_active:
-            cache_key = ("inactive", width, height, self.language)
-            if cache_key == self.visibility_cache_key:
-                return
-            self.visibility_cache_key = cache_key
+    def _start_visibility_chart_compute(
+        self,
+        cache_key,
+        width,
+        height,
+        ra_hours,
+        declination,
+        start_utc,
+        current_offset_hours,
+        local_date,
+        current_in_window,
+        body_name,
+    ):
+        self.visibility_compute_generation += 1
+        generation = self.visibility_compute_generation
+        self.visibility_compute_pending = True
+        self.visibility_cache_key = ("pending", cache_key)
+        has_previous_chart = bool(self.visibility_curve_points and self.visibility_chart_geometry)
+        if has_previous_chart:
+            self.visibility_canvas.delete("visibility-hover")
+        else:
             self.visibility_curve_points = []
             self.visibility_chart_geometry = None
             self.visibility_canvas.delete("all")
             self.visibility_canvas.create_text(
                 width / 2,
                 height / 2,
-                text=self._tr("visibility.no_target"),
+                text=self._tr("visibility.calculating"),
                 fill=self.muted,
                 font=Font(family="Segoe UI", size=13, weight="bold"),
             )
-            self._set_visibility_status(self._tr("visibility.no_target"))
-            return
+        self._set_visibility_status(self._tr("visibility.calculating"))
+        threading.Thread(
+            target=self._run_visibility_chart_compute,
+            args=(
+                generation,
+                cache_key,
+                width,
+                height,
+                ra_hours,
+                declination,
+                start_utc,
+                current_offset_hours,
+                local_date,
+                current_in_window,
+                body_name,
+            ),
+            daemon=True,
+        ).start()
 
-        self._sanitize_coordinate_values()
-        ra_hours, declination = self._current_target_coordinates()
-        start_utc, current_offset_hours, local_date = self._visibility_window_context()
-        minute_bucket = int(time.time() // 60)
-        cache_key = (
+    def _run_visibility_chart_compute(
+        self,
+        generation,
+        cache_key,
+        width,
+        height,
+        ra_hours,
+        declination,
+        start_utc,
+        current_offset_hours,
+        local_date,
+        current_in_window,
+        body_name,
+    ):
+        try:
+            samples = self._visibility_samples_for_solar_body(body_name, start_utc)
+            max_sample = self._curve_extreme_sample(samples, start_utc, find_max=True)
+            current_sample = self._interpolated_visibility_sample(
+                samples,
+                start_utc,
+                current_offset_hours,
+            )
+            error = None
+        except Exception as exc:
+            samples = []
+            max_sample = None
+            current_sample = None
+            error = str(exc)
+
+        try:
+            self.root.after(
+                0,
+                lambda: self._apply_visibility_chart_compute(
+                    generation,
+                    cache_key,
+                    width,
+                    height,
+                    start_utc,
+                    current_offset_hours,
+                    local_date,
+                    current_in_window,
+                    samples,
+                    max_sample,
+                    current_sample,
+                    error,
+                ),
+            )
+        except (tk.TclError, RuntimeError):
+            self.visibility_compute_pending = False
+
+    def _apply_visibility_chart_compute(
+        self,
+        generation,
+        cache_key,
+        width,
+        height,
+        start_utc,
+        current_offset_hours,
+        local_date,
+        current_in_window,
+        samples,
+        max_sample,
+        current_sample,
+        error,
+    ):
+        if generation != self.visibility_compute_generation:
+            return
+        self.visibility_compute_pending = False
+        if error is not None:
+            self.visibility_cache_key = None
+            self._set_visibility_status(self._tr("sky.unavailable", error=error))
+            return
+        if cache_key[0] != self.visibility_canvas.winfo_width() or cache_key[1] != self.visibility_canvas.winfo_height():
+            self.visibility_cache_key = None
+            self._schedule_visibility_chart_resize(delay=10)
+            return
+        if max_sample is None or current_sample is None:
+            self.visibility_cache_key = None
+            return
+        self.visibility_cache_key = cache_key
+        self._draw_visibility_chart_result(
             width,
             height,
-            minute_bucket,
-            local_date.isoformat(),
-            self.timezone_name,
-            self.daylight_saving_enabled,
-            self.target_solar_system_name,
-            round(ra_hours, 5),
-            round(declination, 5),
-            round(self.latitude, 5),
-            round(self.longitude, 5),
-        )
-        if cache_key == self.visibility_cache_key:
-            return
-
-        self.visibility_cache_key = cache_key
-        samples = self._visibility_samples(ra_hours, declination, start_utc)
-        max_sample = self._refine_visibility_extreme(ra_hours, declination, samples, find_max=True)
-        current_sample = self._visibility_sample_at_offset(
-            ra_hours,
-            declination,
             start_utc,
             current_offset_hours,
+            local_date,
+            current_in_window,
+            samples,
+            max_sample,
+            current_sample,
         )
+
+    def _draw_visibility_chart_result(
+        self,
+        width,
+        height,
+        start_utc,
+        current_offset_hours,
+        local_date,
+        current_in_window,
+        samples,
+        max_sample,
+        current_sample,
+    ):
         curve_samples = self._visibility_samples_with_extrema(samples, max_sample, current_sample)
         maximum_time = self._visibility_time_label(start_utc, max_sample["offset_hours"])
+        target_label = self._target_display_label()
+        end_date = local_date + datetime.timedelta(days=1)
+        start_date_text = self._format_local_date(local_date)
+        end_date_text = self._format_local_date(end_date)
+        title_text = self._tr(
+            "visibility.title_named",
+            target=target_label,
+            start_date=start_date_text,
+            end_date=end_date_text,
+        )
 
         canvas = self.visibility_canvas
         canvas.delete("all")
         margin_left = 58
         margin_right = 24
-        margin_top = 24
+        margin_top = 50
         margin_bottom = 46
         plot_left = margin_left
         plot_right = width - margin_right
@@ -2451,6 +3089,7 @@ class AstroClocksApp:
         self.visibility_chart_geometry = {
             "start_utc": start_utc,
             "current_offset_hours": current_offset_hours,
+            "current_in_window": current_in_window,
             "plot_left": plot_left,
             "plot_right": plot_right,
             "plot_top": plot_top,
@@ -2506,28 +3145,36 @@ class AstroClocksApp:
             curve_samples,
             x_from_offset,
             y_from_altitude,
-            past_until_offset=current_offset_hours,
+            past_until_offset=current_offset_hours if current_in_window else None,
         )
 
         current_altitude = current_sample["altitude"]
-        current_x = x_from_offset(current_offset_hours)
-        current_y = y_from_altitude(current_altitude)
-        canvas.create_line(current_x, plot_top, current_x, plot_bottom, fill=self.accent, dash=(5, 5))
-        if current_altitude >= 0:
-            canvas.create_oval(
-                current_x - 5,
-                current_y - 5,
-                current_x + 5,
-                current_y + 5,
-                fill=self.accent,
-                outline=self.ebg,
-            )
+        if current_in_window:
+            current_x = x_from_offset(current_offset_hours)
+            current_y = y_from_altitude(current_altitude)
+            canvas.create_line(current_x, plot_top, current_x, plot_bottom, fill=self.accent, dash=(5, 5))
+            if current_altitude >= 0:
+                canvas.create_oval(
+                    current_x - 5,
+                    current_y - 5,
+                    current_x + 5,
+                    current_y + 5,
+                    fill=self.accent,
+                    outline=self.ebg,
+                )
 
         max_x = x_from_offset(max_sample["offset_hours"])
         max_y = y_from_altitude(max_sample["altitude"])
         if max_sample["altitude"] >= 0:
             canvas.create_line(max_x, max_y, max_x, plot_bottom, fill=self.fg, dash=(3, 6))
-            canvas.create_oval(max_x - 4, max_y - 4, max_x + 4, max_y + 4, fill=self.fg, outline="")
+            canvas.create_oval(
+                max_x - 4,
+                max_y - 4,
+                max_x + 4,
+                max_y + 4,
+                fill=self.fg,
+                outline="",
+            )
             max_label_anchor = "e" if max_x > plot_right - 100 else "w"
             max_label_x = max_x - 8 if max_label_anchor == "e" else max_x + 8
             max_label_y = max(plot_top + 14, max_y - 14)
@@ -2549,24 +3196,33 @@ class AstroClocksApp:
             )
         canvas.create_text(
             plot_left,
-            plot_top - 6,
-            text=self._tr("visibility.title"),
+            16,
+            text=title_text,
             fill=self.text,
             font=Font(family="Segoe UI", size=11, weight="bold"),
             anchor="w",
+            width=plot_width,
         )
         canvas.create_text(
             plot_right,
-            plot_top - 6,
+            plot_top - 8,
             text=self._tr("visibility.axis"),
             fill=self.muted,
             font=Font(family="Segoe UI", size=9),
             anchor="e",
         )
 
+        status_key = (
+            "visibility.status_named"
+            if current_in_window
+            else "visibility.status_named_window"
+        )
         self._set_visibility_status(
             self._tr(
-                "visibility.status",
+                status_key,
+                target=target_label,
+                start_date=start_date_text,
+                end_date=end_date_text,
                 current=current_altitude,
                 maximum=max_sample["altitude"],
                 maximum_time=maximum_time,
@@ -2574,7 +3230,105 @@ class AstroClocksApp:
         )
         self._update_visibility_hover()
 
-    def _current_target_coordinates(self):
+    def _update_visibility_chart(self, state=None):
+        if self.visibility_canvas is None or self.visibility_status is None:
+            return
+
+        width = self.visibility_canvas.winfo_width()
+        height = self.visibility_canvas.winfo_height()
+        if width < 120 or height < 120:
+            return
+        self._update_visibility_date_label()
+
+        if not self.target_active:
+            cache_key = ("inactive", width, height, self.language)
+            if cache_key == self.visibility_cache_key:
+                return
+            if self.visibility_compute_pending:
+                self.visibility_compute_generation += 1
+                self.visibility_compute_pending = False
+            self.visibility_cache_key = cache_key
+            self.visibility_curve_points = []
+            self.visibility_chart_geometry = None
+            self.visibility_canvas.delete("all")
+            self.visibility_canvas.create_text(
+                width / 2,
+                height / 2,
+                text=self._tr("visibility.no_target"),
+                fill=self.muted,
+                font=Font(family="Segoe UI", size=13, weight="bold"),
+            )
+            self._set_visibility_status(self._tr("visibility.no_target"))
+            return
+
+        self._sanitize_coordinate_values()
+        ra_hours, declination = self._current_target_coordinates()
+        start_utc, current_offset_hours, local_date, current_in_window = (
+            self._visibility_window_context()
+        )
+        minute_bucket = int(time.time() // 60)
+        cache_key = (
+            width,
+            height,
+            minute_bucket,
+            local_date.isoformat(),
+            self.timezone_name,
+            self.daylight_saving_enabled,
+            self.target_solar_system_name,
+            self._target_display_label(),
+            round(ra_hours, 5),
+            round(declination, 5),
+            round(self.latitude, 5),
+            round(self.longitude, 5),
+        )
+        if cache_key == self.visibility_cache_key:
+            return
+
+        if self.target_solar_system_name:
+            pending_key = ("pending", cache_key)
+            if self.visibility_compute_pending and self.visibility_cache_key == pending_key:
+                return
+            self._start_visibility_chart_compute(
+                cache_key,
+                width,
+                height,
+                ra_hours,
+                declination,
+                start_utc,
+                current_offset_hours,
+                local_date,
+                current_in_window,
+                self.target_solar_system_name,
+            )
+            return
+
+        if self.visibility_compute_pending:
+            self.visibility_compute_generation += 1
+            self.visibility_compute_pending = False
+        self.visibility_cache_key = cache_key
+        samples = self._visibility_samples(ra_hours, declination, start_utc)
+        max_sample = self._refine_visibility_extreme(ra_hours, declination, samples, find_max=True)
+        current_sample = self._visibility_sample_at_offset(
+            ra_hours,
+            declination,
+            start_utc,
+            current_offset_hours,
+        )
+        if max_sample is None or current_sample is None:
+            return
+        self._draw_visibility_chart_result(
+            width,
+            height,
+            start_utc,
+            current_offset_hours,
+            local_date,
+            current_in_window,
+            samples,
+            max_sample,
+            current_sample,
+        )
+
+    def _current_input_coordinates(self):
         ra_hours = (
             float(self.alpha_hh.get())
             + (float(self.alpha_mm.get()) / 60)
@@ -2589,8 +3343,62 @@ class AstroClocksApp:
         )
         return ra_hours, dec_degrees
 
+    def _current_target_coordinates(self, now_utc=None):
+        ra_hours, dec_degrees = self._current_input_coordinates()
+        utc_key = None
+        if now_utc is not None:
+            utc_key = now_utc.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H")
+        cache_key = (
+            round(ra_hours, 8),
+            round(dec_degrees, 8),
+            utc_key,
+        )
+        if cache_key != self.target_jnow_cache_key:
+            self.target_jnow_cache_key = cache_key
+            self.target_jnow_cache = j2000_to_jnow_coordinates(
+                ra_hours,
+                dec_degrees,
+                now_utc=now_utc,
+            )
+        return self.target_jnow_cache
+
+    def _current_jnow_coordinate_fields(self, now_utc=None):
+        ra_hours, dec_degrees = self._current_target_coordinates(now_utc=now_utc)
+        return self._coordinates_to_fields(ra_hours, dec_degrees)
+
+    def _clock_state_at_time(self, now_utc=None, alpha_fields=(0, 0, 0)):
+        alpha_hh, alpha_mm, alpha_ss = alpha_fields
+        return compute_clock_state(
+            self.longitude,
+            alpha_hh,
+            alpha_mm,
+            alpha_ss,
+            hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
+            timezone_name=self.timezone_name,
+            daylight_saving_enabled=self.daylight_saving_enabled,
+            now_utc=now_utc,
+        )
+
+    def _compute_target_clock_state(self, now_utc=None):
+        alpha_hh, alpha_mm, alpha_ss, _delta_dd, _delta_mm, _delta_ss = (
+            self._current_jnow_coordinate_fields(now_utc=now_utc)
+        )
+        return self._clock_state_at_time(
+            now_utc=now_utc,
+            alpha_fields=(alpha_hh, alpha_mm, alpha_ss),
+        )
+
     def _normalize_hour_angle(self, hours):
         return ((hours + 12) % 24) - 12
+
+    def _display_hour_angle(self, ra_hours, lst_hours=None):
+        if lst_hours is None and self.sky_geometry is not None:
+            lst_hours = self.sky_geometry.get("lst_hours")
+        if lst_hours is None:
+            _state, lst_hours = self._visibility_state_at_time(
+                datetime.datetime.now(datetime.timezone.utc)
+            )
+        return (lst_hours - ra_hours) % 24
 
     def _equatorial_to_horizontal(self, ra_hours, declination, lst_hours):
         hour_angle = self._normalize_hour_angle(lst_hours - ra_hours)
@@ -2794,7 +3602,7 @@ class AstroClocksApp:
         color = color.lstrip("#")
         return tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
 
-    def _sky_star_style(self, name, magnitude):
+    def _sky_star_color(self, name, magnitude):
         if name in NAMED_STAR_COLORS:
             fill = NAMED_STAR_COLORS[name]
         elif magnitude < 0.5:
@@ -2803,14 +3611,16 @@ class AstroClocksApp:
             fill = "#d7eaff"
         else:
             fill = "#9fb2c3"
+        return fill, self._hex_to_rgb(fill)
 
-        magnitude_span = 7.7
-        normalized = max(0.0, min(1.0, (6.2 - magnitude) / magnitude_span))
-        visual_intensity = normalized**0.48
-        sigma = 0.32 + 1.05 * visual_intensity
-        peak_alpha = min(255, int((56 + 199 * visual_intensity) * SKY_STAR_BRIGHTNESS_MULTIPLIER))
-        canvas_size = max(1.8, sigma * 1.9)
-        return fill, self._hex_to_rgb(fill), sigma, peak_alpha, canvas_size
+    def _sky_star_style(self, name, magnitude):
+        fill, rgb = self._sky_star_color(name, magnitude)
+        if self.sky_sprite_cache is None:
+            return None, fill, rgb, max(1.2, 2.8 - min(2.0, magnitude * 0.25))
+
+        self.sky_sprite_cache.configure(magnitude_limit=self.sky_magnitude_limit)
+        style = self.sky_sprite_cache.style_for(fill, rgb, magnitude)
+        return style, fill, rgb, style.canvas_size
 
     def _draw_star_label(self, canvas, star):
         canvas.create_text(
@@ -2837,41 +3647,40 @@ class AstroClocksApp:
                 outline="",
             )
 
-    def _star_stamp(self, rgb, sigma, peak_alpha, diameter, center_x, center_y):
-        q_sigma = round(sigma * 8) / 8
-        q_alpha = max(0, min(255, int(round(peak_alpha / 8) * 8)))
-        q_center_x = round(center_x * SKY_STAR_SUBPIXEL_STEPS) / SKY_STAR_SUBPIXEL_STEPS
-        q_center_y = round(center_y * SKY_STAR_SUBPIXEL_STEPS) / SKY_STAR_SUBPIXEL_STEPS
-        key = (rgb, q_sigma, q_alpha, diameter, q_center_x, q_center_y)
-        stamp = self.sky_star_stamp_cache.get(key)
-        if stamp is not None:
-            return stamp
+    def _draw_solar_system_canvas(self, canvas, solar_objects):
+        for sky_object in solar_objects:
+            x = sky_object["x"]
+            y = sky_object["y"]
+            size = sky_object["size"]
+            canvas.create_oval(
+                x - size,
+                y - size,
+                x + size,
+                y + size,
+                fill=sky_object["hover_color"],
+                outline=self.ebg,
+                width=1,
+            )
 
-        pixels = bytearray(diameter * diameter * 4)
-        sigma_sq = 2 * q_sigma * q_sigma
-        red, green, blue = rgb
-        offset = 0
-        for y in range(diameter):
-            dy = y + 0.5 - q_center_y
-            for x in range(diameter):
-                dx = x + 0.5 - q_center_x
-                alpha = int(q_alpha * math.exp(-((dx * dx + dy * dy) / sigma_sq)))
-                pixels[offset] = red
-                pixels[offset + 1] = green
-                pixels[offset + 2] = blue
-                pixels[offset + 3] = alpha
-                offset += 4
+    def _draw_solar_system_label(self, canvas, sky_object):
+        canvas.create_text(
+            sky_object["x"] + 7,
+            sky_object["y"] - 7,
+            text=sky_object["label"],
+            fill=sky_object["hover_color"],
+            font=Font(family="Segoe UI", size=8, weight="bold"),
+            anchor="w",
+        )
 
-        stamp = Image.frombytes("RGBA", (diameter, diameter), bytes(pixels))
-        self.sky_star_stamp_cache[key] = stamp
+    def _draw_sky_object_labels(self, canvas, stars, solar_objects):
+        for star in stars:
+            if star["magnitude"] <= SKY_STAR_LABEL_MAX_MAGNITUDE:
+                self._draw_star_label(canvas, star)
+        for sky_object in solar_objects:
+            self._draw_solar_system_label(canvas, sky_object)
 
-        if len(self.sky_star_stamp_cache) > 4096:
-            self.sky_star_stamp_cache.clear()
-
-        return stamp
-
-    def _draw_star_catalog_antialiased(self, canvas, stars):
-        if Image is None or ImageDraw is None or ImageTk is None:
+    def _draw_sky_objects_raster(self, canvas, stars, solar_objects, considered_count):
+        if Image is None or ImageTk is None or self.sky_sprite_cache is None:
             return False
 
         width = int(canvas.winfo_width())
@@ -2879,47 +3688,51 @@ class AstroClocksApp:
         if width <= 0 or height <= 0:
             return False
 
+        started_at = time.perf_counter()
         image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        drawn = 0
         for star in stars:
-            diameter = max(5, int(math.ceil(star["sigma"] * 5.2)))
-            left = int(math.floor(star["x"] - diameter / 2))
-            top = int(math.floor(star["y"] - diameter / 2))
-            stamp = self._star_stamp(
-                star["rgb"],
-                star["sigma"],
-                star["peak_alpha"],
-                diameter,
-                star["x"] - left,
-                star["y"] - top,
-            )
-            paste_x = max(0, left)
-            paste_y = max(0, top)
-            paste_right = min(width, left + diameter)
-            paste_bottom = min(height, top + diameter)
-            if paste_x >= paste_right or paste_y >= paste_bottom:
-                continue
+            sprite = star.get("sprite")
+            if sprite is not None and self.sky_sprite_cache.composite_sprite(image, sprite, star["x"], star["y"]):
+                drawn += 1
 
-            if paste_x != left or paste_y != top or paste_right != left + diameter or paste_bottom != top + diameter:
-                stamp = stamp.crop(
-                    (
-                        paste_x - left,
-                        paste_y - top,
-                        paste_right - left,
-                        paste_bottom - top,
-                    )
-                )
-            image.alpha_composite(stamp, (paste_x, paste_y))
+        outline_rgb = self._hex_to_rgb(self.ebg)
+        for sky_object in solar_objects:
+            size = sky_object["size"]
+            outline = self.sky_sprite_cache.sprite_for(outline_rgb, size + 1, 168)
+            sprite = self.sky_sprite_cache.sprite_for(sky_object["rgb"], size, 255)
+            self.sky_sprite_cache.composite_sprite(image, outline, sky_object["x"], sky_object["y"])
+            if self.sky_sprite_cache.composite_sprite(image, sprite, sky_object["x"], sky_object["y"]):
+                drawn += 1
 
         self.sky_star_image = ImageTk.PhotoImage(image)
         canvas.create_image(0, 0, image=self.sky_star_image, anchor="nw")
+        self.sky_render_stats = StarRenderStats(
+            considered=considered_count,
+            projected=len(stars),
+            drawn=drawn,
+            render_ms=(time.perf_counter() - started_at) * 1000,
+            sprite_cache_size=self.sky_sprite_cache.sprite_count,
+        )
+        if SKY_RENDER_DEBUG:
+            print(
+                "sky-render "
+                f"considered={self.sky_render_stats.considered} "
+                f"projected={self.sky_render_stats.projected} "
+                f"drawn={self.sky_render_stats.drawn} "
+                f"sprites={self.sky_render_stats.sprite_cache_size} "
+                f"ms={self.sky_render_stats.render_ms:.2f}"
+            )
         return True
 
-    def _draw_star_catalog(self, canvas, center_x, center_y, radius, lst_hours):
+    def _collect_star_catalog(self, center_x, center_y, radius, lst_hours):
         self.sky_star_points = []
         stars_to_draw = []
+        considered_count = 0
         for name, ra_hours, declination, magnitude in self.named_stars_jnow:
             if magnitude > self.sky_magnitude_limit:
                 break
+            considered_count += 1
 
             altitude, azimuth, hour_angle = self._equatorial_to_horizontal(
                 ra_hours,
@@ -2931,7 +3744,7 @@ class AstroClocksApp:
                 continue
 
             x, y = point
-            fill, rgb, sigma, peak_alpha, canvas_size = self._sky_star_style(name, magnitude)
+            style, fill, rgb, canvas_size = self._sky_star_style(name, magnitude)
             star = {
                 "name": name,
                 "x": x,
@@ -2945,19 +3758,14 @@ class AstroClocksApp:
                 "size": canvas_size,
                 "fill": fill,
                 "rgb": rgb,
-                "sigma": sigma,
-                "peak_alpha": peak_alpha,
+                "sprite": style.sprite if style is not None else None,
+                "sprite_radius": style.radius_px if style is not None else canvas_size,
+                "sprite_alpha": style.alpha if style is not None else 255,
             }
             self.sky_star_points.append(star)
             stars_to_draw.append(star)
 
-        if not self._draw_star_catalog_antialiased(canvas, stars_to_draw):
-            self._draw_star_catalog_canvas(canvas, stars_to_draw)
-
-        for star in stars_to_draw:
-            magnitude = star["magnitude"]
-            if magnitude <= SKY_STAR_LABEL_MAX_MAGNITUDE:
-                self._draw_star_label(canvas, star)
+        return stars_to_draw, considered_count
 
     def _solar_system_positions(self):
         cache_key = (
@@ -2979,11 +3787,12 @@ class AstroClocksApp:
             self.solar_system_cache_key = cache_key
         return self.solar_system_cache
 
-    def _draw_solar_system_objects(self, canvas, center_x, center_y, radius, lst_hours):
+    def _collect_solar_system_objects(self, center_x, center_y, radius, lst_hours):
         self.sky_solar_system_points = []
         if not self.sky_show_solar_system:
-            return
+            return []
 
+        solar_objects = []
         for body in self._solar_system_positions():
             altitude, azimuth, hour_angle = self._equatorial_to_horizontal(
                 body["ra_hours"],
@@ -2998,42 +3807,28 @@ class AstroClocksApp:
             name = body["name"]
             label = self._tr(f"solar.{name}")
             fill = SOLAR_SYSTEM_BODY_COLORS.get(name, self.accent)
-            size = 6 if name in {"Sun", "Moon"} else 4
-            canvas.create_oval(
-                x - size,
-                y - size,
-                x + size,
-                y + size,
-                fill=fill,
-                outline=self.ebg,
-                width=1,
-            )
-            canvas.create_text(
-                x + size + 5,
-                y,
-                text=label,
-                fill=fill,
-                font=Font(family="Segoe UI", size=8, weight="bold"),
-                anchor="w",
-            )
-            self.sky_solar_system_points.append(
-                {
-                    "name": name,
-                    "label": label,
-                    "kind": "solar",
-                    "hover_color": fill,
-                    "x": x,
-                    "y": y,
-                    "ra_hours": body["ra_hours"],
-                    "declination": body["declination"],
-                    "altitude": altitude,
-                    "azimuth": azimuth,
-                    "hour_angle": hour_angle,
-                    "size": size,
-                }
-            )
+            size = 12 if name in {"Sun", "Moon"} else 5
+            sky_object = {
+                "name": name,
+                "label": label,
+                "kind": "solar",
+                "hover_color": fill,
+                "rgb": self._hex_to_rgb(fill),
+                "x": x,
+                "y": y,
+                "ra_hours": body["ra_hours"],
+                "declination": body["declination"],
+                "altitude": altitude,
+                "azimuth": azimuth,
+                "hour_angle": hour_angle,
+                "size": size,
+            }
+            self.sky_solar_system_points.append(sky_object)
+            solar_objects.append(sky_object)
 
-    def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azimuth):
+        return solar_objects
+
+    def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azimuth, label):
         x, y, visible = self._project_target(center_x, center_y, radius, altitude, azimuth)
         if visible and altitude < 10:
             marker_color = TARGET_LOW_ALTITUDE_COLOR
@@ -3045,7 +3840,7 @@ class AstroClocksApp:
         canvas.create_text(
             x,
             y + 26,
-            text=self._tr("sky.target"),
+            text=label,
             fill=marker_color,
             font=Font(family="Segoe UI", size=9, weight="bold"),
         )
@@ -3095,14 +3890,15 @@ class AstroClocksApp:
         declination,
         altitude,
         azimuth,
-        hour_angle,
+        hour_angle=None,
     ):
         return (
             f"JNow : RA = {self._format_unsigned_hms_compact(ra_hours)} ; "
             f"DEC = {self._format_signed_dms_compact(declination)} | "
             f"Alt = {altitude:+.2f}\N{DEGREE SIGN} ; "
             f"Az = {azimuth:05.1f}\N{DEGREE SIGN} | "
-            f"HA = {self._format_signed_hms_compact(hour_angle)}"
+            f"{self._tr('sky.hour_angle_short')} = "
+            f"{self._format_unsigned_hms_compact(self._display_hour_angle(ra_hours))}"
         )
 
     def _coordinates_to_fields(self, ra_hours, dec_degrees):
@@ -3111,17 +3907,21 @@ class AstroClocksApp:
         alpha_mm = (total_ra_seconds % 3600) // 60
         alpha_ss = total_ra_seconds % 60
 
-        dec_degrees = max(-90, min(90, dec_degrees))
+        max_declination = 89 + (59 / 60) + (59 / 3600)
+        dec_degrees = max(-max_declination, min(max_declination, dec_degrees))
         total_dec_seconds = int(round(abs(dec_degrees) * 3600))
-        delta_dd = min(90, total_dec_seconds // 3600)
-        delta_mm = 0 if delta_dd == 90 else (total_dec_seconds % 3600) // 60
-        delta_ss = 0 if delta_dd == 90 else total_dec_seconds % 60
+        total_dec_seconds = min(total_dec_seconds, (89 * 3600) + (59 * 60) + 59)
+        delta_dd = total_dec_seconds // 3600
+        delta_mm = (total_dec_seconds % 3600) // 60
+        delta_ss = total_dec_seconds % 60
         if dec_degrees < 0:
             delta_dd = "-0" if delta_dd == 0 else -delta_dd
 
         return alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta_ss
 
-    def _set_coordinate_fields(self, ra_hours, dec_degrees):
+    def _set_coordinate_fields(self, ra_hours, dec_degrees, frame="jnow"):
+        if frame == "jnow":
+            ra_hours, dec_degrees = jnow_to_j2000_coordinates(ra_hours, dec_degrees)
         alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta_ss = self._coordinates_to_fields(
             ra_hours,
             dec_degrees,
@@ -3332,17 +4132,30 @@ class AstroClocksApp:
         self.sky_hover_update_pending = False
         self._update_sky_hover()
 
-    def _set_target_from_coordinates(self, ra_hours, dec_degrees, label, solar_system_name=None):
+    def _set_target_from_coordinates(
+        self,
+        ra_hours,
+        dec_degrees,
+        label,
+        solar_system_name=None,
+        display_name=None,
+    ):
         self.target_active = True
         self.target_solar_system_name = solar_system_name
+        self.target_display_name = display_name or self._tr("sky.target")
+        self.visibility_start_date = None
+        self._update_visibility_date_label()
         self._set_coordinate_fields(ra_hours, dec_degrees)
+        j2000_ra_hours, j2000_dec_degrees = jnow_to_j2000_coordinates(ra_hours, dec_degrees)
         self.update_value(preserve_solar_target=solar_system_name is not None)
         self._set_result_text(
             self._tr(
                 "result.target_coordinates",
                 label=label,
-                ra=self._format_ra(ra_hours),
-                dec=self._format_dec(dec_degrees),
+                ra=self._format_ra(j2000_ra_hours),
+                dec=self._format_dec(j2000_dec_degrees),
+                jnow_ra=self._format_ra(ra_hours),
+                jnow_dec=self._format_dec(dec_degrees),
             ),
             foreground=self.success,
         )
@@ -3379,6 +4192,7 @@ class AstroClocksApp:
                 sky_object["ra_hours"],
                 sky_object["declination"],
                 self._tr(target_label_key, name=sky_object.get("label", sky_object["name"])),
+                display_name=sky_object.get("label", sky_object["name"]),
                 solar_system_name=(
                     sky_object["name"] if sky_object.get("kind") == "solar" else None
                 ),
@@ -3390,6 +4204,7 @@ class AstroClocksApp:
             ra_hours,
             declination,
             self._tr("sky.target_set"),
+            display_name=self._tr("sky.target"),
         )
 
     def _update_sky_map(self, state=None):
@@ -3402,15 +4217,7 @@ class AstroClocksApp:
             return
 
         if state is None:
-            state = compute_clock_state(
-                self.longitude,
-                self.alpha_hh.get(),
-                self.alpha_mm.get(),
-                self.alpha_ss.get(),
-                hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
-                timezone_name=self.timezone_name,
-                daylight_saving_enabled=self.daylight_saving_enabled,
-            )
+            state = self._compute_target_clock_state()
 
         center_x = width / 2
         center_y = height / 2 - 10
@@ -3426,10 +4233,11 @@ class AstroClocksApp:
                 self.delta_dd.get(),
                 self.delta_mm.get(),
                 self.delta_ss.get(),
+                self._target_display_label(),
             )
         refresh_seconds = (
             SKY_MAP_ANTIALIASED_REFRESH_SECONDS
-            if Image is not None and ImageDraw is not None and ImageTk is not None
+            if Image is not None and ImageTk is not None
             else SKY_MAP_CANVAS_REFRESH_SECONDS
         )
         sidereal_second_bucket = int(self._parse_clock_hours(state["lst"]) * 3600 / refresh_seconds)
@@ -3460,8 +4268,19 @@ class AstroClocksApp:
         self._draw_sky_grid(self.sky_canvas, center_x, center_y, radius)
         if self.sky_show_equatorial_grid:
             self._draw_equatorial_grid(self.sky_canvas, center_x, center_y, radius, lst_hours)
-        self._draw_star_catalog(self.sky_canvas, center_x, center_y, radius, lst_hours)
-        self._draw_solar_system_objects(self.sky_canvas, center_x, center_y, radius, lst_hours)
+        stars_to_draw, considered_count = self._collect_star_catalog(
+            center_x, center_y, radius, lst_hours
+        )
+        solar_objects = self._collect_solar_system_objects(center_x, center_y, radius, lst_hours)
+        if not self._draw_sky_objects_raster(
+            self.sky_canvas,
+            stars_to_draw,
+            solar_objects,
+            considered_count,
+        ):
+            self._draw_star_catalog_canvas(self.sky_canvas, stars_to_draw)
+            self._draw_solar_system_canvas(self.sky_canvas, solar_objects)
+        self._draw_sky_object_labels(self.sky_canvas, stars_to_draw, solar_objects)
 
         if not self.target_active:
             self.sky_base_status = self._sky_inactive_status()
@@ -3492,6 +4311,7 @@ class AstroClocksApp:
             radius,
             target_altitude,
             target_azimuth,
+            self._target_display_label(),
         )
 
         if target_altitude >= 10:
@@ -3503,7 +4323,10 @@ class AstroClocksApp:
         altitude_text = f"{target_altitude:+.2f}"
         self.sky_base_status = self._tr(
             "sky.status",
-            ha=self._format_signed_hms_compact(target_hour_angle),
+            target=self._target_display_label(),
+            ha=self._format_unsigned_hms_compact(
+                self._display_hour_angle(target_ra_hours, lst_hours)
+            ),
             dec=self._format_signed_dms_compact(target_declination),
             altitude=altitude_text,
             azimuth=f"{target_azimuth:05.1f}",
@@ -3523,12 +4346,54 @@ class AstroClocksApp:
         self.result_text.config(state=tk.DISABLED)
 
     def _sanitize_coordinate_values(self):
+        old_values = (
+            str(self.alpha_hh.get()),
+            str(self.alpha_mm.get()),
+            str(self.alpha_ss.get()),
+            str(self.delta_dd.get()),
+            str(self.delta_mm.get()),
+            str(self.delta_ss.get()),
+        )
         self.alpha_hh.set(self._sanitize_int(self.alpha_hh.get(), 0, 23))
         self.alpha_mm.set(self._sanitize_int(self.alpha_mm.get(), 0, 59))
         self.alpha_ss.set(self._sanitize_int(self.alpha_ss.get(), 0, 59))
-        self.delta_dd.set(self._sanitize_int(self.delta_dd.get(), -90, 90))
-        self.delta_mm.set(self._sanitize_int(self.delta_mm.get(), 0, 59))
-        self.delta_ss.set(self._sanitize_int(self.delta_ss.get(), 0, 59))
+        delta_dd, delta_mm, delta_ss = self._sanitize_declination_fields(
+            self.delta_dd.get(),
+            self.delta_mm.get(),
+            self.delta_ss.get(),
+        )
+        self.delta_dd.set(delta_dd)
+        self.delta_mm.set(delta_mm)
+        self.delta_ss.set(delta_ss)
+        new_values = (
+            str(self.alpha_hh.get()),
+            str(self.alpha_mm.get()),
+            str(self.alpha_ss.get()),
+            str(self.delta_dd.get()),
+            str(self.delta_mm.get()),
+            str(self.delta_ss.get()),
+        )
+        if new_values != old_values:
+            self.target_jnow_cache_key = None
+
+    def _sanitize_declination_fields(self, degrees, minutes, seconds):
+        degrees_text = str(degrees).strip()
+        try:
+            sanitized_degrees = int(degrees_text)
+        except ValueError:
+            sanitized_degrees = 0
+
+        if sanitized_degrees >= 90:
+            return "89", "59", "59"
+        if sanitized_degrees <= -90:
+            return "-89", "59", "59"
+
+        sanitized_degrees = max(-89, min(89, sanitized_degrees))
+        sanitized_minutes = self._sanitize_int(minutes, 0, 59)
+        sanitized_seconds = self._sanitize_int(seconds, 0, 59)
+        if sanitized_degrees == 0 and degrees_text.startswith("-"):
+            sanitized_degrees = "-0"
+        return str(sanitized_degrees), sanitized_minutes, sanitized_seconds
 
     def _sanitize_int(self, value, minimum, maximum):
         value_text = str(value).strip()
@@ -3603,14 +4468,8 @@ class AstroClocksApp:
         self.update_value(activate_target=self.target_active)
 
         try:
-            ra_deg, dec_deg = jnow_to_icrs_degrees(
-                self.alpha_hh.get(),
-                self.alpha_mm.get(),
-                self.alpha_ss.get(),
-                self.delta_dd.get(),
-                self.delta_mm.get(),
-                self.delta_ss.get(),
-            )
+            ra_hours, dec_deg = self._current_input_coordinates()
+            ra_deg = (ra_hours % 24) * 15
             html_content = self._build_aladin_html(ra_deg, dec_deg)
             output_file = Path(tempfile.gettempdir()) / "astroclocks_aladin_sky_view.html"
             output_file.write_text(html_content, encoding="utf-8")
@@ -3629,6 +4488,9 @@ class AstroClocksApp:
         )
 
     def _activate_target_from_controls(self):
+        self.target_display_name = self._tr("sky.target")
+        self.visibility_start_date = None
+        self._update_visibility_date_label()
         self.update_value(activate_target=True)
 
     def update_value(self, activate_target=True, preserve_solar_target=False):
@@ -3636,12 +4498,17 @@ class AstroClocksApp:
             self.target_active = True
             if not preserve_solar_target:
                 self.target_solar_system_name = None
+                if not self.target_display_name:
+                    self.target_display_name = self._tr("sky.target")
         self._sanitize_coordinate_values()
+        _alpha_hh, _alpha_mm, _alpha_ss, delta_dd, delta_mm, delta_ss = (
+            self._current_jnow_coordinate_fields()
+        )
         self.lbl_dec_angle.config(
             text=compute_declination_display(
-                self.delta_dd.get(),
-                self.delta_mm.get(),
-                self.delta_ss.get(),
+                delta_dd,
+                delta_mm,
+                delta_ss,
                 apply_offset=self.declination_offset_enabled,
             )
         )
@@ -3716,10 +4583,22 @@ class AstroClocksApp:
         self._update_search_button_state()
         self.alpha_set_button.config(text=self._tr("button.set"))
         self.delta_set_button.config(text=self._tr("button.set"))
-        self.double_search_button.config(text=self._tr("button.search"))
+        if self.double_apply_button is not None:
+            self.double_apply_button.config(text=self._tr("double.apply_filters"))
+        self.double_search_button.config(text=self._tr("double.online_search"))
+        if self.double_orbit_recompute_button is not None:
+            self.double_orbit_recompute_button.config(text=self._tr("double.recalculate_orbits"))
+        if self.double_advanced_button is not None:
+            self.double_advanced_button.config(text=self._double_advanced_button_text())
         self.double_set_button.config(text=self._tr("double.set_target"))
         if self.double_reset_button is not None:
             self.double_reset_button.config(text=self._tr("double.reset_filters"))
+        if self.visibility_previous_button is not None:
+            self.visibility_previous_button.config(text=self._tr("visibility.previous_day"))
+        if self.visibility_next_button is not None:
+            self.visibility_next_button.config(text=self._tr("visibility.next_day"))
+        if self.visibility_calendar_button is not None:
+            self.visibility_calendar_button.config(text=self._tr("visibility.pick_date"))
         for widget, key, kwargs in self.translated_widgets:
             widget.config(text=self._tr(key, **kwargs))
         self._refresh_double_star_headings()
@@ -4253,7 +5132,7 @@ class AstroClocksApp:
     def reset_double_star_filters(self):
         self._apply_double_filter_controls(self._default_double_filters())
         self._save_current_settings()
-        self.search_double_stars()
+        self.search_double_stars(allow_online=False)
 
     def _sort_double_star_table(self, column):
         if column == self.double_sort_column:
@@ -4412,6 +5291,7 @@ class AstroClocksApp:
             normalized_star = dict(star)
             normalized_star.setdefault("source", "Local")
             normalized_star.setdefault("physical_status", "binary")
+            normalized_star.setdefault("coordinate_frame", "j2000")
             normalized.append(normalized_star)
 
         try:
@@ -4426,23 +5306,45 @@ class AstroClocksApp:
         for index, converted_star in enumerate(converted):
             normalized[index]["ra_hours"] = converted_star[1]
             normalized[index]["declination"] = converted_star[2]
+            normalized[index]["coordinate_frame"] = "jnow"
         return normalized
 
-    def _double_visibility_context(self):
+    def _double_search_context(self):
+        alpha_hh, alpha_mm, alpha_ss, _delta_dd, _delta_mm, _delta_ss = (
+            self._current_jnow_coordinate_fields()
+        )
+        return {
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "alpha_hh": alpha_hh,
+            "alpha_mm": alpha_mm,
+            "alpha_ss": alpha_ss,
+            "hour_angle_offset_hours": 6 if self.hour_angle_offset_enabled else 0,
+            "timezone_name": self.timezone_name,
+            "daylight_saving_enabled": self.daylight_saving_enabled,
+        }
+
+    def _double_visibility_context(self, search_context=None):
+        if search_context is None:
+            search_context = self._double_search_context()
         start_utc = datetime.datetime.now(datetime.timezone.utc)
         offsets = [step / 2 for step in range(49)]
         utc_datetimes = [start_utc + datetime.timedelta(hours=offset) for offset in offsets]
-        sun_altitudes = compute_sun_altitudes(self.latitude, self.longitude, utc_datetimes)
+        sun_altitudes = compute_sun_altitudes(
+            search_context["latitude"],
+            search_context["longitude"],
+            utc_datetimes,
+        )
         context = []
         for offset, sample_time, sun_altitude in zip(offsets, utc_datetimes, sun_altitudes):
             state = compute_clock_state(
-                self.longitude,
-                self.alpha_hh.get(),
-                self.alpha_mm.get(),
-                self.alpha_ss.get(),
-                hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
-                timezone_name=self.timezone_name,
-                daylight_saving_enabled=self.daylight_saving_enabled,
+                search_context["longitude"],
+                search_context["alpha_hh"],
+                search_context["alpha_mm"],
+                search_context["alpha_ss"],
+                hour_angle_offset_hours=search_context["hour_angle_offset_hours"],
+                timezone_name=search_context["timezone_name"],
+                daylight_saving_enabled=search_context["daylight_saving_enabled"],
                 now_utc=sample_time,
             )
             context.append(
@@ -4583,15 +5485,16 @@ class AstroClocksApp:
     def _double_local_catalog(self):
         return self._merge_double_star_results(DOUBLE_STARS, self.double_wds_cached_stars)
 
-    def _enrich_double_star_orbits(self, stars, orb6_index):
-        if not orb6_index and not self.double_orb6_orbit_index:
+    def _enrich_double_star_orbits(self, stars, orb6_index, orbit_index=None):
+        active_orbit_index = orbit_index if orbit_index is not None else self.double_orb6_orbit_index
+        if not orb6_index and not active_orbit_index:
             return list(stars), 0
         try:
             return enrich_double_stars_with_orb6(
                 stars,
                 orb6_index,
                 datetime.datetime.now(datetime.timezone.utc),
-                orbit_index=self.double_orb6_orbit_index,
+                orbit_index=active_orbit_index,
             )
         except Exception:
             return list(stars), 0
@@ -4823,7 +5726,7 @@ class AstroClocksApp:
             text=status,
         )
 
-    def search_double_stars(self, allow_online=True):
+    def search_double_stars(self, allow_online=False, refresh_orbits=False):
         filters = self._read_double_star_filters()
         if filters is None:
             return
@@ -4831,59 +5734,156 @@ class AstroClocksApp:
 
         self.double_search_generation += 1
         generation = self.double_search_generation
-        visibility_context = self._double_visibility_context()
-        local_catalog = self._double_local_catalog()
-        local_source, _local_orb6_matches = self._enrich_double_star_orbits(
-            local_catalog,
-            self.double_orb6_index,
-        )
-        local_results = self._filter_double_star_list(
-            local_source,
-            filters,
-            visibility_context,
-        )
-        self._render_double_star_results(
-            local_results,
-            len(local_catalog),
-            "double.source.local",
-        )
-
-        if not allow_online or not filters["use_online"]:
-            return
-
-        if self.network_online is False:
-            notes = [self._tr("double.online_offline")]
-            local_orb6_count = sum(
-                1 for star in local_results if star.get("orb6_current_separation") is not None
-            )
-            orb6_note = self._double_orb6_status_note(
-                local_orb6_count,
-                self.double_orb6_index,
-            )
-            if orb6_note:
-                notes.append(orb6_note)
-            self._render_double_star_results(
-                local_results,
-                len(local_catalog),
-                "double.source.local",
-                "\n".join(notes),
-            )
-            return
-
-        self.double_remote_search_pending = True
+        search_context = self._double_search_context()
+        self.double_remote_search_pending = allow_online or refresh_orbits
+        if allow_online:
+            status_key = "double.searching_online"
+        elif refresh_orbits:
+            status_key = "double.recalculating_orbits"
+        else:
+            status_key = "double.filtering"
         self.double_status_label.config(
-            text=(
-                f"{self.double_status_label.cget('text')}\n"
-                f"{self._tr('double.searching_online')}"
-            )
+            text=self._tr(status_key)
         )
         threading.Thread(
-            target=self._run_double_star_online_search,
-            args=(generation, filters),
+            target=self._run_double_star_search,
+            args=(generation, filters, allow_online, search_context, refresh_orbits),
             daemon=True,
         ).start()
 
-    def _run_double_star_online_search(self, generation, filters):
+    def _run_double_star_search(
+        self,
+        generation,
+        filters,
+        allow_online,
+        search_context,
+        refresh_orbits=False,
+    ):
+        try:
+            visibility_context = self._double_visibility_context(search_context)
+            notes = []
+            orb6_index = self.double_orb6_index
+            orb6_orbit_index = self.double_orb6_orbit_index
+
+            if refresh_orbits:
+                try:
+                    orb6_index = fetch_orb6_ephemerides(timeout=8)
+                    orb6_error = orb6_index.get("fetch_error")
+                except Exception as exc:
+                    orb6_index = self.double_orb6_index
+                    orb6_error = str(exc)
+
+                try:
+                    orb6_orbit_index = fetch_orb6_orbits(timeout=8)
+                    orb6_orbit_error = orb6_orbit_index.get("fetch_error")
+                except Exception as exc:
+                    orb6_orbit_index = self.double_orb6_orbit_index
+                    orb6_orbit_error = str(exc)
+
+                if orb6_error:
+                    notes.append(self._tr("double.orb6_error", error=orb6_error))
+                if orb6_orbit_error:
+                    notes.append(self._tr("double.orb6_orbit_error", error=orb6_orbit_error))
+
+            local_catalog = self._double_local_catalog()
+            source_key = "double.source.wds" if self.double_wds_cached_stars else "double.source.local"
+            wds_cached_stars = None
+
+            if allow_online and self.network_online is False:
+                notes = [self._tr("double.online_offline")]
+            elif allow_online:
+                try:
+                    remote_results = fetch_wds_double_stars(
+                        filters["max_primary"],
+                        filters["max_secondary"],
+                        filters["min_sep"],
+                        filters["max_sep"],
+                        include_physical=filters["include_physical"],
+                        include_noted=filters["include_noted"],
+                        include_apparent=filters["include_apparent"],
+                        include_uncertain=filters["include_uncertain"],
+                        timeout=5,
+                    )
+                    wds_cached_stars = merge_cached_wds_double_stars(remote_results)
+                    local_catalog = self._merge_double_star_results(DOUBLE_STARS, wds_cached_stars)
+                    source_key = "double.source.wds"
+                    notes.extend(
+                        [
+                            self._tr("double.online_loaded", count=len(remote_results)),
+                            self._tr("double.wds_cache_updated", count=len(wds_cached_stars)),
+                        ]
+                    )
+                except Exception as exc:
+                    notes.append(self._tr("double.online_error", error=str(exc)))
+
+            local_source, _local_orb6_matches = self._enrich_double_star_orbits(
+                local_catalog,
+                orb6_index,
+                orb6_orbit_index,
+            )
+            local_results = self._filter_double_star_list(
+                local_source,
+                filters,
+                visibility_context,
+            )
+            orb6_count = sum(
+                1 for star in local_results if star.get("orb6_current_separation") is not None
+            )
+            orb6_note = self._double_orb6_status_note(orb6_count, orb6_index)
+            if orb6_note:
+                notes.append(orb6_note)
+            self._queue_double_star_search_results(
+                generation,
+                {
+                    "stars": local_results,
+                    "total": len(local_catalog),
+                    "source_key": source_key,
+                    "note": "\n".join(notes),
+                    "wds_cached_stars": wds_cached_stars,
+                    "orb6_index": orb6_index if refresh_orbits else None,
+                    "orb6_orbit_index": orb6_orbit_index if refresh_orbits else None,
+                },
+            )
+        except Exception as exc:
+            self._queue_double_star_search_results(
+                generation,
+                {
+                    "stars": [],
+                    "total": 0,
+                    "source_key": "double.source.local",
+                    "note": self._tr("double.online_error", error=str(exc)),
+                },
+            )
+
+    def _queue_double_star_search_results(self, generation, payload):
+        try:
+            self.root.after(
+                0,
+                lambda: self._apply_double_star_search_results(generation, payload),
+            )
+        except (tk.TclError, RuntimeError):
+            self.double_remote_search_pending = False
+
+    def _apply_double_star_search_results(self, generation, payload):
+        if generation != self.double_search_generation:
+            return
+        self.double_remote_search_pending = False
+        if payload.get("wds_cached_stars") is not None:
+            self.double_wds_cached_stars = payload["wds_cached_stars"]
+        if payload.get("orb6_index") is not None:
+            self.double_orb6_index = payload["orb6_index"]
+        if payload.get("orb6_orbit_index") is not None:
+            self.double_orb6_orbit_index = payload["orb6_orbit_index"]
+        self._render_double_star_results(
+            payload["stars"],
+            payload["total"],
+            payload["source_key"],
+            payload.get("note"),
+        )
+
+    def _run_double_star_online_search(self, generation, filters, visibility_context=None):
+        if visibility_context is None:
+            visibility_context = self._double_visibility_context()
         try:
             remote_results = fetch_wds_double_stars(
                 filters["max_primary"],
@@ -4915,22 +5915,89 @@ class AstroClocksApp:
             orb6_orbit_index = None
             orb6_orbit_error = str(exc)
 
-        try:
-            self.root.after(
-                0,
-                lambda: self._apply_double_star_online_results(
-                    generation,
-                    filters,
-                    remote_results,
-                    error,
-                    orb6_index,
-                    orb6_error,
-                    orb6_orbit_index,
-                    orb6_orbit_error,
-                ),
+        active_orb6_index = orb6_index or self.double_orb6_index
+        active_orbit_index = orb6_orbit_index or self.double_orb6_orbit_index
+        wds_cached_stars = None
+        if not error:
+            wds_cached_stars = merge_cached_wds_double_stars(remote_results)
+            local_catalog = self._merge_double_star_results(DOUBLE_STARS, wds_cached_stars)
+        else:
+            local_catalog = self._double_local_catalog()
+
+        local_source, _local_orb6_matches = self._enrich_double_star_orbits(
+            local_catalog,
+            active_orb6_index,
+            active_orbit_index,
+        )
+        local_results = self._filter_double_star_list(
+            local_source,
+            filters,
+            visibility_context,
+        )
+        if error:
+            notes = [self._tr("double.online_error", error=error)]
+            local_orb6_count = sum(
+                1 for star in local_results if star.get("orb6_current_separation") is not None
             )
-        except (tk.TclError, RuntimeError):
-            self.double_remote_search_pending = False
+            if local_orb6_count:
+                orb6_note = self._double_orb6_status_note(
+                    local_orb6_count,
+                    active_orb6_index,
+                )
+                if orb6_note:
+                    notes.append(orb6_note)
+            elif orb6_error:
+                notes.append(self._tr("double.orb6_error", error=orb6_error))
+            self._queue_double_star_search_results(
+                generation,
+                {
+                    "stars": local_results,
+                    "total": len(local_catalog),
+                    "source_key": "double.source.local",
+                    "note": "\n".join(notes),
+                    "orb6_index": orb6_index,
+                    "orb6_orbit_index": orb6_orbit_index,
+                },
+            )
+            return
+
+        remote_source, _remote_orb6_matches = self._enrich_double_star_orbits(
+            remote_results,
+            active_orb6_index,
+            active_orbit_index,
+        )
+        remote_filtered = self._filter_double_star_list(
+            remote_source,
+            filters,
+            visibility_context,
+        )
+        combined = self._merge_double_star_results(local_results, remote_filtered)
+        combined_catalog_total = len(self._merge_double_star_results(local_catalog, remote_source))
+        notes = [
+            self._tr("double.online_loaded", count=len(remote_filtered)),
+            self._tr("double.wds_cache_updated", count=len(wds_cached_stars)),
+        ]
+        orb6_count = sum(
+            1 for star in combined if star.get("orb6_current_separation") is not None
+        )
+        if orb6_count:
+            orb6_note = self._double_orb6_status_note(orb6_count, active_orb6_index)
+            if orb6_note:
+                notes.append(orb6_note)
+        elif orb6_error:
+            notes.append(self._tr("double.orb6_error", error=orb6_error))
+        self._queue_double_star_search_results(
+            generation,
+            {
+                "stars": combined,
+                "total": combined_catalog_total,
+                "source_key": "double.source.wds",
+                "note": "\n".join(notes),
+                "wds_cached_stars": wds_cached_stars,
+                "orb6_index": orb6_index,
+                "orb6_orbit_index": orb6_orbit_index,
+            },
+        )
 
     def _apply_double_star_online_results(
         self,
@@ -5037,10 +6104,15 @@ class AstroClocksApp:
             self.double_status_label.config(text=self._tr("double.no_selection"))
             return
 
+        ra_hours = star["ra_hours"]
+        declination = star["declination"]
+        if star.get("coordinate_frame") == "j2000":
+            ra_hours, declination = j2000_to_jnow_coordinates(ra_hours, declination)
         self._set_target_from_coordinates(
-            star["ra_hours"],
-            star["declination"],
+            ra_hours,
+            declination,
             self._tr("double.target_set", name=star["name"]),
+            display_name=star["name"],
         )
         self.notebook.select(self.main_tab)
 
@@ -5524,25 +6596,51 @@ class AstroClocksApp:
                 ra=result.get("source_ra", ""),
                 dec=result.get("source_dec", ""),
             )
+        if result.get("source") == "local_solar":
+            return self._tr(
+                "result.local_solar_coordinates",
+                ra=result.get("source_ra", ""),
+                dec=result.get("source_dec", ""),
+            )
         if result.get("source") == "sesame":
             return self._tr(
                 "result.sesame_coordinates",
                 ra=result.get("source_ra", ""),
                 dec=result.get("source_dec", ""),
             )
+        if result.get("source") == "local":
+            return self._tr(
+                "result.local_coordinates",
+                ra=result.get("source_ra", ""),
+                dec=result.get("source_dec", ""),
+                source=result.get("source_catalog", ""),
+                note=result.get("source_note", ""),
+            )
         return result["message"]
 
     def _apply_coordinate_result(self, result):
         self._set_result_text(self._coordinate_result_message(result))
-        self.alpha_hh.set(result["alpha_hh"])
-        self.alpha_mm.set(result["alpha_mm"])
-        self.alpha_ss.set(result["alpha_ss"])
-        self.delta_dd.set(result["delta_dd"])
-        self.delta_mm.set(result["delta_mm"])
-        self.delta_ss.set(result["delta_ss"])
-        self.update_value()
+        ra_hours = (
+            float(result["alpha_hh"])
+            + (float(result["alpha_mm"]) / 60)
+            + (float(result["alpha_ss"]) / 3600)
+        )
+        dec_sign = -1 if str(result["delta_dd"]).strip().startswith("-") else 1
+        dec_degrees = dec_sign * (
+            abs(float(result["delta_dd"]))
+            + (float(result["delta_mm"]) / 60)
+            + (float(result["delta_ss"]) / 3600)
+        )
+        result_frame = "jnow" if result.get("source") in {"imcce", "local_solar"} else "j2000"
+        self._set_coordinate_fields(ra_hours, dec_degrees, frame=result_frame)
+        searched_name = result.get("display_name") or self.search_entry.get().strip()
+        self.target_display_name = searched_name or self._tr("sky.target")
+        self.target_solar_system_name = result.get("solar_system_name")
+        self.visibility_start_date = None
+        self._update_visibility_date_label()
+        self.update_value(preserve_solar_target=self.target_solar_system_name is not None)
 
-    def _start_coordinate_search(self, selected_type, object_name):
+    def _start_coordinate_search(self, selected_type, object_name, fallback_result=None):
         self.coordinate_search_generation += 1
         generation = self.coordinate_search_generation
         self.coordinate_search_pending = True
@@ -5550,11 +6648,11 @@ class AstroClocksApp:
         self._set_result_text(self._tr("result.searching", object_name=object_name), self.muted)
         threading.Thread(
             target=self._run_coordinate_search,
-            args=(generation, selected_type, object_name),
+            args=(generation, selected_type, object_name, fallback_result),
             daemon=True,
         ).start()
 
-    def _run_coordinate_search(self, generation, selected_type, object_name):
+    def _run_coordinate_search(self, generation, selected_type, object_name, fallback_result=None):
         try:
             if selected_type in {
                 "Asteroid",
@@ -5569,17 +6667,19 @@ class AstroClocksApp:
             error_key = None
             error_detail = None
         except name_resolve.NameResolveError:
-            result = None
-            error_key = "result.object_not_found"
+            result = fallback_result
+            error_key = None if fallback_result is not None else "result.object_not_found"
             error_detail = None
         except Exception as exc:
-            result = None
-            error_key = (
-                "result.ephemerides_error"
-                if selected_type
-                in {"Asteroid", "Comet", "Dwarf Planet", "Planet", "Natural Satellite"}
-                else "result.search_error"
-            )
+            result = fallback_result
+            error_key = None
+            if fallback_result is None:
+                error_key = (
+                    "result.ephemerides_error"
+                    if selected_type
+                    in {"Asteroid", "Comet", "Dwarf Planet", "Planet", "Natural Satellite"}
+                    else "result.search_error"
+                )
             error_detail = str(exc)
 
         try:
@@ -5606,7 +6706,18 @@ class AstroClocksApp:
             self._set_result_text(self._tr(error_key, **values), foreground=self.danger)
             return
 
+        if result is None:
+            self._set_result_text(self._tr("result.object_not_found"), foreground=self.danger)
+            return
+
         self._apply_coordinate_result(result)
+
+    def _solar_system_search_type_for_local_result(self, result):
+        if result is None:
+            return "Planet"
+        if result.get("solar_system_name") == "Moon":
+            return "Natural Satellite"
+        return "Planet"
 
     def search_coordinates(self):
         solar_system = [
@@ -5615,6 +6726,7 @@ class AstroClocksApp:
             "mercure",
             "mercury",
             "venus",
+            "vénus",
             "lune",
             "moon",
             "mars",
@@ -5644,11 +6756,43 @@ class AstroClocksApp:
             if not object_name:
                 self._set_result_text("")
                 return
-            self._start_coordinate_search(selected_type, object_name)
+            local_solar_result = resolve_local_solar_system_coordinates(
+                object_name,
+                latitude=self.latitude,
+                longitude=self.longitude,
+            )
+            if self.network_online is False:
+                if local_solar_result is not None:
+                    self._apply_coordinate_result(local_solar_result)
+                else:
+                    self._set_result_text(self._tr("result.online_search_offline"), foreground=self.danger)
+                return
+            self._start_coordinate_search(selected_type, object_name, fallback_result=local_solar_result)
+            return
+
+        local_solar_result = resolve_local_solar_system_coordinates(
+            object_name,
+            latitude=self.latitude,
+            longitude=self.longitude,
+        )
+        if local_solar_result is not None:
+            if self.network_online is False:
+                self._apply_coordinate_result(local_solar_result)
+            else:
+                self._start_coordinate_search(
+                    self._solar_system_search_type_for_local_result(local_solar_result),
+                    object_name,
+                    fallback_result=local_solar_result,
+                )
             return
 
         if object_name.lower() in solar_system:
-            self._set_result_text(self._tr("result.object_type_error"), foreground=self.danger)
+            self._set_result_text(
+                self._tr("result.online_search_offline")
+                if self.network_online is False
+                else self._tr("result.object_type_error"),
+                foreground=self.danger,
+            )
             return
 
         if not selected_type:
@@ -5659,19 +6803,22 @@ class AstroClocksApp:
             self._set_result_text("")
             return
 
-        self._start_coordinate_search(selected_type, object_name)
+        local_result = resolve_local_object_coordinates(object_name)
+        if self.network_online is False:
+            if local_result is not None:
+                self._apply_coordinate_result(local_result)
+            else:
+                self._set_result_text(
+                    self._tr("result.local_object_not_found_offline"),
+                    foreground=self.danger,
+                )
+            return
+
+        self._start_coordinate_search(selected_type, object_name, fallback_result=local_result)
 
     def clocks(self):
         self._sanitize_coordinate_values()
-        state = compute_clock_state(
-            self.longitude,
-            self.alpha_hh.get(),
-            self.alpha_mm.get(),
-            self.alpha_ss.get(),
-            hour_angle_offset_hours=6 if self.hour_angle_offset_enabled else 0,
-            timezone_name=self.timezone_name,
-            daylight_saving_enabled=self.daylight_saving_enabled,
-        )
+        state = self._compute_target_clock_state()
 
         self.update_site_labels()
         self.label_local.config(text=state["local"])

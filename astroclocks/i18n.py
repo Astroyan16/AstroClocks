@@ -9,7 +9,7 @@ LANGUAGE_NAMES = dict(LANGUAGE_OPTIONS)
 
 TRANSLATIONS = {
     "en": {
-        "app.subtitle": "Civil time, sidereal time, JNow coordinates and real-time local horizon",
+        "app.subtitle": "Civil time, sidereal time, ICRS/J2000 input and real-time local horizon",
         "button.settings": "Settings",
         "button.about": "About",
         "button.quit": "Quit",
@@ -27,7 +27,7 @@ TRANSLATIONS = {
         "settings.instrument": "Instrument display",
         "settings.hour_angle_offset": "T1m hour angle (+6h East circle)",
         "settings.declination_offset": "T1m declination (+90°)",
-        "tab.main": "Clocks",
+        "tab.main": "Coordinates",
         "tab.visibility": "Target visibility",
         "tab.double_stars": "Double stars",
         "about.title": "About AstroClocks",
@@ -55,8 +55,8 @@ TRANSLATIONS = {
         "frame.double_stars": "Double star results",
         "frame.local_time": "Local Time ({timezone})",
         "frame.utc": "UTC",
-        "frame.alpha": "Alpha JNow (h m s)",
-        "frame.delta": "Delta JNow (d m s)",
+        "frame.alpha": "Alpha ICRS/J2000 (h m s)",
+        "frame.delta": "Delta ICRS/J2000 (d m s)",
         "frame.gmst": "Greenwich Sidereal Time",
         "frame.lst": "Local Sidereal Time",
         "frame.hour_angle": "Hour Angle{suffix}",
@@ -120,21 +120,29 @@ TRANSLATIONS = {
         "sky.zenith": "Zenith",
         "sky.target": "Target",
         "sky.pointer": "Pointer",
+        "sky.hour_angle_short": "HA",
         "sky.target_set": "Target set from map",
         "sky.target_set_star": "Target set from map: {name}",
-        "sky.target_set_body": "Target set from solar system object: {name}",
+        "sky.target_set_body": "Target set from map: {name}",
         "sky.above_horizon": "above horizon",
         "sky.low_horizon": "low above horizon",
         "sky.below_horizon": "below horizon",
         "sky.no_target": "No target selected | {count} named stars visible",
         "sky.status": (
-            "Target : HA = {ha} ; DEC = {dec} | "
+            "{target} : HA = {ha} ; DEC = {dec} | "
             "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}\n"
             "Target visibility : {note} | {count} named stars visible"
         ),
         "sky.unavailable": "Sky map unavailable: {error}",
         "visibility.title": "Altitude curve, noon to noon",
+        "visibility.title_named": "Altitude of {target} between {start_date} and {end_date}",
         "visibility.axis": "Local time",
+        "visibility.previous_day": "-24 h",
+        "visibility.next_day": "+24 h",
+        "visibility.pick_date": "Date...",
+        "visibility.today": "Today",
+        "visibility.calendar_title": "Select visibility start date",
+        "visibility.date_range": "{start_date} to {end_date}",
         "visibility.hover": "{time} | Alt {altitude:+.2f}°",
         "visibility.max_label": "Max {time}",
         "visibility.sunrise": "Sunrise",
@@ -146,9 +154,20 @@ TRANSLATIONS = {
         "visibility.phase.nautical": "Nautical twilight",
         "visibility.phase.astronomical": "Astronomical twilight",
         "visibility.below_horizon": "Below horizon from noon to noon",
+        "visibility.calculating": "Calculating visibility...",
         "visibility.no_target": "No active target. Select an object on the map or enter coordinates.",
         "visibility.status": (
             "Current altitude: {current:+.2f}°. Noon-to-noon maximum: {maximum:+.2f}° "
+            "at {maximum_time} local time."
+        ),
+        "visibility.status_named": (
+            "Altitude of {target} between {start_date} and {end_date}.\n"
+            "Current altitude: {current:+.2f}°. Noon-to-noon maximum: {maximum:+.2f}° "
+            "at {maximum_time} local time."
+        ),
+        "visibility.status_named_window": (
+            "Altitude of {target} between {start_date} and {end_date}.\n"
+            "No current-time marker in this window. Noon-to-noon maximum: {maximum:+.2f}° "
             "at {maximum_time} local time."
         ),
         "double.filters": "Search filters",
@@ -164,12 +183,21 @@ TRANSLATIONS = {
         "double.include_uncertain": "Uncertain / dubious (I/X)",
         "double.exclude_polar_circle": "Exclude polar circle (Dec > +60°)",
         "double.use_online": "Use online WDS catalog",
+        "double.advanced_options_show": "Advanced options",
+        "double.advanced_options_hide": "Hide advanced options",
+        "double.apply_filters": "Apply filters",
+        "double.online_search": "Online search",
+        "double.recalculate_orbits": "Recalculate ORB6",
         "double.set_target": "Set as target",
         "double.reset_filters": "Reset filters",
         "double.result_count": "{count} / {total} double stars ({source})",
         "double.source.local": "local catalog",
         "double.source.wds": "local + WDS/VizieR",
+        "double.cache_restored": "{count} WDS entries restored from local cache. Use Apply filters to refresh altitude/visibility.",
+        "double.filtering": "Applying double-star filters...",
+        "double.searching": "Searching double stars...",
         "double.searching_online": "Searching WDS/VizieR...",
+        "double.recalculating_orbits": "Recalculating ORB6 ephemerides...",
         "double.online_offline": "Online catalog unavailable: offline.",
         "double.online_error": "WDS/VizieR unavailable: {error}",
         "double.online_loaded": "{count} WDS entries loaded.",
@@ -177,6 +205,7 @@ TRANSLATIONS = {
         "double.orb6_loaded": "{count} current ORB6 ephemerides matched.",
         "double.orb6_cached": "{count} ORB6 ephemerides restored from local cache.",
         "double.orb6_error": "ORB6 ephemerides unavailable: {error}",
+        "double.orb6_orbit_error": "ORB6 orbital elements unavailable: {error}",
         "double.nature.binary": "Binary",
         "double.nature.noted": "WDS note",
         "double.nature.apparent": "Apparent",
@@ -214,7 +243,10 @@ TRANSLATIONS = {
         "double.orbit.now": "Now",
         "double.orbit.status": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
         "double.orbit.hover": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
-        "result.target_coordinates": "{label}\nRA JNow: {ra}\nDec JNow: {dec}",
+        "result.target_coordinates": (
+            "{label}\nRA ICRS/J2000: {ra}\nDec ICRS/J2000: {dec}\n"
+            "RA JNow: {jnow_ra}\nDec JNow: {jnow_dec}"
+        ),
         "result.aladin_offline": "Interactive sky view unavailable: offline.",
         "result.aladin_unavailable": "Interactive sky view unavailable. Check internet connection.",
         "result.aladin_opened": (
@@ -229,15 +261,28 @@ TRANSLATIONS = {
         ),
         "result.searching": "Searching {object_name}...",
         "result.search_error": "Coordinate search unavailable: {error}",
+        "result.online_search_offline": "This search requires an internet connection and is unavailable offline.",
+        "result.local_object_not_found_offline": (
+            "Object not found in the local catalog.\n"
+            "Offline search includes the bundled star catalog and local Messier/NGC/IC entries."
+        ),
         "result.imcce_coordinates": (
             "Apparent JNow coordinates from IMCCE:\nAlpha JNow: {ra}\nDelta JNow: {dec}"
         ),
+        "result.local_solar_coordinates": (
+            "Apparent JNow coordinates from local ephemerides:\n"
+            "Alpha JNow: {ra}\nDelta JNow: {dec}"
+        ),
         "result.sesame_coordinates": (
-            "ICRS coordinates from CDS Sesame:\nRA (Alpha): {ra}\nDec (Delta): {dec}"
+            "ICRS/J2000 coordinates from CDS Sesame:\nRA (Alpha): {ra}\nDec (Delta): {dec}"
+        ),
+        "result.local_coordinates": (
+            "Local ICRS/J2000 coordinates ({source}):\n"
+            "RA (Alpha): {ra}\nDec (Delta): {dec}\n{note}"
         ),
     },
     "fr": {
-        "app.subtitle": "Temps légal et sidéral, coordonnées JNow et horizon local en temps réel",
+        "app.subtitle": "Temps légal et sidéral, saisie ICRS/J2000 et horizon local en temps réel",
         "button.settings": "Paramètres",
         "button.about": "À propos",
         "button.quit": "Quitter",
@@ -255,7 +300,7 @@ TRANSLATIONS = {
         "settings.instrument": "Affichage instrument",
         "settings.hour_angle_offset": "Angle horaire T1m (+6h cercle Est)",
         "settings.declination_offset": "Déclinaison T1m (+90°)",
-        "tab.main": "Horloges",
+        "tab.main": "Coordonnées",
         "tab.visibility": "Visibilité de la cible",
         "tab.double_stars": "Étoiles doubles",
         "about.title": "À propos d'AstroClocks",
@@ -283,8 +328,8 @@ TRANSLATIONS = {
         "frame.double_stars": "Résultats étoiles doubles",
         "frame.local_time": "Temps local ({timezone})",
         "frame.utc": "UTC",
-        "frame.alpha": "Alpha JNow (h m s)",
-        "frame.delta": "Delta JNow (d m s)",
+        "frame.alpha": "Alpha ICRS/J2000 (h m s)",
+        "frame.delta": "Delta ICRS/J2000 (d m s)",
         "frame.gmst": "Temps sidéral de Greenwich",
         "frame.lst": "Temps sidéral local",
         "frame.hour_angle": "Angle horaire{suffix}",
@@ -348,21 +393,29 @@ TRANSLATIONS = {
         "sky.zenith": "Zénith",
         "sky.target": "Cible",
         "sky.pointer": "Pointeur",
+        "sky.hour_angle_short": "AH",
         "sky.target_set": "Cible définie depuis la carte",
         "sky.target_set_star": "Cible définie depuis la carte : {name}",
-        "sky.target_set_body": "Cible définie depuis un objet du système solaire : {name}",
+        "sky.target_set_body": "Cible définie depuis la carte : {name}",
         "sky.above_horizon": "au-dessus de l'horizon",
         "sky.low_horizon": "basse sur l'horizon",
         "sky.below_horizon": "sous l'horizon",
         "sky.no_target": "Aucune cible sélectionnée | {count} étoiles nommées visibles",
         "sky.status": (
-            "Cible : AH = {ha} ; DEC = {dec} | "
+            "{target} : AH = {ha} ; DEC = {dec} | "
             "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}\n"
             "Visibilité de la cible : {note} | {count} étoiles nommées visibles"
         ),
         "sky.unavailable": "Carte du ciel indisponible : {error}",
         "visibility.title": "Courbe d'altitude 12h-12h",
+        "visibility.title_named": "Altitude de {target} entre le {start_date} et le {end_date}",
         "visibility.axis": "Temps local",
+        "visibility.previous_day": "-24 h",
+        "visibility.next_day": "+24 h",
+        "visibility.pick_date": "Date...",
+        "visibility.today": "Aujourd'hui",
+        "visibility.calendar_title": "Choisir la date de début de visibilité",
+        "visibility.date_range": "{start_date} au {end_date}",
         "visibility.hover": "{time} | Hauteur {altitude:+.2f}°",
         "visibility.max_label": "Max {time}",
         "visibility.sunrise": "Lever",
@@ -374,12 +427,23 @@ TRANSLATIONS = {
         "visibility.phase.nautical": "Crépuscule nautique",
         "visibility.phase.astronomical": "Crépuscule astronomique",
         "visibility.below_horizon": "Sous l'horizon de 12h à 12h",
+        "visibility.calculating": "Calcul de la visibilité...",
         "visibility.no_target": (
             "Aucune cible active. Sélectionnez un objet sur la carte ou saisissez des coordonnées."
         ),
         "visibility.status": (
             "Altitude actuelle : {current:+.2f}°. Maximum 12h-12h : {maximum:+.2f}° "
             "à {maximum_time} en temps local."
+        ),
+        "visibility.status_named": (
+            "Altitude de {target} entre le {start_date} et le {end_date}.\n"
+            "Altitude actuelle : {current:+.2f}°. Maximum 12h-12h : {maximum:+.2f}° "
+            "à {maximum_time} en temps local."
+        ),
+        "visibility.status_named_window": (
+            "Altitude de {target} entre le {start_date} et le {end_date}.\n"
+            "Aucun marqueur d'heure actuelle dans cette fenêtre. Maximum 12h-12h : "
+            "{maximum:+.2f}° à {maximum_time} en temps local."
         ),
         "double.filters": "Filtres de recherche",
         "double.max_primary": "Magnitude max primaire",
@@ -394,12 +458,21 @@ TRANSLATIONS = {
         "double.include_uncertain": "Incertaines / douteuses (I/X)",
         "double.exclude_polar_circle": "Exclure le cercle polaire (Dec > +60°)",
         "double.use_online": "Utiliser le catalogue WDS en ligne",
+        "double.advanced_options_show": "Options avancées",
+        "double.advanced_options_hide": "Masquer les options avancées",
+        "double.apply_filters": "Appliquer le filtrage",
+        "double.online_search": "Recherche en ligne",
+        "double.recalculate_orbits": "Recalculer ORB6",
         "double.set_target": "Définir comme cible",
         "double.reset_filters": "Réinitialiser les filtres",
         "double.result_count": "{count} / {total} étoiles doubles ({source})",
         "double.source.local": "catalogue local",
         "double.source.wds": "local + WDS/VizieR",
+        "double.cache_restored": "{count} entrées WDS restaurées depuis le cache local. Utilisez Appliquer le filtrage pour recalculer altitude/visibilité.",
+        "double.filtering": "Application du filtrage des étoiles doubles...",
+        "double.searching": "Recherche étoiles doubles...",
         "double.searching_online": "Recherche WDS/VizieR...",
+        "double.recalculating_orbits": "Recalcul des éphémérides ORB6...",
         "double.online_offline": "Catalogue en ligne indisponible : hors-ligne.",
         "double.online_error": "WDS/VizieR indisponible : {error}",
         "double.online_loaded": "{count} entrées WDS chargées.",
@@ -407,6 +480,7 @@ TRANSLATIONS = {
         "double.orb6_loaded": "{count} éphémérides ORB6 actuelles associées.",
         "double.orb6_cached": "{count} éphémérides ORB6 restaurées depuis le cache local.",
         "double.orb6_error": "Éphémérides ORB6 indisponibles : {error}",
+        "double.orb6_orbit_error": "Éléments orbitaux ORB6 indisponibles : {error}",
         "double.nature.binary": "Binaire",
         "double.nature.noted": "Note WDS",
         "double.nature.apparent": "Apparente",
@@ -444,7 +518,10 @@ TRANSLATIONS = {
         "double.orbit.now": "Maintenant",
         "double.orbit.status": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
         "double.orbit.hover": "{date} | ρ={rho:.3f}\" | θ={theta:.1f}°",
-        "result.target_coordinates": "{label}\nRA JNow : {ra}\nDéc JNow : {dec}",
+        "result.target_coordinates": (
+            "{label}\nRA ICRS/J2000 : {ra}\nDéc ICRS/J2000 : {dec}\n"
+            "RA JNow : {jnow_ra}\nDéc JNow : {jnow_dec}"
+        ),
         "result.aladin_offline": "Vue du ciel interactive indisponible : hors-ligne.",
         "result.aladin_unavailable": "Vue du ciel interactive indisponible. Vérifiez la connexion internet.",
         "result.aladin_opened": (
@@ -459,11 +536,26 @@ TRANSLATIONS = {
         ),
         "result.searching": "Recherche de {object_name}...",
         "result.search_error": "Recherche de coordonnées indisponible : {error}",
+        "result.online_search_offline": (
+            "Cette recherche nécessite une connexion internet et n'est pas disponible hors-ligne."
+        ),
+        "result.local_object_not_found_offline": (
+            "Objet introuvable dans le catalogue local.\n"
+            "La recherche hors-ligne inclut le catalogue d'étoiles embarqué et les entrées locales Messier/NGC/IC."
+        ),
         "result.imcce_coordinates": (
             "Coordonnées apparentes JNow depuis IMCCE :\nAlpha JNow : {ra}\nDelta JNow : {dec}"
         ),
+        "result.local_solar_coordinates": (
+            "Coordonnées apparentes JNow depuis les éphémérides locales :\n"
+            "Alpha JNow : {ra}\nDelta JNow : {dec}"
+        ),
         "result.sesame_coordinates": (
-            "Coordonnées ICRS depuis CDS Sesame :\nRA (Alpha) : {ra}\nDéc (Delta) : {dec}"
+            "Coordonnées ICRS/J2000 depuis CDS Sesame :\nRA (Alpha) : {ra}\nDéc (Delta) : {dec}"
+        ),
+        "result.local_coordinates": (
+            "Coordonnées locales ICRS/J2000 ({source}) :\n"
+            "RA (Alpha) : {ra}\nDéc (Delta) : {dec}\n{note}"
         ),
     },
 }
