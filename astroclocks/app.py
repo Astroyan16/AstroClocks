@@ -6148,6 +6148,108 @@ class AstroClocksApp:
     def _orbit_plot_position(self, point, center_x, center_y, scale):
         return center_x + point["east"] * scale, center_y + point["north"] * scale
 
+    def _orbit_label_anchor(self, x_direction, y_direction):
+        vertical = ""
+        horizontal = ""
+        if y_direction > 0.35:
+            vertical = "n"
+        elif y_direction < -0.35:
+            vertical = "s"
+        if x_direction > 0.35:
+            horizontal = "w"
+        elif x_direction < -0.35:
+            horizontal = "e"
+        return vertical + horizontal or "center"
+
+    def _orbit_external_label_position(
+        self,
+        x_position,
+        y_position,
+        center_x,
+        center_y,
+        screen_points,
+        gap=14,
+    ):
+        if not screen_points:
+            x_direction = x_position - center_x
+            y_direction = y_position - center_y
+            length = math.hypot(x_direction, y_direction) or 1.0
+            x_unit = x_direction / length
+            y_unit = y_direction / length
+            return (
+                x_position + x_unit * gap,
+                y_position + y_unit * gap,
+                self._orbit_label_anchor(x_unit, y_unit),
+                x_unit,
+                y_unit,
+            )
+
+        nearest_index = min(
+            range(len(screen_points)),
+            key=lambda index: (
+                (screen_points[index][0] - x_position) ** 2
+                + (screen_points[index][1] - y_position) ** 2
+            ),
+        )
+        previous_point = screen_points[(nearest_index - 1) % len(screen_points)]
+        next_point = screen_points[(nearest_index + 1) % len(screen_points)]
+        tangent_x = next_point[0] - previous_point[0]
+        tangent_y = next_point[1] - previous_point[1]
+
+        centroid_x = sum(point_x for point_x, _point_y, _point in screen_points) / len(
+            screen_points
+        )
+        centroid_y = sum(point_y for _point_x, point_y, _point in screen_points) / len(
+            screen_points
+        )
+        outward_x = x_position - centroid_x
+        outward_y = y_position - centroid_y
+
+        normal_x = -tangent_y
+        normal_y = tangent_x
+        if normal_x * outward_x + normal_y * outward_y < 0:
+            normal_x = -normal_x
+            normal_y = -normal_y
+        length = math.hypot(normal_x, normal_y)
+        if length < 1e-6:
+            normal_x = outward_x
+            normal_y = outward_y
+            length = math.hypot(normal_x, normal_y)
+        if length < 1e-6:
+            normal_x = 0.0
+            normal_y = -1.0
+            length = 1.0
+
+        x_unit = normal_x / length
+        y_unit = normal_y / length
+        return (
+            x_position + x_unit * gap,
+            y_position + y_unit * gap,
+            self._orbit_label_anchor(x_unit, y_unit),
+            x_unit,
+            y_unit,
+        )
+
+    def _keep_canvas_item_in_bounds(self, canvas, item, padding=8):
+        bbox = canvas.bbox(item)
+        if bbox is None:
+            return 0, 0
+        canvas_width = canvas.winfo_width()
+        canvas_height = canvas.winfo_height()
+        dx = 0
+        dy = 0
+        if bbox[0] < padding:
+            dx = padding - bbox[0]
+        elif bbox[2] > canvas_width - padding:
+            dx = canvas_width - padding - bbox[2]
+        if bbox[1] < padding:
+            dy = padding - bbox[1]
+        elif bbox[3] > canvas_height - padding:
+            dy = canvas_height - padding - bbox[3]
+        if dx or dy:
+            canvas.move(item, dx, dy)
+        return dx, dy
+
     def open_double_star_orbit_window(self, star):
         orbit = star.get("orb6_orbit")
         if not orbit:
@@ -6410,8 +6512,10 @@ class AstroClocksApp:
             abs(current["east"]),
             abs(current["north"]),
         )
-        margin = 58
-        scale = min((width - margin * 2) / (2 * max_extent), (height - margin * 2) / (2 * max_extent))
+        margin = 86
+        available_width = max(20, width - margin * 2)
+        available_height = max(20, height - margin * 2)
+        scale = min(available_width / (2 * max_extent), available_height / (2 * max_extent))
         center_x = width / 2
         center_y = height / 2
 
@@ -6483,14 +6587,32 @@ class AstroClocksApp:
                 fill=self.fg,
                 outline=self.ebg,
             )
-            canvas.create_text(
-                marker_x + 6,
-                marker_y - 6,
+            gap = 14
+            label_x, label_y, label_anchor, x_unit, y_unit = self._orbit_external_label_position(
+                marker_x,
+                marker_y,
+                center_x,
+                center_y,
+                screen_points,
+                gap=gap,
+            )
+            label_item = canvas.create_text(
+                label_x,
+                label_y,
                 text=self._format_orbit_epoch_label(orbit, marker_year),
                 fill=self.text,
                 font=Font(family="Segoe UI", size=8),
-                anchor="sw",
+                anchor=label_anchor,
             )
+            dx, dy = self._keep_canvas_item_in_bounds(canvas, label_item)
+            leader_item = canvas.create_line(
+                marker_x + x_unit * 5,
+                marker_y + y_unit * 5,
+                label_x + dx - x_unit * 2,
+                label_y + dy - y_unit * 2,
+                fill=self.card_edge,
+            )
+            canvas.tag_lower(leader_item, label_item)
 
         current_x, current_y = self._orbit_plot_position(current, center_x, center_y, scale)
         canvas.create_oval(
@@ -6502,14 +6624,38 @@ class AstroClocksApp:
             outline=self.text,
             width=2,
         )
-        canvas.create_text(
-            current_x + 8,
-            current_y + 8,
+        current_gap = 18
+        (
+            current_label_x,
+            current_label_y,
+            current_label_anchor,
+            current_x_unit,
+            current_y_unit,
+        ) = self._orbit_external_label_position(
+            current_x,
+            current_y,
+            center_x,
+            center_y,
+            screen_points,
+            gap=current_gap,
+        )
+        current_label_item = canvas.create_text(
+            current_label_x,
+            current_label_y,
             text=self._tr("double.orbit.now"),
             fill=self.fg,
             font=Font(family="Segoe UI", size=9, weight="bold"),
-            anchor="nw",
+            anchor=current_label_anchor,
         )
+        dx, dy = self._keep_canvas_item_in_bounds(canvas, current_label_item)
+        leader_item = canvas.create_line(
+            current_x + current_x_unit * 7,
+            current_y + current_y_unit * 7,
+            current_label_x + dx - current_x_unit * 2,
+            current_label_y + dy - current_y_unit * 2,
+            fill=self.card_edge,
+        )
+        canvas.tag_lower(leader_item, current_label_item)
         today_label.config(
             text=self._tr(
                 "double.orbit.status",
