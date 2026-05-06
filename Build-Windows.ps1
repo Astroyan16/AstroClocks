@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$Version = "3.2"
+$Version = "3.3"
 $AppName = "AstroClocks-v$Version"
 $InstallerName = "Install_AstroClocks$Version.exe"
 
