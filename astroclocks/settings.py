@@ -37,6 +37,23 @@ DEFAULT_DOUBLE_INCLUDE_APPARENT = False
 DEFAULT_DOUBLE_INCLUDE_UNCERTAIN = False
 DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE = False
 DEFAULT_DOUBLE_USE_ONLINE = True
+DEFAULT_DEEP_SKY_CATEGORY = "galaxy"
+DEFAULT_DEEP_SKY_MIN_MAGNITUDE = -2.0
+DEFAULT_DEEP_SKY_MAX_MAGNITUDE = 13.0
+DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE = 10.0
+DEFAULT_DEEP_SKY_VISIBLE_NIGHT = True
+DEEP_SKY_CATEGORY_CODES = {
+    "planetary_nebula",
+    "emission_nebula",
+    "reflection_nebula",
+    "dark_nebula",
+    "supernova_remnant",
+    "galaxy",
+    "galaxy_cluster",
+    "open_cluster",
+    "globular_cluster",
+    "quasar",
+}
 SUPPORTED_LANGUAGES = {"en", "fr"}
 
 LEGACY_LONGITUDE_FILE = resource_path("Longitude.ini")
@@ -81,6 +98,11 @@ class AppSettings:
     double_include_uncertain: bool = DEFAULT_DOUBLE_INCLUDE_UNCERTAIN
     double_exclude_polar_circle: bool = DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE
     double_use_online: bool = DEFAULT_DOUBLE_USE_ONLINE
+    deep_sky_category: str = DEFAULT_DEEP_SKY_CATEGORY
+    deep_sky_min_magnitude: float = DEFAULT_DEEP_SKY_MIN_MAGNITUDE
+    deep_sky_max_magnitude: float = DEFAULT_DEEP_SKY_MAX_MAGNITUDE
+    deep_sky_min_max_altitude: float = DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE
+    deep_sky_visible_night: bool = DEFAULT_DEEP_SKY_VISIBLE_NIGHT
 
 
 def _clamp(value, minimum, maximum):
@@ -123,6 +145,12 @@ def normalize_settings(settings):
     timezone_name = str(
         getattr(settings, "timezone_name", DEFAULT_TIMEZONE_NAME) or DEFAULT_TIMEZONE_NAME
     ).strip()
+    deep_sky_category = str(
+        getattr(settings, "deep_sky_category", DEFAULT_DEEP_SKY_CATEGORY)
+        or DEFAULT_DEEP_SKY_CATEGORY
+    )
+    if deep_sky_category not in DEEP_SKY_CATEGORY_CODES:
+        deep_sky_category = DEFAULT_DEEP_SKY_CATEGORY
 
     return AppSettings(
         site_name=site_name,
@@ -225,6 +253,26 @@ def normalize_settings(settings):
         double_use_online=_coerce_bool(
             getattr(settings, "double_use_online", DEFAULT_DOUBLE_USE_ONLINE),
             DEFAULT_DOUBLE_USE_ONLINE,
+        ),
+        deep_sky_category=deep_sky_category,
+        deep_sky_min_magnitude=_clamp(
+            float(getattr(settings, "deep_sky_min_magnitude", DEFAULT_DEEP_SKY_MIN_MAGNITUDE)),
+            -30,
+            30,
+        ),
+        deep_sky_max_magnitude=_clamp(
+            float(getattr(settings, "deep_sky_max_magnitude", DEFAULT_DEEP_SKY_MAX_MAGNITUDE)),
+            -30,
+            30,
+        ),
+        deep_sky_min_max_altitude=_clamp(
+            float(getattr(settings, "deep_sky_min_max_altitude", DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE)),
+            -90,
+            90,
+        ),
+        deep_sky_visible_night=_coerce_bool(
+            getattr(settings, "deep_sky_visible_night", DEFAULT_DEEP_SKY_VISIBLE_NIGHT),
+            DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
         ),
     )
 
@@ -330,6 +378,26 @@ def load_app_settings():
             double_use_online=data.get(
                 "double_use_online",
                 DEFAULT_DOUBLE_USE_ONLINE,
+            ),
+            deep_sky_category=data.get(
+                "deep_sky_category",
+                DEFAULT_DEEP_SKY_CATEGORY,
+            ),
+            deep_sky_min_magnitude=data.get(
+                "deep_sky_min_magnitude",
+                DEFAULT_DEEP_SKY_MIN_MAGNITUDE,
+            ),
+            deep_sky_max_magnitude=data.get(
+                "deep_sky_max_magnitude",
+                DEFAULT_DEEP_SKY_MAX_MAGNITUDE,
+            ),
+            deep_sky_min_max_altitude=data.get(
+                "deep_sky_min_max_altitude",
+                DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE,
+            ),
+            deep_sky_visible_night=data.get(
+                "deep_sky_visible_night",
+                DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
             ),
         )
     )

@@ -2,6 +2,7 @@ import calendar
 import datetime
 import math
 import os
+import queue
 import socket
 import tempfile
 import threading
@@ -44,6 +45,14 @@ from astroclocks.double_star_catalog import (
     load_cached_wds_double_stars,
     merge_cached_wds_double_stars,
 )
+from astroclocks.deep_sky_catalog import (
+    DEEP_SKY_CATEGORY_ORDER,
+    deep_sky_search_objects,
+    fetch_simbad_deep_sky_objects,
+    load_cached_simbad_deep_sky_objects,
+    merge_cached_simbad_deep_sky_objects,
+    merge_deep_sky_objects,
+)
 from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS, translate
 from astroclocks.local_object_catalog import resolve_local_object_coordinates
 from astroclocks.orbit_catalog import (
@@ -73,6 +82,11 @@ from astroclocks.settings import (
     DEFAULT_DOUBLE_MIN_SEPARATION,
     DEFAULT_DOUBLE_USE_ONLINE,
     DEFAULT_DOUBLE_VISIBLE_NIGHT,
+    DEFAULT_DEEP_SKY_CATEGORY,
+    DEFAULT_DEEP_SKY_MAX_MAGNITUDE,
+    DEFAULT_DEEP_SKY_MIN_MAGNITUDE,
+    DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE,
+    DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
     DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
@@ -104,8 +118,8 @@ from astroclocks.windowing import (
 )
 
 
-APP_VERSION = "3.2"
-APP_RELEASE_MONTH = 4
+APP_VERSION = "3.3"
+APP_RELEASE_MONTH = 5
 APP_YEAR = "2026"
 APP_AUTHOR = "Yannis Benazza"
 APP_EMAIL = "yannis.benazza@obspm.fr"
@@ -188,6 +202,8 @@ TWILIGHT_PHASE_COLORS = {
 }
 DOUBLE_NIGHT_SUN_MAX_ALTITUDE = -6
 DOUBLE_NIGHT_TARGET_MIN_ALTITUDE = 10
+DEEP_SKY_NIGHT_SUN_MAX_ALTITUDE = -6
+DEEP_SKY_NIGHT_TARGET_MIN_ALTITUDE = 10
 DOUBLE_PHYSICAL_NOTE_FLAGS = frozenset({"O", "C", "Z", "T", "V"})
 DOUBLE_NOTED_NOTE_FLAGS = frozenset({"N"})
 DOUBLE_APPARENT_NOTE_FLAGS = frozenset({"Y", "S", "U"})
@@ -281,8 +297,9 @@ class AstroClocksApp:
         self.connectivity_check_pending = False
         self.sky_canvas = None
         self.sky_status = None
-        self._set_loading_status("Conversion du catalogue d'étoiles...")
-        self.named_stars_jnow = convert_star_catalog_j2000_to_jnow(SKY_STARS_J2000)
+        self.named_stars_jnow = []
+        self.named_stars_loading = False
+        self.named_stars_result_queue = queue.Queue()
         self.sky_geometry = None
         self.sky_map_cache_key = None
         self.sky_star_image = None
@@ -324,6 +341,7 @@ class AstroClocksApp:
         self.main_tab = None
         self.visibility_tab = None
         self.double_star_tab = None
+        self.deep_sky_tab = None
         self.visibility_canvas = None
         self.visibility_status = None
         self.visibility_cache_key = None
@@ -340,28 +358,52 @@ class AstroClocksApp:
         self.double_star_results = []
         self.double_star_tree = None
         self.double_apply_button = None
+        self.double_search_button = None
         self.double_orbit_recompute_button = None
         self.double_reset_button = None
         self.double_advanced_button = None
         self.double_advanced_frame = None
         self.double_advanced_options_visible = False
         self.double_tree_separators = []
+        self.double_tree_render_job = None
+        self.double_status_label = None
         self.double_sort_column = "name"
         self.double_sort_reverse = False
+        self.double_star_tab_initialized = False
+        self.double_star_initial_load_started = False
         self.double_search_generation = 0
         self.double_remote_search_pending = False
         self.double_orb6_index = None
         self.double_orb6_orbit_index = None
         self.double_wds_note_cache = {}
         self.double_wds_cached_stars = []
+        self.deep_sky_results = []
+        self.deep_sky_tree = None
+        self.deep_sky_apply_button = None
+        self.deep_sky_online_button = None
+        self.deep_sky_reset_button = None
+        self.deep_sky_set_button = None
+        self.deep_sky_status_label = None
+        self.deep_sky_tree_separators = []
+        self.deep_sky_sort_column = "name"
+        self.deep_sky_sort_reverse = False
+        self.deep_sky_tab_initialized = False
+        self.deep_sky_initial_load_started = False
+        self.deep_sky_search_generation = 0
+        self.deep_sky_search_pending = False
+        self.deep_sky_simbad_cached_objects = []
+        self.deep_sky_category_label_to_code = {}
+        self.deep_sky_magnitude_entries = []
         self.coordinate_search_generation = 0
         self.coordinate_search_pending = False
         self.translated_widgets = []
+        self.deferred_startup_scheduled = False
 
         self._set_loading_status("Chargement du cache ORB6...")
         self.double_orb6_index = load_cached_orb6_ephemerides()
         self.double_orb6_orbit_index = load_cached_orb6_orbits()
         self.double_wds_cached_stars = load_cached_wds_double_stars()
+        self.deep_sky_simbad_cached_objects = load_cached_simbad_deep_sky_objects()
 
         self._set_loading_status("Préparation de l'interface...")
         self._configure_styles()
@@ -374,13 +416,17 @@ class AstroClocksApp:
         self._create_hour_angle_widgets()
         self._create_sky_widgets()
         self._create_visibility_widgets()
-        self._create_double_star_widgets()
         self.update_site_labels()
         self.update_value(activate_target=False)
         self._schedule_connectivity_check(0)
         self._set_loading_status("Affichage de la fenêtre...")
         self._place_initial_window()
+        try:
+            self.root.update()
+        except (tk.TclError, RuntimeError):
+            pass
         self._close_loading_window()
+        self._schedule_deferred_startup_work()
 
         self.root.bind("<Return>", lambda event: self.search_coordinates())
         self.root.bind("<Configure>", self._schedule_dynamic_font_update)
@@ -409,6 +455,48 @@ class AstroClocksApp:
             pass
         self.loading_window = None
         self.loading_status_var = None
+
+    def _schedule_deferred_startup_work(self):
+        if self.deferred_startup_scheduled:
+            return
+        self.deferred_startup_scheduled = True
+        self.root.after(0, self._start_deferred_startup_work)
+
+    def _start_deferred_startup_work(self):
+        self._start_named_star_catalog_conversion()
+
+    def _start_named_star_catalog_conversion(self):
+        if self.named_stars_loading or self.named_stars_jnow:
+            return
+        self.named_stars_loading = True
+        threading.Thread(target=self._load_named_star_catalog_jnow, daemon=True).start()
+        self.root.after(50, self._poll_named_star_catalog_conversion)
+
+    def _load_named_star_catalog_jnow(self):
+        try:
+            converted = convert_star_catalog_j2000_to_jnow(SKY_STARS_J2000)
+        except Exception:
+            converted = []
+        self.named_stars_result_queue.put(converted)
+
+    def _poll_named_star_catalog_conversion(self):
+        if not self.named_stars_loading:
+            return
+        try:
+            converted = self.named_stars_result_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(50, self._poll_named_star_catalog_conversion)
+            return
+        self._apply_named_star_catalog_jnow(converted)
+
+    def _apply_named_star_catalog_jnow(self, converted):
+        self.named_stars_loading = False
+        self.named_stars_jnow = converted
+        self.sky_map_cache_key = None
+        try:
+            self._update_sky_map()
+        except (tk.TclError, RuntimeError):
+            pass
 
     def _release_date_text(self):
         return f"{self._tr(f'about.month.{APP_RELEASE_MONTH}')} {APP_YEAR}"
@@ -647,6 +735,24 @@ class AstroClocksApp:
         dialog_height = dialog.winfo_height()
         x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog_width) // 2
         y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog_height) // 2
+
+        monitor_x, monitor_y, monitor_width, monitor_height = self._current_monitor_geometry()
+        max_x = monitor_x + monitor_width - dialog_width
+        max_y = monitor_y + monitor_height - dialog_height
+        if max_x >= monitor_x:
+            x = min(max(x, monitor_x), max_x)
+        if max_y >= monitor_y:
+            y = min(max(y, monitor_y), max_y)
+
+        self._move_window_to(dialog, x, y)
+        dialog.lift(self.root)
+
+    def _place_dialog_below_widget(self, dialog, widget, x_offset=0, y_offset=6):
+        dialog.update_idletasks()
+        dialog_width = dialog.winfo_width()
+        dialog_height = dialog.winfo_height()
+        x = widget.winfo_rootx() + x_offset
+        y = widget.winfo_rooty() + widget.winfo_height() + y_offset
 
         monitor_x, monitor_y, monitor_width, monitor_height = self._current_monitor_geometry()
         max_x = monitor_x + monitor_width - dialog_width
@@ -1104,10 +1210,12 @@ class AstroClocksApp:
         self.main_tab = tk.Frame(self.notebook, bg=self.gbg)
         self.visibility_tab = tk.Frame(self.notebook, bg=self.gbg)
         self.double_star_tab = tk.Frame(self.notebook, bg=self.gbg)
+        self.deep_sky_tab = tk.Frame(self.notebook, bg=self.gbg)
 
         self.notebook.add(self.main_tab, text=self._tr("tab.main"))
         self.notebook.add(self.visibility_tab, text=self._tr("tab.visibility"))
         self.notebook.add(self.double_star_tab, text=self._tr("tab.double_stars"))
+        self.notebook.add(self.deep_sky_tab, text=self._tr("tab.deep_sky"))
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         for column in range(3):
@@ -1120,12 +1228,22 @@ class AstroClocksApp:
         self.double_star_tab.grid_columnconfigure(0, weight=0)
         self.double_star_tab.grid_columnconfigure(1, weight=1)
         self.double_star_tab.grid_rowconfigure(0, weight=1)
+        self.deep_sky_tab.grid_columnconfigure(0, weight=0)
+        self.deep_sky_tab.grid_columnconfigure(1, weight=1)
+        self.deep_sky_tab.grid_rowconfigure(0, weight=1)
 
     def _on_tab_changed(self, _event=None):
-        if self.notebook is None or self.double_star_tree is None:
+        if self.notebook is None:
             return
-        if self.notebook.select() == str(self.double_star_tab):
+        selected_tab = self.notebook.select()
+        if selected_tab == str(self.double_star_tab):
+            self._ensure_double_star_tab_initialized()
+        if selected_tab == str(self.deep_sky_tab):
+            self._ensure_deep_sky_tab_initialized()
+        if self.double_star_tree is not None and selected_tab == str(self.double_star_tab):
             self.root.after_idle(self._update_double_tree_separators)
+        if self.deep_sky_tree is not None and selected_tab == str(self.deep_sky_tab):
+            self.root.after_idle(self._update_deep_sky_tree_separators)
 
     def _create_site_widgets(self):
         self.site_info_font = Font(family="Segoe UI", size=10)
@@ -2037,7 +2155,258 @@ class AstroClocksApp:
 
         self._refresh_double_star_headings()
         self._update_double_tree_separators()
-        self._restore_double_star_cached_results()
+        if self.double_status_label is not None:
+            self.double_status_label.config(text=self._tr("double.loading_objects"))
+
+    def _create_deep_sky_widgets(self):
+        controls = tk.Frame(self.deep_sky_tab, bg=self.card_bg)
+        controls.grid(column=0, row=0, padx=(12, 8), pady=12, sticky="ns")
+        controls.grid_columnconfigure(0, weight=1)
+
+        self._register_translated_widget(
+            tk.Label(
+                controls,
+                bg=self.card_bg,
+                fg=self.muted,
+                font=Font(family="Segoe UI", size=10, weight="bold"),
+                anchor="w",
+            ),
+            "deep_sky.filters",
+        ).grid(column=0, row=0, pady=(0, 10), sticky="ew")
+
+        self.deep_sky_category_var = tk.StringVar()
+        self.deep_sky_min_mag_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.deep_sky_min_magnitude)
+        )
+        self.deep_sky_max_mag_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.deep_sky_max_magnitude)
+        )
+        self.deep_sky_min_altitude_var = tk.StringVar(
+            value=self._format_double_filter_number(self.settings.deep_sky_min_max_altitude)
+        )
+        self.deep_sky_visible_night_var = tk.BooleanVar(
+            value=self.settings.deep_sky_visible_night
+        )
+
+        category_label = tk.Label(
+            controls,
+            text=self._tr("deep_sky.category"),
+            bg=self.card_bg,
+            fg=self.text,
+            font=Font(family="Segoe UI", size=10),
+            anchor="w",
+        )
+        self._register_translated_widget(category_label, "deep_sky.category")
+        category_label.grid(column=0, row=1, sticky="ew", pady=(6, 2))
+
+        self.deep_sky_category_combo = ttk.Combobox(
+            controls,
+            textvariable=self.deep_sky_category_var,
+            state="readonly",
+            style="Dark.TCombobox",
+            width=24,
+        )
+        self.deep_sky_category_combo.grid(column=0, row=2, sticky="ew")
+        self.deep_sky_category_combo.bind(
+            "<<ComboboxSelected>>",
+            self._on_deep_sky_category_changed,
+        )
+
+        def add_filter(parent, row, key, variable, column=0, columnspan=1):
+            label = tk.Label(
+                parent,
+                bg=self.card_bg,
+                fg=self.text,
+                font=Font(family="Segoe UI", size=10),
+                anchor="w",
+            )
+            self._register_translated_widget(label, key)
+            label.grid(column=column, row=row, columnspan=columnspan, sticky="ew", pady=(6, 2))
+            entry = tk.Entry(
+                parent,
+                textvariable=variable,
+                bg=self.ebg,
+                fg=self.text,
+                insertbackground=self.fg,
+                font=Font(family="Segoe UI", size=11),
+                relief="flat",
+                highlightbackground=self.card_edge,
+                highlightcolor=self.accent,
+                highlightthickness=1,
+                width=16,
+            )
+            entry.grid(column=column, row=row + 1, columnspan=columnspan, sticky="ew")
+            entry.bind("<Return>", lambda _event: self.search_deep_sky_objects())
+            entry.bind("<FocusOut>", self._save_deep_sky_filters_if_valid)
+            return entry
+
+        magnitude_frame = tk.Frame(controls, bg=self.card_bg)
+        magnitude_frame.grid(column=0, row=3, sticky="ew")
+        magnitude_frame.grid_columnconfigure(0, weight=1)
+        magnitude_frame.grid_columnconfigure(1, weight=1)
+        self.deep_sky_magnitude_entries = [
+            add_filter(
+                magnitude_frame,
+                0,
+                "deep_sky.min_magnitude",
+                self.deep_sky_min_mag_var,
+                column=0,
+            ),
+            add_filter(
+                magnitude_frame,
+                0,
+                "deep_sky.max_magnitude",
+                self.deep_sky_max_mag_var,
+                column=1,
+            ),
+        ]
+
+        add_filter(controls, 5, "deep_sky.min_max_altitude", self.deep_sky_min_altitude_var)
+
+        self._register_translated_widget(
+            self._build_inline_checkbutton(
+                controls,
+                self.deep_sky_visible_night_var,
+                self._tr("deep_sky.visible_night"),
+                self._save_deep_sky_filters_if_valid,
+            ),
+            "deep_sky.visible_night",
+        ).grid(column=0, row=7, pady=(12, 0), sticky="ew")
+
+        self.deep_sky_apply_button = self._build_button(
+            controls,
+            self._tr("deep_sky.apply_filters"),
+            lambda: self.search_deep_sky_objects(allow_online=False),
+        )
+        self.deep_sky_apply_button.grid(column=0, row=8, pady=(14, 6), sticky="ew")
+
+        self.deep_sky_online_button = self._build_button(
+            controls,
+            self._tr("deep_sky.online_search"),
+            lambda: self.search_deep_sky_objects(allow_online=True),
+        )
+        self.deep_sky_online_button.grid(column=0, row=9, pady=(0, 6), sticky="ew")
+
+        self.deep_sky_set_button = self._build_button(
+            controls,
+            self._tr("deep_sky.set_target"),
+            self.set_selected_deep_sky_target,
+        )
+        self.deep_sky_set_button.grid(column=0, row=10, pady=(0, 6), sticky="ew")
+
+        self.deep_sky_reset_button = self._build_button(
+            controls,
+            self._tr("deep_sky.reset_filters"),
+            self.reset_deep_sky_filters,
+        )
+        self.deep_sky_reset_button.grid(column=0, row=11, pady=(0, 12), sticky="ew")
+
+        self.deep_sky_status_label = tk.Label(
+            controls,
+            bg=self.card_bg,
+            fg=self.muted,
+            font=Font(family="Segoe UI", size=9),
+            justify="left",
+            wraplength=220,
+            anchor="nw",
+        )
+        self.deep_sky_status_label.grid(column=0, row=12, sticky="ew")
+
+        results_frame = self._build_labelframe(
+            "frame.deep_sky",
+            1,
+            0,
+            parent=self.deep_sky_tab,
+            padx=(8, 12),
+            pady=12,
+        )
+        results_frame.grid_columnconfigure(0, weight=1)
+        results_frame.grid_rowconfigure(0, weight=1)
+
+        columns = (
+            "name",
+            "aliases",
+            "type",
+            "magnitude",
+            "max_altitude",
+            "max_night_altitude",
+            "ra",
+            "declination",
+            "source",
+        )
+        self.deep_sky_tree = ttk.Treeview(
+            results_frame,
+            columns=columns,
+            show="headings",
+            selectmode="browse",
+        )
+        self.deep_sky_tree.grid(column=0, row=0, sticky="nsew", padx=(8, 0), pady=8)
+        scrollbar = ttk.Scrollbar(
+            results_frame,
+            orient="vertical",
+            command=self.deep_sky_tree.yview,
+            style="Dark.Vertical.TScrollbar",
+        )
+        scrollbar.grid(column=1, row=0, sticky="ns", padx=(0, 8), pady=8)
+        horizontal_scrollbar = ttk.Scrollbar(
+            results_frame,
+            orient="horizontal",
+            command=self._deep_sky_tree_xview,
+            style="Dark.Horizontal.TScrollbar",
+        )
+        horizontal_scrollbar.grid(column=0, row=1, sticky="ew", padx=(8, 0), pady=(0, 8))
+        self.deep_sky_tree.configure(
+            yscrollcommand=scrollbar.set,
+            xscrollcommand=lambda first, last: self._on_deep_sky_tree_xscroll(
+                horizontal_scrollbar,
+                first,
+                last,
+            ),
+        )
+        self.deep_sky_tree.bind("<Double-1>", lambda _event: self.set_selected_deep_sky_target())
+        self.deep_sky_tree.bind(
+            "<Configure>",
+            lambda _event: self.root.after_idle(self._update_deep_sky_tree_separators),
+        )
+        self.deep_sky_tree.tag_configure("odd", background="#0e151b")
+        self.deep_sky_tree.tag_configure("even", background=self.ebg)
+
+        column_widths = {
+            "name": 145,
+            "aliases": 260,
+            "type": 145,
+            "magnitude": 90,
+            "max_altitude": 90,
+            "max_night_altitude": 95,
+            "ra": 95,
+            "declination": 95,
+            "source": 170,
+        }
+        column_min_widths = {
+            "name": 120,
+            "aliases": 180,
+            "type": 120,
+            "magnitude": 80,
+            "max_altitude": 85,
+            "max_night_altitude": 90,
+            "ra": 85,
+            "declination": 85,
+            "source": 130,
+        }
+        for column, width in column_widths.items():
+            anchor = "center" if column in {"magnitude", "max_altitude", "max_night_altitude"} else "w"
+            self.deep_sky_tree.column(
+                column,
+                width=width,
+                minwidth=column_min_widths[column],
+                anchor=anchor,
+            )
+
+        self._set_deep_sky_category_values(self.settings.deep_sky_category)
+        self._refresh_deep_sky_headings()
+        self._update_deep_sky_tree_separators()
+        if self.deep_sky_status_label is not None:
+            self.deep_sky_status_label.config(text=self._tr("deep_sky.loading_objects"))
 
     def _double_advanced_button_text(self):
         key = (
@@ -2069,6 +2438,32 @@ class AstroClocksApp:
             count=len(self.double_wds_cached_stars),
         )
         self._render_double_star_results(stars, len(stars), source_key, note)
+
+    def _ensure_double_star_tab_initialized(self):
+        if self.double_star_tab_initialized:
+            return
+        self._create_double_star_widgets()
+        self.double_star_tab_initialized = True
+        self._schedule_initial_double_star_load()
+
+    def _ensure_deep_sky_tab_initialized(self):
+        if self.deep_sky_tab_initialized:
+            return
+        self._create_deep_sky_widgets()
+        self.deep_sky_tab_initialized = True
+        self._schedule_initial_deep_sky_load()
+
+    def _schedule_initial_double_star_load(self):
+        if self.double_star_initial_load_started:
+            return
+        self.double_star_initial_load_started = True
+        self.root.after(120, self._restore_double_star_cached_results)
+
+    def _schedule_initial_deep_sky_load(self):
+        if self.deep_sky_initial_load_started:
+            return
+        self.deep_sky_initial_load_started = True
+        self.root.after(120, lambda: self.search_deep_sky_objects(allow_online=False))
 
     def _parse_clock_hours(self, value):
         hours, minutes, seconds = value.split(":")
@@ -2164,6 +2559,7 @@ class AstroClocksApp:
     def _open_visibility_calendar(self):
         selected_date = self.visibility_start_date or self._default_visibility_start_date()
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
         dialog.title(self._tr("visibility.calendar_title"))
         apply_app_icon(dialog)
         dialog.configure(bg=self.gbg)
@@ -2297,6 +2693,9 @@ class AstroClocksApp:
             sticky="ew",
         )
         render_month()
+        self._place_dialog_below_widget(dialog, self.visibility_calendar_button)
+        dialog.deiconify()
+        dialog.lift(self.root)
 
     def _visibility_window_context(self):
         now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -4569,6 +4968,7 @@ class AstroClocksApp:
             self.notebook.tab(self.main_tab, text=self._tr("tab.main"))
             self.notebook.tab(self.visibility_tab, text=self._tr("tab.visibility"))
             self.notebook.tab(self.double_star_tab, text=self._tr("tab.double_stars"))
+            self.notebook.tab(self.deep_sky_tab, text=self._tr("tab.deep_sky"))
         self.subtitle_label.config(text=self._tr("app.subtitle"))
         self.header_settings_button.config(text=self._tr("button.settings"))
         self.about_button.config(text=self._tr("button.about"))
@@ -4585,14 +4985,24 @@ class AstroClocksApp:
         self.delta_set_button.config(text=self._tr("button.set"))
         if self.double_apply_button is not None:
             self.double_apply_button.config(text=self._tr("double.apply_filters"))
-        self.double_search_button.config(text=self._tr("double.online_search"))
+        if self.double_search_button is not None:
+            self.double_search_button.config(text=self._tr("double.online_search"))
         if self.double_orbit_recompute_button is not None:
             self.double_orbit_recompute_button.config(text=self._tr("double.recalculate_orbits"))
         if self.double_advanced_button is not None:
             self.double_advanced_button.config(text=self._double_advanced_button_text())
-        self.double_set_button.config(text=self._tr("double.set_target"))
+        if self.double_set_button is not None:
+            self.double_set_button.config(text=self._tr("double.set_target"))
         if self.double_reset_button is not None:
             self.double_reset_button.config(text=self._tr("double.reset_filters"))
+        if self.deep_sky_apply_button is not None:
+            self.deep_sky_apply_button.config(text=self._tr("deep_sky.apply_filters"))
+        if self.deep_sky_online_button is not None:
+            self.deep_sky_online_button.config(text=self._tr("deep_sky.online_search"))
+        if self.deep_sky_set_button is not None:
+            self.deep_sky_set_button.config(text=self._tr("deep_sky.set_target"))
+        if self.deep_sky_reset_button is not None:
+            self.deep_sky_reset_button.config(text=self._tr("deep_sky.reset_filters"))
         if self.visibility_previous_button is not None:
             self.visibility_previous_button.config(text=self._tr("visibility.previous_day"))
         if self.visibility_next_button is not None:
@@ -4608,6 +5018,8 @@ class AstroClocksApp:
             title_label.config(text=self._tr(title_key, **title_values).upper())
 
         self._set_object_type_values()
+        self._set_deep_sky_category_values()
+        self._refresh_deep_sky_headings()
         self.update_site_labels()
         self.update_value(
             activate_target=self.target_active,
@@ -4616,6 +5028,7 @@ class AstroClocksApp:
 
     def _save_current_settings(self):
         double_filter_settings = self._current_double_filter_settings()
+        deep_sky_filter_settings = self._current_deep_sky_filter_settings()
         self.settings = AppSettings(
             site_name=self.site_name,
             country=self.country,
@@ -4632,6 +5045,7 @@ class AstroClocksApp:
             hour_angle_offset_enabled=self.hour_angle_offset_enabled,
             declination_offset_enabled=self.declination_offset_enabled,
             **double_filter_settings,
+            **deep_sky_filter_settings,
         )
         save_app_settings(self.settings)
 
@@ -4717,6 +5131,293 @@ class AstroClocksApp:
         if not all(is_float(variable.get()) for variable in variables):
             return
         self._save_current_settings()
+
+    def _current_deep_sky_filter_settings(self):
+        def read_float(variable_name, current_value):
+            variable = getattr(self, variable_name, None)
+            if variable is None or not is_float(variable.get()):
+                return current_value
+            return float(variable.get())
+
+        category = DEFAULT_DEEP_SKY_CATEGORY
+        if getattr(self, "deep_sky_category_var", None) is not None:
+            category = self.deep_sky_category_label_to_code.get(
+                self.deep_sky_category_var.get(),
+                getattr(self.settings, "deep_sky_category", DEFAULT_DEEP_SKY_CATEGORY),
+            )
+        visible_night_var = getattr(self, "deep_sky_visible_night_var", None)
+
+        return {
+            "deep_sky_category": category,
+            "deep_sky_min_magnitude": read_float(
+                "deep_sky_min_mag_var",
+                self.settings.deep_sky_min_magnitude,
+            ),
+            "deep_sky_max_magnitude": read_float(
+                "deep_sky_max_mag_var",
+                self.settings.deep_sky_max_magnitude,
+            ),
+            "deep_sky_min_max_altitude": read_float(
+                "deep_sky_min_altitude_var",
+                self.settings.deep_sky_min_max_altitude,
+            ),
+            "deep_sky_visible_night": (
+                visible_night_var.get()
+                if visible_night_var is not None
+                else self.settings.deep_sky_visible_night
+            ),
+        }
+
+    def _save_deep_sky_filters_if_valid(self, _event=None):
+        variables = [self.deep_sky_min_altitude_var]
+        if self._deep_sky_uses_magnitude_filter():
+            variables.extend((self.deep_sky_min_mag_var, self.deep_sky_max_mag_var))
+        if not all(is_float(variable.get()) for variable in variables):
+            return
+        self._save_current_settings()
+
+    def _deep_sky_uses_magnitude_filter(self, category=None):
+        active_category = category or self._current_deep_sky_category_code()
+        return active_category != "dark_nebula"
+
+    def _on_deep_sky_category_changed(self, _event=None):
+        self._update_deep_sky_magnitude_filter_state()
+        self._save_deep_sky_filters_if_valid()
+
+    def _update_deep_sky_magnitude_filter_state(self):
+        state = tk.NORMAL if self._deep_sky_uses_magnitude_filter() else tk.DISABLED
+        for entry in getattr(self, "deep_sky_magnitude_entries", ()):
+            entry.config(
+                state=state,
+                disabledbackground=self.card_edge,
+                disabledforeground=self.muted,
+            )
+
+    def _deep_sky_category_values(self):
+        values = []
+        label_to_code = {}
+        for code in DEEP_SKY_CATEGORY_ORDER:
+            label = self._tr(f"deep_sky.category.{code}")
+            values.append(label)
+            label_to_code[label] = code
+        return values, label_to_code
+
+    def _set_deep_sky_category_values(self, selected_code=None):
+        if getattr(self, "deep_sky_category_combo", None) is None:
+            return
+
+        current_code = selected_code or self._current_deep_sky_category_code()
+        values, label_to_code = self._deep_sky_category_values()
+        self.deep_sky_category_label_to_code = label_to_code
+        self.deep_sky_category_combo.config(values=values)
+        selected_label = next(
+            (
+                label
+                for label, code in label_to_code.items()
+                if code == current_code
+            ),
+            values[0],
+        )
+        self.deep_sky_category_var.set(selected_label)
+        self._update_deep_sky_magnitude_filter_state()
+
+    def _current_deep_sky_category_code(self):
+        category_var = getattr(self, "deep_sky_category_var", None)
+        label = category_var.get() if category_var is not None else ""
+        return self.deep_sky_category_label_to_code.get(
+            label,
+            getattr(self.settings, "deep_sky_category", DEFAULT_DEEP_SKY_CATEGORY),
+        )
+
+    def _default_deep_sky_filters(self):
+        return {
+            "category": DEFAULT_DEEP_SKY_CATEGORY,
+            "min_magnitude": DEFAULT_DEEP_SKY_MIN_MAGNITUDE,
+            "max_magnitude": DEFAULT_DEEP_SKY_MAX_MAGNITUDE,
+            "min_altitude": DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE,
+            "visible_night": DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
+        }
+
+    def _apply_deep_sky_filter_controls(self, filters):
+        self._set_deep_sky_category_values(filters["category"])
+        self.deep_sky_min_mag_var.set(
+            self._format_double_filter_number(filters["min_magnitude"])
+        )
+        self.deep_sky_max_mag_var.set(
+            self._format_double_filter_number(filters["max_magnitude"])
+        )
+        self.deep_sky_min_altitude_var.set(
+            self._format_double_filter_number(filters["min_altitude"])
+        )
+        self.deep_sky_visible_night_var.set(filters["visible_night"])
+
+    def reset_deep_sky_filters(self):
+        self._apply_deep_sky_filter_controls(self._default_deep_sky_filters())
+        self._save_current_settings()
+        self.search_deep_sky_objects(allow_online=False)
+
+    def _read_deep_sky_filters(self):
+        category = self._current_deep_sky_category_code()
+        use_magnitude = self._deep_sky_uses_magnitude_filter(category)
+        try:
+            if use_magnitude:
+                min_magnitude = self._parse_float_setting(
+                    self.deep_sky_min_mag_var.get(),
+                    self._tr("deep_sky.min_magnitude"),
+                    -30,
+                    30,
+                )
+                max_magnitude = self._parse_float_setting(
+                    self.deep_sky_max_mag_var.get(),
+                    self._tr("deep_sky.max_magnitude"),
+                    -30,
+                    30,
+                )
+            else:
+                min_magnitude = None
+                max_magnitude = None
+            min_altitude = self._parse_float_setting(
+                self.deep_sky_min_altitude_var.get(),
+                self._tr("deep_sky.min_max_altitude"),
+                -90,
+                90,
+            )
+        except ValueError as exc:
+            messagebox.showerror(self._tr("settings.invalid_title"), str(exc), parent=self.root)
+            return None
+
+        if use_magnitude and min_magnitude > max_magnitude:
+            min_magnitude, max_magnitude = max_magnitude, min_magnitude
+            self.deep_sky_min_mag_var.set(self._format_double_filter_number(min_magnitude))
+            self.deep_sky_max_mag_var.set(self._format_double_filter_number(max_magnitude))
+
+        return {
+            "category": category,
+            "use_magnitude": use_magnitude,
+            "min_magnitude": min_magnitude,
+            "max_magnitude": max_magnitude,
+            "min_altitude": min_altitude,
+            "visible_night": self.deep_sky_visible_night_var.get(),
+        }
+
+    def _deep_sky_heading_keys(self):
+        return {
+            "name": "deep_sky.column.name",
+            "aliases": "deep_sky.column.aliases",
+            "type": "deep_sky.column.type",
+            "magnitude": "deep_sky.column.magnitude",
+            "max_altitude": "deep_sky.column.max_altitude",
+            "max_night_altitude": "deep_sky.column.max_night_altitude",
+            "ra": "deep_sky.column.ra",
+            "declination": "deep_sky.column.declination",
+            "source": "deep_sky.column.source",
+        }
+
+    def _refresh_deep_sky_headings(self):
+        if self.deep_sky_tree is None:
+            return
+
+        for column, key in self._deep_sky_heading_keys().items():
+            label = self._tr(key)
+            if column == self.deep_sky_sort_column:
+                label = f"{label} {'v' if self.deep_sky_sort_reverse else '^'}"
+            self.deep_sky_tree.heading(
+                column,
+                text=label,
+                command=lambda selected_column=column: self._sort_deep_sky_table(
+                    selected_column
+                ),
+            )
+
+    def _sort_deep_sky_table(self, column):
+        if column == self.deep_sky_sort_column:
+            self.deep_sky_sort_reverse = not self.deep_sky_sort_reverse
+        else:
+            self.deep_sky_sort_column = column
+            self.deep_sky_sort_reverse = False
+        self._refresh_deep_sky_headings()
+        self._populate_deep_sky_tree()
+
+    def _deep_sky_sort_value(self, sky_object):
+        column = self.deep_sky_sort_column
+        if column == "name":
+            return str(sky_object.get("name", "")).casefold()
+        if column == "aliases":
+            return self._format_deep_sky_aliases(sky_object).casefold()
+        if column == "type":
+            return self._deep_sky_category_label(sky_object).casefold()
+        if column == "magnitude":
+            return sky_object.get("magnitude")
+        if column == "max_altitude":
+            return sky_object.get("max_altitude")
+        if column == "max_night_altitude":
+            return sky_object.get("max_night_altitude")
+        if column == "ra":
+            return sky_object.get("ra_hours")
+        if column == "declination":
+            return sky_object.get("declination")
+        if column == "source":
+            return str(sky_object.get("source", "")).casefold()
+        return str(sky_object.get("name", "")).casefold()
+
+    def _deep_sky_optional_numeric_sort_key(self, sky_object):
+        value = self._deep_sky_sort_value(sky_object)
+        name = str(sky_object.get("name", "")).casefold()
+        if value is None:
+            return (1, 0, name)
+        value = float(value)
+        if self.deep_sky_sort_reverse:
+            value = -value
+        return (0, value, name)
+
+    def _deep_sky_tree_xview(self, *args):
+        if self.deep_sky_tree is None:
+            return
+        self.deep_sky_tree.xview(*args)
+        self.root.after_idle(self._update_deep_sky_tree_separators)
+
+    def _on_deep_sky_tree_xscroll(self, scrollbar, first, last):
+        scrollbar.set(first, last)
+        self.root.after_idle(self._update_deep_sky_tree_separators)
+
+    def _update_deep_sky_tree_separators(self):
+        if self.deep_sky_tree is None:
+            return
+
+        for separator in self.deep_sky_tree_separators:
+            separator.destroy()
+        self.deep_sky_tree_separators = []
+
+        tree_height = self.deep_sky_tree.winfo_height()
+        if tree_height <= 1:
+            return
+
+        total_width = sum(
+            self.deep_sky_tree.column(column, "width")
+            for column in self.deep_sky_tree["columns"]
+        )
+        if total_width <= 0:
+            return
+
+        visible_width = self.deep_sky_tree.winfo_width()
+        first_fraction = self.deep_sky_tree.xview()[0]
+        scroll_offset = total_width * first_fraction
+        x_position = -scroll_offset
+        for column in self.deep_sky_tree["columns"][:-1]:
+            x_position += self.deep_sky_tree.column(column, "width")
+            if x_position <= 0 or x_position >= visible_width:
+                continue
+            separator = tk.Frame(
+                self.deep_sky_tree,
+                bg=self.card_edge,
+                width=1,
+                bd=0,
+                highlightthickness=0,
+            )
+            separator.place(x=x_position, y=0, width=1, height=tree_height)
+            separator.lift()
+            self.deep_sky_tree_separators.append(separator)
+
 
     def _parse_float_setting(self, value, label, minimum, maximum):
         if not is_float(value):
@@ -5599,7 +6300,16 @@ class AstroClocksApp:
             value = -value
         return (0, value, name)
 
-    def _populate_double_star_tree(self):
+    def _cancel_double_tree_render(self):
+        if self.double_tree_render_job is None:
+            return
+        try:
+            self.root.after_cancel(self.double_tree_render_job)
+        except (tk.TclError, RuntimeError):
+            pass
+        self.double_tree_render_job = None
+
+    def _populate_double_star_tree(self, on_complete=None):
         if self.double_sort_column in {
             "orb6_separation",
             "orb6_pa",
@@ -5619,32 +6329,54 @@ class AstroClocksApp:
                 reverse=self.double_sort_reverse,
             )
 
+        self._cancel_double_tree_render()
+
+        if self.double_star_tree is None:
+            if on_complete is not None:
+                on_complete()
+            return
+
         for item in self.double_star_tree.get_children():
             self.double_star_tree.delete(item)
 
-        for index, star in enumerate(self.double_star_results):
-            self.double_star_tree.insert(
-                "",
-                "end",
-                iid=str(index),
-                values=(
-                    star["name"],
-                    self._format_double_designation(star),
-                    self._double_star_nature_label(star),
-                    self._format_double_magnitudes(star),
-                    self._format_double_separation(star),
-                    f"{star['position_angle']:.0f}\N{DEGREE SIGN}",
-                    self._format_double_orb6_separation(star),
-                    self._format_double_orb6_pa(star),
-                    self._format_double_max_altitude(star),
-                    self._format_double_optional_int(star.get("last_observation_year")),
-                    self._format_double_optional_int(star.get("observation_count")),
-                    self._double_wds_note_cell_text(star),
-                    self._double_orbit_cell_text(star),
-                ),
-                tags=("even" if index % 2 == 0 else "odd",),
-            )
-        self._update_double_tree_separators()
+        batch_size = 250
+
+        def insert_batch(start_index=0):
+            end_index = min(start_index + batch_size, len(self.double_star_results))
+            for index in range(start_index, end_index):
+                star = self.double_star_results[index]
+                self.double_star_tree.insert(
+                    "",
+                    "end",
+                    iid=str(index),
+                    values=(
+                        star["name"],
+                        self._format_double_designation(star),
+                        self._double_star_nature_label(star),
+                        self._format_double_magnitudes(star),
+                        self._format_double_separation(star),
+                        f"{star['position_angle']:.0f}\N{DEGREE SIGN}",
+                        self._format_double_orb6_separation(star),
+                        self._format_double_orb6_pa(star),
+                        self._format_double_max_altitude(star),
+                        self._format_double_optional_int(star.get("last_observation_year")),
+                        self._format_double_optional_int(star.get("observation_count")),
+                        self._double_wds_note_cell_text(star),
+                        self._double_orbit_cell_text(star),
+                    ),
+                    tags=("even" if index % 2 == 0 else "odd",),
+                )
+
+            if end_index < len(self.double_star_results):
+                self.double_tree_render_job = self.root.after(1, lambda: insert_batch(end_index))
+                return
+
+            self.double_tree_render_job = None
+            self._update_double_tree_separators()
+            if on_complete is not None:
+                on_complete()
+
+        insert_batch()
 
     def _double_tree_column_at(self, event):
         if self.double_star_tree is None:
@@ -5712,7 +6444,6 @@ class AstroClocksApp:
 
     def _render_double_star_results(self, stars, total, source_key, note=None):
         self.double_star_results = list(stars)
-        self._populate_double_star_tree()
 
         status = self._tr(
             "double.result_count",
@@ -5722,8 +6453,10 @@ class AstroClocksApp:
         )
         if note:
             status = f"{status}\n{note}"
-        self.double_status_label.config(
-            text=status,
+        self._populate_double_star_tree(
+            on_complete=lambda: self.double_status_label.config(text=status)
+            if self.double_status_label is not None
+            else None
         )
 
     def search_double_stars(self, allow_online=False, refresh_orbits=False):
@@ -6084,6 +6817,356 @@ class AstroClocksApp:
             "double.source.wds",
             "\n".join(notes),
         )
+
+    def _deep_sky_visibility_context(self, search_context=None):
+        return self._double_visibility_context(search_context)
+
+    def _deep_sky_objects_to_jnow(self, sky_objects):
+        normalized = []
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        for sky_object in sky_objects:
+            item = dict(sky_object)
+            if item.get("coordinate_frame") == "jnow":
+                normalized.append(item)
+                continue
+            ra_hours, declination = j2000_to_jnow_coordinates(
+                item["ra_hours"],
+                item["declination"],
+                now_utc=now_utc,
+            )
+            item["ra_hours"] = ra_hours
+            item["declination"] = declination
+            item["coordinate_frame"] = "jnow"
+            normalized.append(item)
+        return normalized
+
+    def _deep_sky_visibility_metrics(self, sky_object, visibility_context):
+        if not visibility_context:
+            return {
+                "max_altitude": None,
+                "max_night_altitude": None,
+                "visible_at_night": False,
+            }
+
+        max_altitude = None
+        max_night_altitude = None
+        visible_at_night = False
+        for sample in visibility_context:
+            altitude, _azimuth, _hour_angle = self._equatorial_to_horizontal(
+                sky_object["ra_hours"],
+                sky_object["declination"],
+                sample["lst_hours"],
+            )
+            if max_altitude is None or altitude > max_altitude:
+                max_altitude = altitude
+            if sample["sun_altitude"] > DEEP_SKY_NIGHT_SUN_MAX_ALTITUDE:
+                continue
+            if max_night_altitude is None or altitude > max_night_altitude:
+                max_night_altitude = altitude
+            if altitude >= DEEP_SKY_NIGHT_TARGET_MIN_ALTITUDE:
+                visible_at_night = True
+
+        return {
+            "max_altitude": max_altitude,
+            "max_night_altitude": max_night_altitude,
+            "visible_at_night": visible_at_night,
+        }
+
+    def _filter_deep_sky_list(self, sky_objects, filters, visibility_context=None):
+        if visibility_context is None:
+            visibility_context = self._deep_sky_visibility_context()
+
+        candidates = []
+        for sky_object in sky_objects:
+            if sky_object.get("category") != filters["category"]:
+                continue
+            if filters.get("use_magnitude", True):
+                magnitude = sky_object.get("magnitude")
+                if magnitude is None:
+                    continue
+                if not filters["min_magnitude"] <= magnitude <= filters["max_magnitude"]:
+                    continue
+            candidates.append(sky_object)
+
+        filtered = []
+        for sky_object in self._deep_sky_objects_to_jnow(candidates):
+            sky_object.update(self._deep_sky_visibility_metrics(sky_object, visibility_context))
+            max_altitude = sky_object.get("max_altitude")
+            if max_altitude is None or max_altitude < filters["min_altitude"]:
+                continue
+            if filters["visible_night"] and not sky_object.get("visible_at_night"):
+                continue
+            filtered.append(sky_object)
+        return filtered
+
+    def _deep_sky_catalog(self):
+        return merge_deep_sky_objects(
+            deep_sky_search_objects(),
+            self.deep_sky_simbad_cached_objects,
+        )
+
+    def _deep_sky_category_label(self, sky_object):
+        label = self._tr(f"deep_sky.category.{sky_object.get('category', 'galaxy')}")
+        morphology = str(sky_object.get("morphology", "") or "").strip()
+        if sky_object.get("category") == "galaxy" and morphology:
+            return f"{label} ({morphology})"
+        return label
+
+    def _format_deep_sky_aliases(self, sky_object):
+        aliases = [
+            alias
+            for alias in sky_object.get("aliases", ())
+            if alias and alias != sky_object.get("name")
+        ]
+        return ", ".join(aliases[:3])
+
+    def _format_deep_sky_magnitude(self, sky_object):
+        magnitude = sky_object.get("magnitude")
+        if magnitude is None:
+            return "-"
+        band = sky_object.get("magnitude_band") or ""
+        suffix = f" {band}" if band else ""
+        return f"{magnitude:.2f}{suffix}"
+
+    def _format_deep_sky_angle(self, value):
+        if value is None:
+            return "-"
+        return f"{value:+.1f}\N{DEGREE SIGN}"
+
+    def _format_deep_sky_ra(self, sky_object):
+        total_seconds = int(round((float(sky_object["ra_hours"]) % 24) * 3600))
+        total_seconds %= 24 * 3600
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _format_deep_sky_dec(self, sky_object):
+        declination = float(sky_object["declination"])
+        sign = "-" if declination < 0 else "+"
+        total_seconds = int(round(abs(declination) * 3600))
+        degrees = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"{sign}{degrees:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _format_deep_sky_source(self, sky_object):
+        source = str(sky_object.get("source", ""))
+        if source.startswith("OpenNGC"):
+            return "OpenNGC"
+        return source
+
+    def _populate_deep_sky_tree(self):
+        if self.deep_sky_tree is None:
+            return
+
+        if self.deep_sky_sort_column in {"magnitude", "max_altitude", "max_night_altitude", "ra", "declination"}:
+            self.deep_sky_results.sort(key=self._deep_sky_optional_numeric_sort_key)
+        else:
+            self.deep_sky_results.sort(
+                key=lambda sky_object: self._deep_sky_sort_value(sky_object),
+                reverse=self.deep_sky_sort_reverse,
+            )
+
+        for item in self.deep_sky_tree.get_children():
+            self.deep_sky_tree.delete(item)
+
+        for index, sky_object in enumerate(self.deep_sky_results):
+            self.deep_sky_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    sky_object["name"],
+                    self._format_deep_sky_aliases(sky_object),
+                    self._deep_sky_category_label(sky_object),
+                    self._format_deep_sky_magnitude(sky_object),
+                    self._format_deep_sky_angle(sky_object.get("max_altitude")),
+                    self._format_deep_sky_angle(sky_object.get("max_night_altitude")),
+                    self._format_deep_sky_ra(sky_object),
+                    self._format_deep_sky_dec(sky_object),
+                    self._format_deep_sky_source(sky_object),
+                ),
+                tags=("odd" if index % 2 else "even",),
+            )
+        self._update_deep_sky_tree_separators()
+
+    def _render_deep_sky_results(self, sky_objects, total, note=None):
+        self.deep_sky_results = list(sky_objects)
+        self._populate_deep_sky_tree()
+        status = self._tr(
+            "deep_sky.result_count",
+            count=len(self.deep_sky_results),
+            total=total,
+        )
+        if note:
+            status = f"{status}\n{note}"
+        self.deep_sky_status_label.config(text=status)
+
+    def search_deep_sky_objects(self, allow_online=False):
+        filters = self._read_deep_sky_filters()
+        if filters is None:
+            return
+
+        self._save_current_settings()
+        self.deep_sky_search_generation += 1
+        generation = self.deep_sky_search_generation
+        self.deep_sky_search_pending = True
+        if allow_online and self.network_online is False:
+            allow_online = False
+            offline_note = self._tr("deep_sky.online_offline")
+        else:
+            offline_note = None
+        status_key = "deep_sky.searching_online" if allow_online else "deep_sky.filtering"
+        self.deep_sky_status_label.config(text=self._tr(status_key))
+        for button in (
+            self.deep_sky_apply_button,
+            self.deep_sky_online_button,
+            self.deep_sky_reset_button,
+        ):
+            if button is not None:
+                button.config(state=tk.DISABLED)
+        search_context = self._double_search_context()
+        threading.Thread(
+            target=self._run_deep_sky_search,
+            args=(generation, filters, search_context, allow_online, offline_note),
+            daemon=True,
+        ).start()
+
+    def _run_deep_sky_search(
+        self,
+        generation,
+        filters,
+        search_context,
+        allow_online=False,
+        offline_note=None,
+    ):
+        try:
+            visibility_context = self._deep_sky_visibility_context(search_context)
+            catalog = self._deep_sky_catalog()
+            notes = [offline_note] if offline_note else []
+            simbad_cached_objects = None
+            if allow_online:
+                try:
+                    remote_objects = fetch_simbad_deep_sky_objects(
+                        filters["category"],
+                        filters["min_magnitude"],
+                        filters["max_magnitude"],
+                        filters["use_magnitude"],
+                    )
+                    simbad_cached_objects = merge_cached_simbad_deep_sky_objects(
+                        remote_objects,
+                        filters["category"],
+                    )
+                    catalog = merge_deep_sky_objects(
+                        deep_sky_search_objects(),
+                        simbad_cached_objects,
+                    )
+                    notes.append(self._tr("deep_sky.online_loaded", count=len(remote_objects)))
+                    notes.append(
+                        self._tr(
+                            "deep_sky.simbad_cache_updated",
+                            count=len(simbad_cached_objects),
+                        )
+                    )
+                except Exception as exc:
+                    notes.append(self._tr("deep_sky.online_error", error=str(exc)))
+
+            category_catalog = [
+                sky_object
+                for sky_object in catalog
+                if sky_object.get("category") == filters["category"]
+            ]
+            filtered = self._filter_deep_sky_list(catalog, filters, visibility_context)
+            unknown_count = (
+                sum(
+                    1
+                    for sky_object in category_catalog
+                    if sky_object.get("magnitude") is None
+                )
+                if filters.get("use_magnitude", True)
+                else 0
+            )
+            note = (
+                self._tr("deep_sky.unknown_magnitudes", count=unknown_count)
+                if unknown_count
+                else None
+            )
+            if note:
+                notes.append(note)
+            self._queue_deep_sky_search_results(
+                generation,
+                {
+                    "objects": filtered,
+                    "total": len(category_catalog),
+                    "note": "\n".join(note for note in notes if note),
+                    "simbad_cached_objects": simbad_cached_objects,
+                },
+            )
+        except Exception as exc:
+            self._queue_deep_sky_search_results(
+                generation,
+                {
+                    "objects": [],
+                    "total": 0,
+                    "note": self._tr("deep_sky.search_error", error=str(exc)),
+                },
+            )
+
+    def _queue_deep_sky_search_results(self, generation, payload):
+        try:
+            self.root.after(
+                0,
+                lambda: self._apply_deep_sky_search_results(generation, payload),
+            )
+        except (tk.TclError, RuntimeError):
+            self.deep_sky_search_pending = False
+
+    def _apply_deep_sky_search_results(self, generation, payload):
+        if generation != self.deep_sky_search_generation:
+            return
+        self.deep_sky_search_pending = False
+        if payload.get("simbad_cached_objects") is not None:
+            self.deep_sky_simbad_cached_objects = payload["simbad_cached_objects"]
+        for button in (
+            self.deep_sky_apply_button,
+            self.deep_sky_online_button,
+            self.deep_sky_reset_button,
+        ):
+            if button is not None:
+                button.config(state=tk.NORMAL)
+        self._render_deep_sky_results(
+            payload["objects"],
+            payload["total"],
+            payload.get("note"),
+        )
+
+    def _selected_deep_sky_object(self):
+        if self.deep_sky_tree is None:
+            return None
+
+        selection = self.deep_sky_tree.selection()
+        if not selection:
+            return None
+
+        index = int(selection[0])
+        if index < 0 or index >= len(self.deep_sky_results):
+            return None
+        return self.deep_sky_results[index]
+
+    def set_selected_deep_sky_target(self):
+        sky_object = self._selected_deep_sky_object()
+        if sky_object is None:
+            self.deep_sky_status_label.config(text=self._tr("deep_sky.no_selection"))
+            return
+
+        self._set_target_from_coordinates(
+            sky_object["ra_hours"],
+            sky_object["declination"],
+            self._tr("deep_sky.target_set", name=sky_object["name"]),
+            display_name=sky_object["name"],
+        )
+        self.notebook.select(self.main_tab)
 
     def _selected_double_star(self):
         if self.double_star_tree is None:

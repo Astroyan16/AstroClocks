@@ -1,5 +1,19 @@
 # Changelog
 
+## AstroClocks v3.3 - en cours
+
+### Ajoute
+
+- Nouvel onglet "Ciel profond" pour rechercher des objets par type, magnitude apparente, visibilité nocturne et hauteur maximale.
+- Recherche en ligne SIMBAD/CDS pour enrichir les résultats ciel profond, avec cache local et repli hors-ligne.
+- Ajout du type "Rémanent de supernova" dans la recherche ciel profond.
+- Magnitudes apparentes OpenNGC embarquées pour filtrer hors ligne les objets NGC/IC/Messier et les entrées d'addendum.
+- Liste complémentaire de quasars brillants pour proposer le type "Quasar" dans la recherche.
+
+### Corrige
+
+- Correction de la recherche SIMBAD/CDS des nébuleuses obscures, qui échouait avec une erreur HTTP 400.
+
 ## AstroClocks v3.2 stable - 2026-04-30
 
 ### Ajoute

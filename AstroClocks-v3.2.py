@@ -32,7 +32,7 @@ def create_loading_window():
 
     tk.Label(
         window,
-        text="AstroClocks v3.2",
+        text="AstroClocks v3.3",
         bg="#101419",
         fg="#f6c451",
         font=Font(family="Segoe UI", size=22, weight="bold"),
