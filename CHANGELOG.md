@@ -9,6 +9,11 @@
 - Ajout du type "Rémanent de supernova" dans la recherche ciel profond.
 - Magnitudes apparentes OpenNGC embarquées pour filtrer hors ligne les objets NGC/IC/Messier et les entrées d'addendum.
 - Liste complémentaire de quasars brillants pour proposer le type "Quasar" dans la recherche.
+- Sélection de la bande photométrique préférée (`V`, `U`, `B`, `G`, `R`, `I`, `Z`, `Y`, `J`, `H`, `K`) pour la recherche ciel profond, avec `V` par défaut.
+- Nouvel onglet "Étoiles" pour rechercher des étoiles SIMBAD par type spectral, bande photométrique, magnitude, visibilité nocturne et hauteur maximale.
+- Recherche hors-ligne des étoiles basée sur le catalogue local de la carte du ciel, enrichi avec les types spectraux du Bright Star Catalogue.
+- Bouton "Vider le cache" dans les onglets étoiles doubles, ciel profond et étoiles.
+- Préchargement des onglets de recherche, du catalogue d'étoiles de la carte du ciel et des ajustements de police avant l'affichage de la fenêtre principale.
 
 ### Corrige
 

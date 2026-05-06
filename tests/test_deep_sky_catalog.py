@@ -1,12 +1,19 @@
 import unittest
+from unittest.mock import patch
 
 from astroclocks.deep_sky_catalog import (
     _append_simbad_band_rows,
     deep_sky_category_for_type,
     deep_sky_search_objects,
+    fetch_simbad_deep_sky_objects,
     merge_deep_sky_objects,
 )
 from astroclocks.app import AstroClocksApp
+from astroclocks.settings import (
+    AppSettings,
+    DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
+    normalize_settings,
+)
 
 
 class DeepSkyCatalogTests(unittest.TestCase):
@@ -20,6 +27,7 @@ class DeepSkyCatalogTests(unittest.TestCase):
                 objects["NGC 6205"] = sky_object
 
         self.assertEqual(objects["NGC 224"]["category"], "galaxy")
+        self.assertEqual(objects["NGC 224"]["morphology"], "Sb")
         self.assertIsNotNone(objects["NGC 224"]["magnitude"])
         self.assertIn(objects["NGC 224"]["magnitude_band"], {"V", "B"})
         self.assertEqual(objects["NGC 6205"]["category"], "globular_cluster")
@@ -144,6 +152,53 @@ class DeepSkyCatalogTests(unittest.TestCase):
         self.assertEqual(objects_by_id["M  31"]["magnitude"], 3.44)
         self.assertEqual(objects_by_id["M  31"]["magnitude_band"], "V")
         self.assertEqual(objects_by_id["M  31"]["morphology"], "SA(s)b")
+
+    def test_simbad_band_rows_prefer_selected_band_over_v(self):
+        objects_by_id = {}
+
+        _append_simbad_band_rows(
+            objects_by_id,
+            [["M  31", 10.684708333333333, 41.26875, "AGN", "SA(s)b", 3.44]],
+            "V",
+            preferred_band="U",
+        )
+        _append_simbad_band_rows(
+            objects_by_id,
+            [["M  31", 10.684708333333333, 41.26875, "AGN", "SA(s)b", 4.12]],
+            "U",
+            preferred_band="U",
+        )
+
+        self.assertEqual(len(objects_by_id), 1)
+        self.assertEqual(objects_by_id["M  31"]["magnitude"], 4.12)
+        self.assertEqual(objects_by_id["M  31"]["magnitude_band"], "U")
+
+    def test_invalid_deep_sky_magnitude_band_falls_back_to_default(self):
+        settings = normalize_settings(AppSettings(deep_sky_magnitude_band="X"))
+        self.assertEqual(settings.deep_sky_magnitude_band, DEFAULT_DEEP_SKY_MAGNITUDE_BAND)
+
+    def test_online_search_uses_selected_band_without_b_fallback(self):
+        queries = []
+
+        def fake_fetch(query, _timeout):
+            queries.append(query)
+            return {
+                "data": [["M  31", 10.684708333333333, 41.26875, "AGN", "SA(s)b", 3.44]]
+            }
+
+        with patch("astroclocks.deep_sky_catalog._fetch_simbad_json", side_effect=fake_fetch):
+            objects = fetch_simbad_deep_sky_objects(
+                "galaxy",
+                min_magnitude=-2,
+                max_magnitude=8.5,
+                use_magnitude=True,
+                preferred_band="V",
+            )
+
+        self.assertEqual(len(objects), 1)
+        self.assertEqual(objects[0]["magnitude_band"], "V")
+        self.assertEqual(len(queries), 1)
+        self.assertIn("flux.filter = 'V'", queries[0])
 
 
 if __name__ == "__main__":

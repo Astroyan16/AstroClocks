@@ -448,6 +448,14 @@ def merge_cached_wds_double_stars(new_stars):
     return save_cached_wds_double_stars(merged.values())
 
 
+def clear_cached_wds_double_stars():
+    try:
+        _wds_cache_file().unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def build_wds_notes_url(wds):
     params = {
         "-source": "B/wds/notes",

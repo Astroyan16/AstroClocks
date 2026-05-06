@@ -42,6 +42,18 @@ DEFAULT_DEEP_SKY_MIN_MAGNITUDE = -2.0
 DEFAULT_DEEP_SKY_MAX_MAGNITUDE = 13.0
 DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE = 10.0
 DEFAULT_DEEP_SKY_VISIBLE_NIGHT = True
+DEEP_SKY_MAGNITUDE_BANDS = ("V", "U", "B", "G", "R", "I", "Z", "Y", "J", "H", "K")
+DEFAULT_DEEP_SKY_MAGNITUDE_BAND = "V"
+DEEP_SKY_MAGNITUDE_BAND_CODES = set(DEEP_SKY_MAGNITUDE_BANDS)
+STAR_SEARCH_SPECTRAL_TYPES = ("O", "B", "A", "F", "G", "K", "M")
+DEFAULT_STAR_SEARCH_SPECTRAL_TYPE = "G"
+STAR_SEARCH_MAGNITUDE_BANDS = DEEP_SKY_MAGNITUDE_BANDS
+DEFAULT_STAR_SEARCH_MAGNITUDE_BAND = "V"
+STAR_SEARCH_MAGNITUDE_BAND_CODES = set(STAR_SEARCH_MAGNITUDE_BANDS)
+DEFAULT_STAR_SEARCH_MIN_MAGNITUDE = -2.0
+DEFAULT_STAR_SEARCH_MAX_MAGNITUDE = 8.5
+DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE = 10.0
+DEFAULT_STAR_SEARCH_VISIBLE_NIGHT = True
 DEEP_SKY_CATEGORY_CODES = {
     "planetary_nebula",
     "emission_nebula",
@@ -103,6 +115,13 @@ class AppSettings:
     deep_sky_max_magnitude: float = DEFAULT_DEEP_SKY_MAX_MAGNITUDE
     deep_sky_min_max_altitude: float = DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE
     deep_sky_visible_night: bool = DEFAULT_DEEP_SKY_VISIBLE_NIGHT
+    deep_sky_magnitude_band: str = DEFAULT_DEEP_SKY_MAGNITUDE_BAND
+    star_search_spectral_type: str = DEFAULT_STAR_SEARCH_SPECTRAL_TYPE
+    star_search_magnitude_band: str = DEFAULT_STAR_SEARCH_MAGNITUDE_BAND
+    star_search_min_magnitude: float = DEFAULT_STAR_SEARCH_MIN_MAGNITUDE
+    star_search_max_magnitude: float = DEFAULT_STAR_SEARCH_MAX_MAGNITUDE
+    star_search_min_max_altitude: float = DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE
+    star_search_visible_night: bool = DEFAULT_STAR_SEARCH_VISIBLE_NIGHT
 
 
 def _clamp(value, minimum, maximum):
@@ -151,6 +170,24 @@ def normalize_settings(settings):
     )
     if deep_sky_category not in DEEP_SKY_CATEGORY_CODES:
         deep_sky_category = DEFAULT_DEEP_SKY_CATEGORY
+    deep_sky_magnitude_band = str(
+        getattr(settings, "deep_sky_magnitude_band", DEFAULT_DEEP_SKY_MAGNITUDE_BAND)
+        or DEFAULT_DEEP_SKY_MAGNITUDE_BAND
+    ).upper()
+    if deep_sky_magnitude_band not in DEEP_SKY_MAGNITUDE_BAND_CODES:
+        deep_sky_magnitude_band = DEFAULT_DEEP_SKY_MAGNITUDE_BAND
+    star_search_spectral_type = str(
+        getattr(settings, "star_search_spectral_type", DEFAULT_STAR_SEARCH_SPECTRAL_TYPE)
+        or DEFAULT_STAR_SEARCH_SPECTRAL_TYPE
+    ).upper()
+    if star_search_spectral_type not in STAR_SEARCH_SPECTRAL_TYPES:
+        star_search_spectral_type = DEFAULT_STAR_SEARCH_SPECTRAL_TYPE
+    star_search_magnitude_band = str(
+        getattr(settings, "star_search_magnitude_band", DEFAULT_STAR_SEARCH_MAGNITUDE_BAND)
+        or DEFAULT_STAR_SEARCH_MAGNITUDE_BAND
+    ).upper()
+    if star_search_magnitude_band not in STAR_SEARCH_MAGNITUDE_BAND_CODES:
+        star_search_magnitude_band = DEFAULT_STAR_SEARCH_MAGNITUDE_BAND
 
     return AppSettings(
         site_name=site_name,
@@ -273,6 +310,28 @@ def normalize_settings(settings):
         deep_sky_visible_night=_coerce_bool(
             getattr(settings, "deep_sky_visible_night", DEFAULT_DEEP_SKY_VISIBLE_NIGHT),
             DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
+        ),
+        deep_sky_magnitude_band=deep_sky_magnitude_band,
+        star_search_spectral_type=star_search_spectral_type,
+        star_search_magnitude_band=star_search_magnitude_band,
+        star_search_min_magnitude=_clamp(
+            float(getattr(settings, "star_search_min_magnitude", DEFAULT_STAR_SEARCH_MIN_MAGNITUDE)),
+            -30,
+            30,
+        ),
+        star_search_max_magnitude=_clamp(
+            float(getattr(settings, "star_search_max_magnitude", DEFAULT_STAR_SEARCH_MAX_MAGNITUDE)),
+            -30,
+            30,
+        ),
+        star_search_min_max_altitude=_clamp(
+            float(getattr(settings, "star_search_min_max_altitude", DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE)),
+            -90,
+            90,
+        ),
+        star_search_visible_night=_coerce_bool(
+            getattr(settings, "star_search_visible_night", DEFAULT_STAR_SEARCH_VISIBLE_NIGHT),
+            DEFAULT_STAR_SEARCH_VISIBLE_NIGHT,
         ),
     )
 
@@ -398,6 +457,34 @@ def load_app_settings():
             deep_sky_visible_night=data.get(
                 "deep_sky_visible_night",
                 DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
+            ),
+            deep_sky_magnitude_band=data.get(
+                "deep_sky_magnitude_band",
+                DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
+            ),
+            star_search_spectral_type=data.get(
+                "star_search_spectral_type",
+                DEFAULT_STAR_SEARCH_SPECTRAL_TYPE,
+            ),
+            star_search_magnitude_band=data.get(
+                "star_search_magnitude_band",
+                DEFAULT_STAR_SEARCH_MAGNITUDE_BAND,
+            ),
+            star_search_min_magnitude=data.get(
+                "star_search_min_magnitude",
+                DEFAULT_STAR_SEARCH_MIN_MAGNITUDE,
+            ),
+            star_search_max_magnitude=data.get(
+                "star_search_max_magnitude",
+                DEFAULT_STAR_SEARCH_MAX_MAGNITUDE,
+            ),
+            star_search_min_max_altitude=data.get(
+                "star_search_min_max_altitude",
+                DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE,
+            ),
+            star_search_visible_night=data.get(
+                "star_search_visible_night",
+                DEFAULT_STAR_SEARCH_VISIBLE_NIGHT,
             ),
         )
     )

@@ -6,6 +6,7 @@ import unicodedata
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
+from astroclocks.deep_sky_morphology import DEEP_SKY_MORPHOLOGY_BY_KEY
 from astroclocks.deep_sky_photometry import DEEP_SKY_PHOTOMETRY_BY_KEY
 from astroclocks.local_deep_sky_catalog import DEEP_SKY_OBJECTS, OPENNGC_ATTRIBUTION
 from astroclocks import settings as app_settings
@@ -155,13 +156,60 @@ def deep_sky_category_for_type(object_type):
     return DEEP_SKY_TYPE_CATEGORY.get(object_type)
 
 
-def _photometry_for_aliases(name, aliases):
+def normalize_deep_sky_magnitude_band(band):
+    normalized = str(band or app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND).upper()
+    if normalized not in app_settings.DEEP_SKY_MAGNITUDE_BAND_CODES:
+        return app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND
+    return normalized
+
+
+def preferred_deep_sky_magnitude_bands(preferred_band, fallback_bands=("V", "B")):
+    ordered = []
+    for band in (preferred_band, *fallback_bands):
+        normalized = normalize_deep_sky_magnitude_band(band)
+        if normalized not in ordered:
+            ordered.append(normalized)
+    return tuple(ordered)
+
+
+def _photometry_band_map(photometry):
+    if photometry is None:
+        return {}
+    if isinstance(photometry, dict):
+        return {
+            str(band).upper(): float(magnitude)
+            for band, magnitude in photometry.items()
+            if magnitude is not None
+        }
+    magnitude, band = photometry
+    if magnitude is None or not band:
+        return {}
+    return {str(band).upper(): float(magnitude)}
+
+
+def _photometry_for_aliases(name, aliases, preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND):
+    preferred_bands = preferred_deep_sky_magnitude_bands(preferred_band)
+    full_band_order = preferred_bands + tuple(
+        band
+        for band in app_settings.DEEP_SKY_MAGNITUDE_BANDS
+        if band not in preferred_bands
+    )
     for alias in (name, *aliases):
-        photometry = DEEP_SKY_PHOTOMETRY_BY_KEY.get(normalize_deep_sky_key(alias))
-        if photometry is not None:
-            magnitude, band = photometry
-            return magnitude, band
+        photometry = _photometry_band_map(
+            DEEP_SKY_PHOTOMETRY_BY_KEY.get(normalize_deep_sky_key(alias))
+        )
+        for band in full_band_order:
+            if band in photometry:
+                return photometry[band], band
     return None, ""
+
+
+def _morphology_for_aliases(name, aliases):
+    for alias in (name, *aliases):
+        morphology = DEEP_SKY_MORPHOLOGY_BY_KEY.get(normalize_deep_sky_key(alias))
+        if morphology:
+            return morphology
+    return ""
 
 
 def _simbad_object_key(sky_object):
@@ -313,6 +361,14 @@ def merge_cached_simbad_deep_sky_objects(new_objects, category):
     return merged
 
 
+def clear_cached_simbad_deep_sky_objects():
+    try:
+        _simbad_cache_file().unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def _simbad_type_condition(category):
     type_codes = SIMBAD_CATEGORY_OTYPES.get(category)
     if not type_codes:
@@ -358,13 +414,27 @@ def _fetch_simbad_json(query, timeout):
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
-def _append_simbad_band_rows(objects_by_id, rows, band):
+def _append_simbad_band_rows(
+    objects_by_id,
+    rows,
+    band,
+    preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
+):
+    preferred_order = preferred_deep_sky_magnitude_bands(preferred_band)
+
+    def band_rank(value):
+        normalized = normalize_deep_sky_magnitude_band(value)
+        try:
+            return preferred_order.index(normalized)
+        except ValueError:
+            return len(preferred_order)
+
     for row in rows:
         name, ra_degrees, dec_degrees, object_type, morphology, magnitude = row
         source_id = str(name)
-        band = str(band).upper()
+        band = normalize_deep_sky_magnitude_band(band)
         existing = objects_by_id.get(source_id)
-        if existing is not None and existing.get("magnitude_band") == "V" and band != "V":
+        if existing is not None and band_rank(existing.get("magnitude_band")) <= band_rank(band):
             continue
         objects_by_id[source_id] = {
             "name": source_id,
@@ -386,12 +456,14 @@ def fetch_simbad_deep_sky_objects(
     min_magnitude=None,
     max_magnitude=None,
     use_magnitude=True,
+    preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
     row_limit=SIMBAD_ROW_LIMIT,
     timeout=20,
 ):
+    preferred_band = normalize_deep_sky_magnitude_band(preferred_band)
     if use_magnitude:
         objects_by_id = {}
-        for band in ("V", "B"):
+        for band in (preferred_band,):
             query = _simbad_band_query(
                 category,
                 min_magnitude,
@@ -400,7 +472,12 @@ def fetch_simbad_deep_sky_objects(
                 row_limit,
             )
             payload = _fetch_simbad_json(query, timeout)
-            _append_simbad_band_rows(objects_by_id, payload.get("data", []), band)
+            _append_simbad_band_rows(
+                objects_by_id,
+                payload.get("data", []),
+                band,
+                preferred_band=preferred_band,
+            )
 
         objects = list(objects_by_id.values())
         for sky_object in objects:
@@ -438,12 +515,17 @@ def fetch_simbad_deep_sky_objects(
     return objects
 
 
-def deep_sky_search_objects():
+def deep_sky_search_objects(preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND):
     for name, ra_hours, dec_degrees, aliases, object_type in DEEP_SKY_OBJECTS:
         category = deep_sky_category_for_type(object_type)
         if category is None:
             continue
-        magnitude, magnitude_band = _photometry_for_aliases(name, aliases)
+        morphology = _morphology_for_aliases(name, aliases) if category == "galaxy" else ""
+        magnitude, magnitude_band = _photometry_for_aliases(
+            name,
+            aliases,
+            preferred_band=preferred_band,
+        )
         yield {
             "name": name,
             "aliases": tuple(alias for alias in aliases if alias != name),
@@ -451,6 +533,7 @@ def deep_sky_search_objects():
             "declination": float(dec_degrees),
             "object_type": object_type,
             "category": category,
+            "morphology": morphology,
             "magnitude": magnitude,
             "magnitude_band": magnitude_band,
             "source": OPENNGC_ATTRIBUTION,
