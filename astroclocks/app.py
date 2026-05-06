@@ -1632,7 +1632,7 @@ class AstroClocksApp:
             text=text,
             bg=self.card_bg,
             fg=self.fg,
-            font=Font(family="Segoe UI", size=13, weight="bold"),
+            font=Font(family="Consolas", size=self.coord_font_size, weight="bold"),
             anchor="w",
         )
         label.grid(column=column, row=row, padx=(0, 7), pady=7, sticky="w")
@@ -1711,15 +1711,10 @@ class AstroClocksApp:
         if size != self.coord_font_size:
             self.coord_font_size = size
             spinbox_font = Font(family="Consolas", size=size, weight="bold")
-            unit_font = Font(
-                family="Segoe UI",
-                size=max(10, min(14, round(size * 0.62))),
-                weight="bold",
-            )
             for spinbox in getattr(self, "coordinate_spinboxes", ()):
                 spinbox.config(font=spinbox_font)
             for label in getattr(self, "coordinate_unit_labels", ()):
-                label.config(font=unit_font)
+                label.config(font=spinbox_font)
 
     def _update_clock_font_size(self):
         if not self.clock_labels:
