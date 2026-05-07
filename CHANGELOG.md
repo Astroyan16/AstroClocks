@@ -1,6 +1,6 @@
 # Changelog
 
-## AstroClocks v3.3 - en cours
+## AstroClocks v3.3 stable - 2026-05-08
 
 ### Ajoute
 
@@ -18,6 +18,12 @@
 ### Corrige
 
 - Correction de la recherche SIMBAD/CDS des nébuleuses obscures, qui échouait avec une erreur HTTP 400.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Build Windows v3.3 via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.exe`.
 
 ## AstroClocks v3.2 stable - 2026-04-30
 
