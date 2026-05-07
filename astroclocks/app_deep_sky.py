@@ -278,6 +278,7 @@ def _create_deep_sky_widgets(self):
         "magnitude",
         "max_altitude",
         "max_night_altitude",
+        "transit_time",
         "ra",
         "declination",
         "source",
@@ -334,6 +335,7 @@ def _create_deep_sky_widgets(self):
         "magnitude": 90,
         "max_altitude": 90,
         "max_night_altitude": 95,
+        "transit_time": 82,
         "ra": 95,
         "declination": 95,
         "source": 170,
@@ -345,12 +347,13 @@ def _create_deep_sky_widgets(self):
         "magnitude": 80,
         "max_altitude": 85,
         "max_night_altitude": 90,
+        "transit_time": 74,
         "ra": 85,
         "declination": 85,
         "source": 130,
     }
     for column, width in column_widths.items():
-        anchor = "center" if column in {"magnitude", "max_altitude", "max_night_altitude"} else "w"
+        anchor = "center" if column in {"magnitude", "max_altitude", "max_night_altitude", "transit_time"} else "w"
         self.deep_sky_tree.column(
             column,
             width=width,
@@ -562,6 +565,7 @@ def _deep_sky_heading_keys(self):
         "magnitude": "deep_sky.column.magnitude",
         "max_altitude": "deep_sky.column.max_altitude",
         "max_night_altitude": "deep_sky.column.max_night_altitude",
+        "transit_time": "deep_sky.column.transit_time",
         "ra": "deep_sky.column.ra",
         "declination": "deep_sky.column.declination",
         "source": "deep_sky.column.source",
@@ -608,6 +612,8 @@ def _deep_sky_sort_value(self, sky_object):
         return sky_object.get("max_altitude")
     if column == "max_night_altitude":
         return sky_object.get("max_night_altitude")
+    if column == "transit_time":
+        return sky_object.get("meridian_transit_sort_timestamp")
     if column == "ra":
         return sky_object.get("ra_hours")
     if column == "declination":
@@ -818,7 +824,7 @@ def _populate_deep_sky_tree(self):
     if self.deep_sky_tree is None:
         return
 
-    if self.deep_sky_sort_column in {"magnitude", "max_altitude", "max_night_altitude", "ra", "declination"}:
+    if self.deep_sky_sort_column in {"magnitude", "max_altitude", "max_night_altitude", "transit_time", "ra", "declination"}:
         self.deep_sky_results.sort(key=self._deep_sky_optional_numeric_sort_key)
     else:
         self.deep_sky_results.sort(
@@ -841,6 +847,9 @@ def _populate_deep_sky_tree(self):
                 self._format_deep_sky_magnitude(sky_object),
                 self._format_deep_sky_angle(sky_object.get("max_altitude")),
                 self._format_deep_sky_angle(sky_object.get("max_night_altitude")),
+                self._format_transit_time(
+                    sky_object.get("meridian_transit_local_datetime")
+                ),
                 self._format_deep_sky_ra(sky_object),
                 self._format_deep_sky_dec(sky_object),
                 self._format_deep_sky_source(sky_object),

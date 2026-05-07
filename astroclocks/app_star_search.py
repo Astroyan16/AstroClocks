@@ -235,6 +235,7 @@ def _create_star_search_widgets(self):
         "magnitude",
         "max_altitude",
         "max_night_altitude",
+        "transit_time",
         "ra",
         "declination",
         "source",
@@ -263,12 +264,13 @@ def _create_star_search_widgets(self):
         "magnitude": 90,
         "max_altitude": 90,
         "max_night_altitude": 95,
+        "transit_time": 82,
         "ra": 95,
         "declination": 95,
         "source": 170,
     }
     for column, width in column_widths.items():
-        anchor = "center" if column in {"magnitude", "max_altitude", "max_night_altitude"} else "w"
+        anchor = "center" if column in {"magnitude", "max_altitude", "max_night_altitude", "transit_time"} else "w"
         self.star_search_tree.column(column, width=width, minwidth=min(width, 120), anchor=anchor)
 
     self._refresh_star_search_headings()
@@ -417,6 +419,7 @@ def _star_search_heading_keys(self):
         "magnitude": "star_search.column.magnitude",
         "max_altitude": "star_search.column.max_altitude",
         "max_night_altitude": "star_search.column.max_night_altitude",
+        "transit_time": "star_search.column.transit_time",
         "ra": "star_search.column.ra",
         "declination": "star_search.column.declination",
         "source": "star_search.column.source",
@@ -460,6 +463,8 @@ def _star_search_sort_value(self, star):
         return star.get("max_altitude")
     if column == "max_night_altitude":
         return star.get("max_night_altitude")
+    if column == "transit_time":
+        return star.get("meridian_transit_sort_timestamp")
     if column == "ra":
         return star.get("ra_hours")
     if column == "declination":
@@ -670,6 +675,9 @@ def _populate_star_search_tree(self):
                 self._format_star_search_magnitude(star),
                 self._format_deep_sky_angle(star.get("max_altitude")),
                 self._format_deep_sky_angle(star.get("max_night_altitude")),
+                self._format_transit_time(
+                    star.get("meridian_transit_local_datetime")
+                ),
                 self._format_deep_sky_ra(star),
                 self._format_deep_sky_dec(star),
                 star.get("source", ""),

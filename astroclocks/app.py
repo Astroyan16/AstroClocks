@@ -2110,6 +2110,7 @@ class AstroClocksApp:
             "orb6_separation",
             "orb6_pa",
             "max_altitude",
+            "transit_time",
             "last_observation_year",
             "observation_count",
             "wds_note",
@@ -2169,6 +2170,7 @@ class AstroClocksApp:
             "orb6_separation": 78,
             "orb6_pa": 68,
             "max_altitude": 90,
+            "transit_time": 82,
             "last_observation_year": 75,
             "observation_count": 75,
             "wds_note": 110,
@@ -2184,6 +2186,7 @@ class AstroClocksApp:
             "orb6_separation": 72,
             "orb6_pa": 62,
             "max_altitude": 85,
+            "transit_time": 74,
             "last_observation_year": 65,
             "observation_count": 65,
             "wds_note": 95,
@@ -4956,6 +4959,7 @@ class AstroClocksApp:
             "orb6_separation": "double.column.orb6_separation",
             "orb6_pa": "double.column.orb6_pa",
             "max_altitude": "double.column.max_altitude",
+            "transit_time": "double.column.transit_time",
             "last_observation_year": "double.column.last_observation_year",
             "observation_count": "double.column.observation_count",
             "wds_note": "double.column.wds_note",
@@ -5059,6 +5063,8 @@ class AstroClocksApp:
             return star.get("orb6_current_pa")
         if column == "max_altitude":
             return star.get("max_altitude")
+        if column == "transit_time":
+            return star.get("meridian_transit_sort_timestamp")
         if column == "last_observation_year":
             return star.get("last_observation_year")
         if column == "observation_count":
@@ -5265,6 +5271,8 @@ class AstroClocksApp:
                     "offset_hours": offset,
                     "lst_hours": self._parse_clock_hours(state["lst"]),
                     "sun_altitude": sun_altitude,
+                    "utc_datetime": sample_time,
+                    "local_datetime": self._local_datetime_from_utc(sample_time),
                 }
             )
         return context
@@ -5283,13 +5291,20 @@ class AstroClocksApp:
                 "max_night_altitude": None,
                 "visible_at_night": False,
                 "meridian_transit_at_night": False,
+                "meridian_transit_local_datetime": None,
+                "meridian_transit_local_minutes": None,
+                "meridian_transit_sort_timestamp": None,
             }
 
         max_altitude = None
         max_night_altitude = None
         visible_at_night = False
         meridian_transit_at_night = False
+        meridian_transit_local_datetime = None
+        best_hour_angle_distance = None
+        best_transit_local_datetime = None
         previous_night_hour_angle = None
+        previous_night_local_datetime = None
         for sample in visibility_context:
             altitude, _azimuth, hour_angle = self._equatorial_to_horizontal(
                 ra_hours,
@@ -5297,17 +5312,27 @@ class AstroClocksApp:
                 sample["lst_hours"],
             )
             hour_angle = self._normalize_hour_angle(hour_angle)
+            hour_angle_distance = abs(hour_angle)
             if max_altitude is None or altitude > max_altitude:
                 max_altitude = altitude
             if sample["sun_altitude"] > night_sun_max_altitude:
                 previous_night_hour_angle = None
+                previous_night_local_datetime = None
                 continue
             if max_night_altitude is None or altitude > max_night_altitude:
                 max_night_altitude = altitude
             if altitude >= night_target_min_altitude:
                 visible_at_night = True
+            if (
+                best_hour_angle_distance is None
+                or hour_angle_distance < best_hour_angle_distance
+            ):
+                best_hour_angle_distance = hour_angle_distance
+                best_transit_local_datetime = sample.get("local_datetime")
             if abs(hour_angle) <= 0.25:
                 meridian_transit_at_night = True
+                if meridian_transit_local_datetime is None:
+                    meridian_transit_local_datetime = sample.get("local_datetime")
             elif previous_night_hour_angle is not None:
                 if (
                     previous_night_hour_angle <= 0 <= hour_angle
@@ -5317,13 +5342,51 @@ class AstroClocksApp:
                     and (previous_night_hour_angle - hour_angle) <= 1.0
                 ):
                     meridian_transit_at_night = True
+                    if meridian_transit_local_datetime is None:
+                        previous_distance = abs(previous_night_hour_angle)
+                        current_distance = hour_angle_distance
+                        total_distance = previous_distance + current_distance
+                        if (
+                            total_distance > 0
+                            and previous_night_local_datetime is not None
+                            and sample.get("local_datetime") is not None
+                        ):
+                            span_seconds = (
+                                sample["local_datetime"] - previous_night_local_datetime
+                            ).total_seconds()
+                            fraction = previous_distance / total_distance
+                            meridian_transit_local_datetime = (
+                                previous_night_local_datetime
+                                + datetime.timedelta(seconds=span_seconds * fraction)
+                            )
+                        else:
+                            meridian_transit_local_datetime = sample.get("local_datetime")
             previous_night_hour_angle = hour_angle
+            previous_night_local_datetime = sample.get("local_datetime")
+
+        if meridian_transit_local_datetime is None:
+            meridian_transit_local_datetime = best_transit_local_datetime
+
+        meridian_transit_local_minutes = None
+        meridian_transit_sort_timestamp = None
+        if meridian_transit_local_datetime is not None:
+            meridian_transit_local_minutes = (
+                meridian_transit_local_datetime.hour * 60
+                + meridian_transit_local_datetime.minute
+                + meridian_transit_local_datetime.second / 60.0
+            )
+            meridian_transit_sort_timestamp = (
+                meridian_transit_local_datetime.astimezone(datetime.timezone.utc).timestamp()
+            )
 
         return {
             "max_altitude": max_altitude,
             "max_night_altitude": max_night_altitude,
             "visible_at_night": visible_at_night,
             "meridian_transit_at_night": meridian_transit_at_night,
+            "meridian_transit_local_datetime": meridian_transit_local_datetime,
+            "meridian_transit_local_minutes": meridian_transit_local_minutes,
+            "meridian_transit_sort_timestamp": meridian_transit_sort_timestamp,
         }
 
     def _double_star_visibility_metrics(self, star, visibility_context):
@@ -5500,6 +5563,11 @@ class AstroClocksApp:
             return ""
         return f"{float(altitude):+.1f}\N{DEGREE SIGN}"
 
+    def _format_transit_time(self, value):
+        if value is None:
+            return ""
+        return value.strftime("%H:%M")
+
     def _format_double_optional_int(self, value):
         if value is None:
             return ""
@@ -5562,6 +5630,7 @@ class AstroClocksApp:
             "orb6_separation",
             "orb6_pa",
             "max_altitude",
+            "transit_time",
             "last_observation_year",
             "observation_count",
             "wds_note",
@@ -5607,6 +5676,9 @@ class AstroClocksApp:
                         self._format_double_orb6_separation(star),
                         self._format_double_orb6_pa(star),
                         self._format_double_max_altitude(star),
+                        self._format_transit_time(
+                            star.get("meridian_transit_local_datetime")
+                        ),
                         self._format_double_optional_int(star.get("last_observation_year")),
                         self._format_double_optional_int(star.get("observation_count")),
                         self._double_wds_note_cell_text(star),

@@ -1,3 +1,4 @@
+import datetime
 import unittest
 from unittest.mock import patch
 
@@ -244,6 +245,34 @@ class StarSearchCatalogTests(unittest.TestCase):
         filtered = app._filter_star_search_list(stars, filters, [])
 
         self.assertEqual([star["name"] for star in filtered], ["Clean star"])
+
+    def test_transit_time_sort_uses_actual_datetime_order(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.star_search_sort_column = "transit_time"
+
+        late_evening = datetime.datetime(
+            2026, 5, 7, 23, 30, tzinfo=datetime.timezone.utc
+        )
+        after_midnight = datetime.datetime(
+            2026, 5, 8, 0, 30, tzinfo=datetime.timezone.utc
+        )
+
+        first_value = app._star_search_sort_value(
+            {
+                "name": "Late evening transit",
+                "meridian_transit_local_datetime": late_evening,
+                "meridian_transit_sort_timestamp": late_evening.timestamp(),
+            }
+        )
+        second_value = app._star_search_sort_value(
+            {
+                "name": "After midnight transit",
+                "meridian_transit_local_datetime": after_midnight,
+                "meridian_transit_sort_timestamp": after_midnight.timestamp(),
+            }
+        )
+
+        self.assertLess(first_value, second_value)
 
 
 if __name__ == "__main__":
