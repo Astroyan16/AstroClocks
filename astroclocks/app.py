@@ -68,6 +68,7 @@ from astroclocks.settings import (
     DEFAULT_DOUBLE_MAX_SEPARATION,
     DEFAULT_DOUBLE_MIN_MAX_ALTITUDE,
     DEFAULT_DOUBLE_MIN_SEPARATION,
+    DEFAULT_DOUBLE_TRANSIT_NIGHT,
     DEFAULT_DOUBLE_USE_ONLINE,
     DEFAULT_DOUBLE_VISIBLE_NIGHT,
     DEFAULT_DEEP_SKY_CATEGORY,
@@ -81,6 +82,7 @@ from astroclocks.star_sprites import StarRenderStats, StarSpriteCache
 from astroclocks.star_catalog import SKY_STARS_J2000
 from astroclocks.utils import is_float, resource_path
 from astroclocks.windowing import (
+    apply_windows_title_bar_theme,
     center_window_on_pointer_monitor,
     current_monitor_geometry as window_current_monitor_geometry,
     fallback_screen_geometry as window_fallback_screen_geometry,
@@ -242,6 +244,9 @@ class AstroClocksApp:
         self.success = "#7bd88f"
         self.danger = "#ff5c5c"
         self.button_bg = "#22303a"
+        self._apply_native_window_chrome(self.root)
+        if self.loading_window is not None:
+            self._apply_native_window_chrome(self.loading_window)
         self._set_loading_status("Chargement des paramètres...")
         self.settings = load_app_settings()
         self.site_name = self.settings.site_name
@@ -697,6 +702,18 @@ class AstroClocksApp:
         self.root.grid_rowconfigure(0, weight=0)
         self.root.grid_rowconfigure(1, weight=1)
 
+    def _apply_native_window_chrome(self, window):
+        try:
+            apply_windows_title_bar_theme(
+                window,
+                caption_color=self.gbg,
+                text_color=self.text,
+                border_color=self.card_edge,
+                immersive_dark=True,
+            )
+        except Exception:
+            pass
+
     def _monitor_geometry_from_handle(self, hwnd, use_work_area=False):
         return window_monitor_geometry_from_handle(hwnd, use_work_area=use_work_area)
 
@@ -751,6 +768,7 @@ class AstroClocksApp:
         self.root.update_idletasks()
         self.root.deiconify()
         self.root.update_idletasks()
+        self._apply_native_window_chrome(self.root)
         self._move_window_to(self.root, x, y)
         try:
             self.root.attributes("-alpha", 1.0)
@@ -778,6 +796,7 @@ class AstroClocksApp:
         else:
             y = monitor_y
 
+        self._apply_native_window_chrome(dialog)
         self._move_window_to(dialog, x, y)
         dialog.lift(self.root)
 
@@ -802,8 +821,37 @@ class AstroClocksApp:
         else:
             y = monitor_y
 
+        self._apply_native_window_chrome(dialog)
         self._move_window_to(dialog, x, y)
         dialog.lift(self.root)
+
+    def _reveal_dialog(self, dialog, anchor=None, focus=False):
+        anchor = anchor or self.root
+        alpha_supported = False
+        try:
+            dialog.attributes("-alpha", 0.0)
+            alpha_supported = True
+        except (tk.TclError, RuntimeError):
+            pass
+
+        dialog.deiconify()
+        self._apply_native_window_chrome(dialog)
+        dialog.lift(anchor)
+        try:
+            dialog.update_idletasks()
+            dialog.update()
+        except (tk.TclError, RuntimeError):
+            pass
+        if focus:
+            try:
+                dialog.focus_set()
+            except (tk.TclError, RuntimeError):
+                pass
+        if alpha_supported:
+            try:
+                dialog.attributes("-alpha", 1.0)
+            except (tk.TclError, RuntimeError):
+                pass
 
     def _enter_fullscreen(self):
         if self.is_fullscreen:
@@ -1858,6 +1906,7 @@ class AstroClocksApp:
             value=self._format_double_filter_number(self.settings.double_min_max_altitude)
         )
         self.double_visible_night_var = tk.BooleanVar(value=self.settings.double_visible_night)
+        self.double_transit_night_var = tk.BooleanVar(value=self.settings.double_transit_night)
         self.double_include_physical_var = tk.BooleanVar(
             value=self.settings.double_include_physical
         )
@@ -1935,12 +1984,21 @@ class AstroClocksApp:
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 self.double_advanced_frame,
+                self.double_transit_night_var,
+                self._tr("double.transit_night"),
+                self._save_double_filters_if_valid,
+            ),
+            "double.transit_night",
+        ).grid(column=0, row=0, pady=(4, 0), sticky="ew")
+        self._register_translated_widget(
+            self._build_inline_checkbutton(
+                self.double_advanced_frame,
                 self.double_include_physical_var,
                 self._tr("double.include_physical"),
                 self._save_double_filters_if_valid,
             ),
             "double.include_physical",
-        ).grid(column=0, row=0, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=1, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 self.double_advanced_frame,
@@ -1949,7 +2007,7 @@ class AstroClocksApp:
                 self._save_double_filters_if_valid,
             ),
             "double.include_noted",
-        ).grid(column=0, row=1, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=2, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 self.double_advanced_frame,
@@ -1958,7 +2016,7 @@ class AstroClocksApp:
                 self._save_double_filters_if_valid,
             ),
             "double.include_apparent",
-        ).grid(column=0, row=2, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=3, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 self.double_advanced_frame,
@@ -1967,7 +2025,7 @@ class AstroClocksApp:
                 self._save_double_filters_if_valid,
             ),
             "double.include_uncertain",
-        ).grid(column=0, row=3, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=4, pady=(4, 0), sticky="ew")
         self._register_translated_widget(
             self._build_inline_checkbutton(
                 self.double_advanced_frame,
@@ -1976,7 +2034,7 @@ class AstroClocksApp:
                 self._save_double_filters_if_valid,
             ),
             "double.exclude_polar_circle",
-        ).grid(column=0, row=4, pady=(4, 0), sticky="ew")
+        ).grid(column=0, row=5, pady=(4, 0), sticky="ew")
 
         self.double_apply_button = self._build_button(
             controls,
@@ -4665,6 +4723,7 @@ class AstroClocksApp:
             return float(variable.get())
 
         visible_night_var = getattr(self, "double_visible_night_var", None)
+        transit_night_var = getattr(self, "double_transit_night_var", None)
         include_physical_var = getattr(self, "double_include_physical_var", None)
         include_noted_var = getattr(self, "double_include_noted_var", None)
         include_apparent_var = getattr(self, "double_include_apparent_var", None)
@@ -4697,6 +4756,11 @@ class AstroClocksApp:
                 visible_night_var.get()
                 if visible_night_var is not None
                 else self.settings.double_visible_night
+            ),
+            "double_transit_night": (
+                transit_night_var.get()
+                if transit_night_var is not None
+                else self.settings.double_transit_night
             ),
             "double_include_physical": (
                 include_physical_var.get()
@@ -4754,6 +4818,13 @@ class AstroClocksApp:
                 getattr(self.settings, "deep_sky_category", DEFAULT_DEEP_SKY_CATEGORY),
             )
         visible_night_var = getattr(self, "deep_sky_visible_night_var", None)
+        transit_night_var = getattr(self, "deep_sky_transit_night_var", None)
+        exclude_polar_circle_var = getattr(self, "deep_sky_exclude_polar_circle_var", None)
+        exclude_suspect_magnitudes_var = getattr(
+            self,
+            "deep_sky_exclude_suspect_magnitudes_var",
+            None,
+        )
 
         return {
             "deep_sky_category": category,
@@ -4774,6 +4845,21 @@ class AstroClocksApp:
                 if visible_night_var is not None
                 else self.settings.deep_sky_visible_night
             ),
+            "deep_sky_transit_night": (
+                transit_night_var.get()
+                if transit_night_var is not None
+                else self.settings.deep_sky_transit_night
+            ),
+            "deep_sky_exclude_polar_circle": (
+                exclude_polar_circle_var.get()
+                if exclude_polar_circle_var is not None
+                else self.settings.deep_sky_exclude_polar_circle
+            ),
+            "deep_sky_exclude_suspect_magnitudes": (
+                exclude_suspect_magnitudes_var.get()
+                if exclude_suspect_magnitudes_var is not None
+                else self.settings.deep_sky_exclude_suspect_magnitudes
+            ),
             "deep_sky_magnitude_band": self._current_deep_sky_magnitude_band(),
         }
 
@@ -4793,6 +4879,13 @@ class AstroClocksApp:
             return float(variable.get())
 
         visible_night_var = getattr(self, "star_search_visible_night_var", None)
+        transit_night_var = getattr(self, "star_search_transit_night_var", None)
+        exclude_polar_circle_var = getattr(self, "star_search_exclude_polar_circle_var", None)
+        exclude_suspect_magnitudes_var = getattr(
+            self,
+            "star_search_exclude_suspect_magnitudes_var",
+            None,
+        )
         return {
             "star_search_spectral_type": self._current_star_search_spectral_type(),
             "star_search_magnitude_band": self._current_star_search_magnitude_band(),
@@ -4812,6 +4905,21 @@ class AstroClocksApp:
                 visible_night_var.get()
                 if visible_night_var is not None
                 else self.settings.star_search_visible_night
+            ),
+            "star_search_transit_night": (
+                transit_night_var.get()
+                if transit_night_var is not None
+                else self.settings.star_search_transit_night
+            ),
+            "star_search_exclude_polar_circle": (
+                exclude_polar_circle_var.get()
+                if exclude_polar_circle_var is not None
+                else self.settings.star_search_exclude_polar_circle
+            ),
+            "star_search_exclude_suspect_magnitudes": (
+                exclude_suspect_magnitudes_var.get()
+                if exclude_suspect_magnitudes_var is not None
+                else self.settings.star_search_exclude_suspect_magnitudes
             ),
         }
 
@@ -4883,6 +4991,7 @@ class AstroClocksApp:
             "max_sep": DEFAULT_DOUBLE_MAX_SEPARATION,
             "min_altitude": DEFAULT_DOUBLE_MIN_MAX_ALTITUDE,
             "visible_night": DEFAULT_DOUBLE_VISIBLE_NIGHT,
+            "transit_night": DEFAULT_DOUBLE_TRANSIT_NIGHT,
             "include_physical": DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
             "include_noted": DEFAULT_DOUBLE_INCLUDE_NOTED,
             "include_apparent": DEFAULT_DOUBLE_INCLUDE_APPARENT,
@@ -4902,6 +5011,7 @@ class AstroClocksApp:
             self._format_double_filter_number(filters["min_altitude"])
         )
         self.double_visible_night_var.set(filters["visible_night"])
+        self.double_transit_night_var.set(filters["transit_night"])
         self.double_include_physical_var.set(filters["include_physical"])
         self.double_include_noted_var.set(filters["include_noted"])
         self.double_include_apparent_var.set(filters["include_apparent"])
@@ -5079,6 +5189,7 @@ class AstroClocksApp:
             "max_sep": max_sep,
             "min_altitude": min_altitude,
             "visible_night": self.double_visible_night_var.get(),
+            "transit_night": self.double_transit_night_var.get(),
             "include_physical": self.double_include_physical_var.get(),
             "include_noted": self.double_include_noted_var.get(),
             "include_apparent": self.double_include_apparent_var.get(),
@@ -5158,37 +5269,71 @@ class AstroClocksApp:
             )
         return context
 
-    def _double_star_visibility_metrics(self, star, visibility_context):
+    def _search_visibility_metrics(
+        self,
+        ra_hours,
+        declination,
+        visibility_context,
+        night_sun_max_altitude,
+        night_target_min_altitude,
+    ):
         if not visibility_context:
             return {
                 "max_altitude": None,
                 "max_night_altitude": None,
                 "visible_at_night": False,
+                "meridian_transit_at_night": False,
             }
 
         max_altitude = None
         max_night_altitude = None
         visible_at_night = False
+        meridian_transit_at_night = False
+        previous_night_hour_angle = None
         for sample in visibility_context:
-            altitude, _azimuth, _hour_angle = self._equatorial_to_horizontal(
-                star["ra_hours"],
-                star["declination"],
+            altitude, _azimuth, hour_angle = self._equatorial_to_horizontal(
+                ra_hours,
+                declination,
                 sample["lst_hours"],
             )
+            hour_angle = self._normalize_hour_angle(hour_angle)
             if max_altitude is None or altitude > max_altitude:
                 max_altitude = altitude
-            if sample["sun_altitude"] > DOUBLE_NIGHT_SUN_MAX_ALTITUDE:
+            if sample["sun_altitude"] > night_sun_max_altitude:
+                previous_night_hour_angle = None
                 continue
             if max_night_altitude is None or altitude > max_night_altitude:
                 max_night_altitude = altitude
-            if altitude >= DOUBLE_NIGHT_TARGET_MIN_ALTITUDE:
+            if altitude >= night_target_min_altitude:
                 visible_at_night = True
+            if abs(hour_angle) <= 0.25:
+                meridian_transit_at_night = True
+            elif previous_night_hour_angle is not None:
+                if (
+                    previous_night_hour_angle <= 0 <= hour_angle
+                    and (hour_angle - previous_night_hour_angle) <= 1.0
+                ) or (
+                    hour_angle <= 0 <= previous_night_hour_angle
+                    and (previous_night_hour_angle - hour_angle) <= 1.0
+                ):
+                    meridian_transit_at_night = True
+            previous_night_hour_angle = hour_angle
 
         return {
             "max_altitude": max_altitude,
             "max_night_altitude": max_night_altitude,
             "visible_at_night": visible_at_night,
+            "meridian_transit_at_night": meridian_transit_at_night,
         }
+
+    def _double_star_visibility_metrics(self, star, visibility_context):
+        return self._search_visibility_metrics(
+            star["ra_hours"],
+            star["declination"],
+            visibility_context,
+            DOUBLE_NIGHT_SUN_MAX_ALTITUDE,
+            DOUBLE_NIGHT_TARGET_MIN_ALTITUDE,
+        )
 
     def _double_note_flags(self, star):
         return set(str(star.get("notes", "") or "").strip().upper())
@@ -5249,7 +5394,7 @@ class AstroClocksApp:
             star.update(self._double_star_visibility_metrics(star, visibility_context))
             if not self._double_group_allowed(star, filters):
                 continue
-            if filters["exclude_polar_circle"] and star["declination"] > 60:
+            if filters.get("exclude_polar_circle", False) and star["declination"] > 60:
                 continue
             if star["mag_primary"] > filters["max_primary"]:
                 continue
@@ -5262,7 +5407,9 @@ class AstroClocksApp:
             max_altitude = star.get("max_altitude")
             if max_altitude is None or max_altitude < filters["min_altitude"]:
                 continue
-            if filters["visible_night"] and not star.get("visible_at_night"):
+            if filters.get("visible_night", False) and not star.get("visible_at_night"):
+                continue
+            if filters.get("transit_night", False) and not star.get("meridian_transit_at_night"):
                 continue
             filtered.append(star)
         return filtered
@@ -6386,6 +6533,13 @@ def _create_loading_window():
     apply_app_icon(window)
     window.configure(bg="#101419")
     window.resizable(False, False)
+    apply_windows_title_bar_theme(
+        window,
+        caption_color="#101419",
+        text_color="#edf3f8",
+        border_color="#2b3a45",
+        immersive_dark=True,
+    )
     width = 440
     height = 170
     tk.Label(
@@ -6418,6 +6572,13 @@ def _create_loading_window():
     )
     root._astroclocks_startup_monitor_geometry = startup_monitor_geometry
     window.deiconify()
+    apply_windows_title_bar_theme(
+        window,
+        caption_color="#101419",
+        text_color="#edf3f8",
+        border_color="#2b3a45",
+        immersive_dark=True,
+    )
     window.lift()
     window.update()
     return root, window, status_var

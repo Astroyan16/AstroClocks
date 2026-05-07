@@ -23,6 +23,9 @@ from astroclocks.settings import (
     DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
     DEFAULT_DEEP_SKY_MIN_MAGNITUDE,
     DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE,
+    DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE,
+    DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES,
+    DEFAULT_DEEP_SKY_TRANSIT_NIGHT,
     DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
     DEEP_SKY_MAGNITUDE_BANDS,
 )
@@ -63,6 +66,15 @@ def _create_deep_sky_widgets(self):
     )
     self.deep_sky_visible_night_var = tk.BooleanVar(
         value=self.settings.deep_sky_visible_night
+    )
+    self.deep_sky_transit_night_var = tk.BooleanVar(
+        value=self.settings.deep_sky_transit_night
+    )
+    self.deep_sky_exclude_polar_circle_var = tk.BooleanVar(
+        value=self.settings.deep_sky_exclude_polar_circle
+    )
+    self.deep_sky_exclude_suspect_magnitudes_var = tk.BooleanVar(
+        value=self.settings.deep_sky_exclude_suspect_magnitudes
     )
 
     category_label = tk.Label(
@@ -174,41 +186,68 @@ def _create_deep_sky_widgets(self):
         ),
         "deep_sky.visible_night",
     ).grid(column=0, row=9, pady=(12, 0), sticky="ew")
+    self._register_translated_widget(
+        self._build_inline_checkbutton(
+            controls,
+            self.deep_sky_transit_night_var,
+            self._tr("deep_sky.transit_night"),
+            self._save_deep_sky_filters_if_valid,
+        ),
+        "deep_sky.transit_night",
+    ).grid(column=0, row=10, pady=(4, 0), sticky="ew")
+    self._register_translated_widget(
+        self._build_inline_checkbutton(
+            controls,
+            self.deep_sky_exclude_polar_circle_var,
+            self._tr("deep_sky.exclude_polar_circle"),
+            self._save_deep_sky_filters_if_valid,
+        ),
+        "deep_sky.exclude_polar_circle",
+    ).grid(column=0, row=11, pady=(4, 0), sticky="ew")
+    self._register_translated_widget(
+        self._build_inline_checkbutton(
+            controls,
+            self.deep_sky_exclude_suspect_magnitudes_var,
+            self._tr("deep_sky.exclude_suspect_magnitudes"),
+            self._save_deep_sky_filters_if_valid,
+        ),
+        "deep_sky.exclude_suspect_magnitudes",
+    ).grid(column=0, row=12, pady=(4, 0), sticky="ew")
 
     self.deep_sky_apply_button = self._build_button(
         controls,
         self._tr("deep_sky.apply_filters"),
         lambda: self.search_deep_sky_objects(allow_online=False),
     )
-    self.deep_sky_apply_button.grid(column=0, row=10, pady=(14, 6), sticky="ew")
+    self.deep_sky_apply_button.grid(column=0, row=13, pady=(14, 6), sticky="ew")
 
     self.deep_sky_online_button = self._build_button(
         controls,
         self._tr("deep_sky.online_search"),
         lambda: self.search_deep_sky_objects(allow_online=True),
     )
-    self.deep_sky_online_button.grid(column=0, row=11, pady=(0, 6), sticky="ew")
+    self.deep_sky_online_button.grid(column=0, row=14, pady=(0, 6), sticky="ew")
 
     self.deep_sky_set_button = self._build_button(
         controls,
         self._tr("deep_sky.set_target"),
         self.set_selected_deep_sky_target,
     )
-    self.deep_sky_set_button.grid(column=0, row=12, pady=(0, 6), sticky="ew")
+    self.deep_sky_set_button.grid(column=0, row=15, pady=(0, 6), sticky="ew")
 
     self.deep_sky_clear_cache_button = self._build_button(
         controls,
         self._tr("button.clear_cache"),
         self.clear_deep_sky_cache,
     )
-    self.deep_sky_clear_cache_button.grid(column=0, row=13, pady=(0, 6), sticky="ew")
+    self.deep_sky_clear_cache_button.grid(column=0, row=16, pady=(0, 6), sticky="ew")
 
     self.deep_sky_reset_button = self._build_button(
         controls,
         self._tr("deep_sky.reset_filters"),
         self.reset_deep_sky_filters,
     )
-    self.deep_sky_reset_button.grid(column=0, row=14, pady=(0, 12), sticky="ew")
+    self.deep_sky_reset_button.grid(column=0, row=17, pady=(0, 12), sticky="ew")
 
     self.deep_sky_status_label = tk.Label(
         controls,
@@ -219,7 +258,7 @@ def _create_deep_sky_widgets(self):
         wraplength=220,
         anchor="nw",
     )
-    self.deep_sky_status_label.grid(column=0, row=15, sticky="ew")
+    self.deep_sky_status_label.grid(column=0, row=18, sticky="ew")
 
     results_frame = self._build_labelframe(
         "frame.deep_sky",
@@ -420,6 +459,9 @@ def _default_deep_sky_filters(self):
         "max_magnitude": DEFAULT_DEEP_SKY_MAX_MAGNITUDE,
         "min_altitude": DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE,
         "visible_night": DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
+        "transit_night": DEFAULT_DEEP_SKY_TRANSIT_NIGHT,
+        "exclude_polar_circle": DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE,
+        "exclude_suspect_magnitudes": DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES,
     }
 
 def _apply_deep_sky_filter_controls(self, filters):
@@ -440,6 +482,11 @@ def _apply_deep_sky_filter_controls(self, filters):
         self._format_double_filter_number(filters["min_altitude"])
     )
     self.deep_sky_visible_night_var.set(filters["visible_night"])
+    self.deep_sky_transit_night_var.set(filters["transit_night"])
+    self.deep_sky_exclude_polar_circle_var.set(filters["exclude_polar_circle"])
+    self.deep_sky_exclude_suspect_magnitudes_var.set(
+        filters["exclude_suspect_magnitudes"]
+    )
     self._refresh_deep_sky_headings()
 
 def reset_deep_sky_filters(self):
@@ -502,6 +549,9 @@ def _read_deep_sky_filters(self):
         "max_magnitude": max_magnitude,
         "min_altitude": min_altitude,
         "visible_night": self.deep_sky_visible_night_var.get(),
+        "transit_night": self.deep_sky_transit_night_var.get(),
+        "exclude_polar_circle": self.deep_sky_exclude_polar_circle_var.get(),
+        "exclude_suspect_magnitudes": self.deep_sky_exclude_suspect_magnitudes_var.get(),
     }
 
 def _deep_sky_heading_keys(self):
@@ -659,36 +709,13 @@ def _deep_sky_objects_to_jnow(self, sky_objects):
     return normalized
 
 def _deep_sky_visibility_metrics(self, sky_object, visibility_context):
-    if not visibility_context:
-        return {
-            "max_altitude": None,
-            "max_night_altitude": None,
-            "visible_at_night": False,
-        }
-
-    max_altitude = None
-    max_night_altitude = None
-    visible_at_night = False
-    for sample in visibility_context:
-        altitude, _azimuth, _hour_angle = self._equatorial_to_horizontal(
-            sky_object["ra_hours"],
-            sky_object["declination"],
-            sample["lst_hours"],
-        )
-        if max_altitude is None or altitude > max_altitude:
-            max_altitude = altitude
-        if sample["sun_altitude"] > DEEP_SKY_NIGHT_SUN_MAX_ALTITUDE:
-            continue
-        if max_night_altitude is None or altitude > max_night_altitude:
-            max_night_altitude = altitude
-        if altitude >= DEEP_SKY_NIGHT_TARGET_MIN_ALTITUDE:
-            visible_at_night = True
-
-    return {
-        "max_altitude": max_altitude,
-        "max_night_altitude": max_night_altitude,
-        "visible_at_night": visible_at_night,
-    }
+    return self._search_visibility_metrics(
+        sky_object["ra_hours"],
+        sky_object["declination"],
+        visibility_context,
+        DEEP_SKY_NIGHT_SUN_MAX_ALTITUDE,
+        DEEP_SKY_NIGHT_TARGET_MIN_ALTITUDE,
+    )
 
 def _filter_deep_sky_list(self, sky_objects, filters, visibility_context=None):
     if visibility_context is None:
@@ -704,6 +731,11 @@ def _filter_deep_sky_list(self, sky_objects, filters, visibility_context=None):
             magnitude = sky_object.get("magnitude")
             if magnitude is None:
                 continue
+            if (
+                filters.get("exclude_suspect_magnitudes", False)
+                and "E" in str(sky_object.get("magnitude_flag", "")).upper()
+            ):
+                continue
             if not filters["min_magnitude"] <= magnitude <= filters["max_magnitude"]:
                 continue
         candidates.append(sky_object)
@@ -711,10 +743,14 @@ def _filter_deep_sky_list(self, sky_objects, filters, visibility_context=None):
     filtered = []
     for sky_object in self._deep_sky_objects_to_jnow(candidates):
         sky_object.update(self._deep_sky_visibility_metrics(sky_object, visibility_context))
+        if filters.get("exclude_polar_circle", False) and sky_object["declination"] > 60:
+            continue
         max_altitude = sky_object.get("max_altitude")
         if max_altitude is None or max_altitude < filters["min_altitude"]:
             continue
-        if filters["visible_night"] and not sky_object.get("visible_at_night"):
+        if filters.get("visible_night", False) and not sky_object.get("visible_at_night"):
+            continue
+        if filters.get("transit_night", False) and not sky_object.get("meridian_transit_at_night"):
             continue
         filtered.append(sky_object)
     return filtered

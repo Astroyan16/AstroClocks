@@ -8,11 +8,14 @@ from tkinter.font import Font
 from astroclocks import app_dialogs
 from astroclocks.astronomy import convert_star_catalog_j2000_to_jnow
 from astroclocks.settings import (
+    DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
+    DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES,
     DEFAULT_STAR_SEARCH_MAX_MAGNITUDE,
     DEFAULT_STAR_SEARCH_MAGNITUDE_BAND,
     DEFAULT_STAR_SEARCH_MIN_MAGNITUDE,
     DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE,
     DEFAULT_STAR_SEARCH_SPECTRAL_TYPE,
+    DEFAULT_STAR_SEARCH_TRANSIT_NIGHT,
     DEFAULT_STAR_SEARCH_VISIBLE_NIGHT,
     STAR_SEARCH_MAGNITUDE_BANDS,
     STAR_SEARCH_SPECTRAL_TYPES,
@@ -59,6 +62,15 @@ def _create_star_search_widgets(self):
     )
     self.star_search_visible_night_var = tk.BooleanVar(
         value=self.settings.star_search_visible_night
+    )
+    self.star_search_transit_night_var = tk.BooleanVar(
+        value=self.settings.star_search_transit_night
+    )
+    self.star_search_exclude_polar_circle_var = tk.BooleanVar(
+        value=self.settings.star_search_exclude_polar_circle
+    )
+    self.star_search_exclude_suspect_magnitudes_var = tk.BooleanVar(
+        value=self.settings.star_search_exclude_suspect_magnitudes
     )
 
     def add_combo(row, key, variable, values):
@@ -131,41 +143,68 @@ def _create_star_search_widgets(self):
         ),
         "star_search.visible_night",
     ).grid(column=0, row=9, pady=(12, 0), sticky="ew")
+    self._register_translated_widget(
+        self._build_inline_checkbutton(
+            controls,
+            self.star_search_transit_night_var,
+            self._tr("star_search.transit_night"),
+            self._save_star_search_filters_if_valid,
+        ),
+        "star_search.transit_night",
+    ).grid(column=0, row=10, pady=(4, 0), sticky="ew")
+    self._register_translated_widget(
+        self._build_inline_checkbutton(
+            controls,
+            self.star_search_exclude_polar_circle_var,
+            self._tr("star_search.exclude_polar_circle"),
+            self._save_star_search_filters_if_valid,
+        ),
+        "star_search.exclude_polar_circle",
+    ).grid(column=0, row=11, pady=(4, 0), sticky="ew")
+    self._register_translated_widget(
+        self._build_inline_checkbutton(
+            controls,
+            self.star_search_exclude_suspect_magnitudes_var,
+            self._tr("star_search.exclude_suspect_magnitudes"),
+            self._save_star_search_filters_if_valid,
+        ),
+        "star_search.exclude_suspect_magnitudes",
+    ).grid(column=0, row=12, pady=(4, 0), sticky="ew")
 
     self.star_search_apply_button = self._build_button(
         controls,
         self._tr("star_search.apply_filters"),
         lambda: self.search_stars(allow_online=False),
     )
-    self.star_search_apply_button.grid(column=0, row=10, pady=(14, 6), sticky="ew")
+    self.star_search_apply_button.grid(column=0, row=13, pady=(14, 6), sticky="ew")
 
     self.star_search_online_button = self._build_button(
         controls,
         self._tr("star_search.online_search"),
         lambda: self.search_stars(allow_online=True),
     )
-    self.star_search_online_button.grid(column=0, row=11, pady=(0, 6), sticky="ew")
+    self.star_search_online_button.grid(column=0, row=14, pady=(0, 6), sticky="ew")
 
     self.star_search_set_button = self._build_button(
         controls,
         self._tr("star_search.set_target"),
         self.set_selected_star_target,
     )
-    self.star_search_set_button.grid(column=0, row=12, pady=(0, 6), sticky="ew")
+    self.star_search_set_button.grid(column=0, row=15, pady=(0, 6), sticky="ew")
 
     self.star_search_clear_cache_button = self._build_button(
         controls,
         self._tr("button.clear_cache"),
         self.clear_star_search_cache,
     )
-    self.star_search_clear_cache_button.grid(column=0, row=13, pady=(0, 6), sticky="ew")
+    self.star_search_clear_cache_button.grid(column=0, row=16, pady=(0, 6), sticky="ew")
 
     self.star_search_reset_button = self._build_button(
         controls,
         self._tr("star_search.reset_filters"),
         self.reset_star_search_filters,
     )
-    self.star_search_reset_button.grid(column=0, row=14, pady=(0, 12), sticky="ew")
+    self.star_search_reset_button.grid(column=0, row=17, pady=(0, 12), sticky="ew")
 
     self.star_search_status_label = tk.Label(
         controls,
@@ -176,7 +215,7 @@ def _create_star_search_widgets(self):
         wraplength=220,
         anchor="nw",
     )
-    self.star_search_status_label.grid(column=0, row=15, sticky="ew")
+    self.star_search_status_label.grid(column=0, row=18, sticky="ew")
 
     results_frame = self._build_labelframe(
         "frame.star_search",
@@ -293,6 +332,9 @@ def _default_star_search_filters(self):
         "max_magnitude": DEFAULT_STAR_SEARCH_MAX_MAGNITUDE,
         "min_altitude": DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE,
         "visible_night": DEFAULT_STAR_SEARCH_VISIBLE_NIGHT,
+        "transit_night": DEFAULT_STAR_SEARCH_TRANSIT_NIGHT,
+        "exclude_polar_circle": DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
+        "exclude_suspect_magnitudes": DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES,
     }
 
 def _apply_star_search_filter_controls(self, filters):
@@ -302,6 +344,11 @@ def _apply_star_search_filter_controls(self, filters):
     self.star_search_max_mag_var.set(self._format_double_filter_number(filters["max_magnitude"]))
     self.star_search_min_altitude_var.set(self._format_double_filter_number(filters["min_altitude"]))
     self.star_search_visible_night_var.set(filters["visible_night"])
+    self.star_search_transit_night_var.set(filters["transit_night"])
+    self.star_search_exclude_polar_circle_var.set(filters["exclude_polar_circle"])
+    self.star_search_exclude_suspect_magnitudes_var.set(
+        filters["exclude_suspect_magnitudes"]
+    )
     self._refresh_star_search_headings()
 
 def reset_star_search_filters(self):
@@ -357,6 +404,9 @@ def _read_star_search_filters(self):
         "max_magnitude": max_magnitude,
         "min_altitude": min_altitude,
         "visible_night": self.star_search_visible_night_var.get(),
+        "transit_night": self.star_search_transit_night_var.get(),
+        "exclude_polar_circle": self.star_search_exclude_polar_circle_var.get(),
+        "exclude_suspect_magnitudes": self.star_search_exclude_suspect_magnitudes_var.get(),
     }
 
 def _star_search_heading_keys(self):
@@ -548,6 +598,11 @@ def _filter_star_search_list(self, stars, filters, visibility_context=None):
         magnitude = star.get("magnitude")
         if magnitude is None:
             continue
+        if (
+            filters.get("exclude_suspect_magnitudes", False)
+            and "E" in str(star.get("magnitude_flag", "")).upper()
+        ):
+            continue
         if not filters["min_magnitude"] <= magnitude <= filters["max_magnitude"]:
             continue
         candidates.append(star)
@@ -555,10 +610,14 @@ def _filter_star_search_list(self, stars, filters, visibility_context=None):
     filtered = []
     for star in self._stars_to_jnow(candidates):
         star.update(self._deep_sky_visibility_metrics(star, visibility_context))
+        if filters.get("exclude_polar_circle", False) and star["declination"] > 60:
+            continue
         max_altitude = star.get("max_altitude")
         if max_altitude is None or max_altitude < filters["min_altitude"]:
             continue
-        if filters["visible_night"] and not star.get("visible_at_night"):
+        if filters.get("visible_night", False) and not star.get("visible_at_night"):
+            continue
+        if filters.get("transit_night", False) and not star.get("meridian_transit_at_night"):
             continue
         filtered.append(star)
     return filtered

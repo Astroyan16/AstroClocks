@@ -31,6 +31,7 @@ DEFAULT_DOUBLE_MIN_SEPARATION = 0.14
 DEFAULT_DOUBLE_MAX_SEPARATION = 5.0
 DEFAULT_DOUBLE_MIN_MAX_ALTITUDE = 10.0
 DEFAULT_DOUBLE_VISIBLE_NIGHT = True
+DEFAULT_DOUBLE_TRANSIT_NIGHT = False
 DEFAULT_DOUBLE_INCLUDE_PHYSICAL = True
 DEFAULT_DOUBLE_INCLUDE_NOTED = True
 DEFAULT_DOUBLE_INCLUDE_APPARENT = False
@@ -42,6 +43,9 @@ DEFAULT_DEEP_SKY_MIN_MAGNITUDE = -2.0
 DEFAULT_DEEP_SKY_MAX_MAGNITUDE = 13.0
 DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE = 10.0
 DEFAULT_DEEP_SKY_VISIBLE_NIGHT = True
+DEFAULT_DEEP_SKY_TRANSIT_NIGHT = False
+DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE = False
+DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES = False
 DEEP_SKY_MAGNITUDE_BANDS = ("V", "U", "B", "R", "I", "J", "H", "K")
 DEFAULT_DEEP_SKY_MAGNITUDE_BAND = "V"
 DEEP_SKY_MAGNITUDE_BAND_CODES = set(DEEP_SKY_MAGNITUDE_BANDS)
@@ -54,6 +58,9 @@ DEFAULT_STAR_SEARCH_MIN_MAGNITUDE = -2.0
 DEFAULT_STAR_SEARCH_MAX_MAGNITUDE = 8.5
 DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE = 10.0
 DEFAULT_STAR_SEARCH_VISIBLE_NIGHT = True
+DEFAULT_STAR_SEARCH_TRANSIT_NIGHT = False
+DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE = False
+DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES = False
 DEEP_SKY_CATEGORY_CODES = {
     "planetary_nebula",
     "emission_nebula",
@@ -104,6 +111,7 @@ class AppSettings:
     double_max_separation: float = DEFAULT_DOUBLE_MAX_SEPARATION
     double_min_max_altitude: float = DEFAULT_DOUBLE_MIN_MAX_ALTITUDE
     double_visible_night: bool = DEFAULT_DOUBLE_VISIBLE_NIGHT
+    double_transit_night: bool = DEFAULT_DOUBLE_TRANSIT_NIGHT
     double_include_physical: bool = DEFAULT_DOUBLE_INCLUDE_PHYSICAL
     double_include_noted: bool = DEFAULT_DOUBLE_INCLUDE_NOTED
     double_include_apparent: bool = DEFAULT_DOUBLE_INCLUDE_APPARENT
@@ -115,6 +123,9 @@ class AppSettings:
     deep_sky_max_magnitude: float = DEFAULT_DEEP_SKY_MAX_MAGNITUDE
     deep_sky_min_max_altitude: float = DEFAULT_DEEP_SKY_MIN_MAX_ALTITUDE
     deep_sky_visible_night: bool = DEFAULT_DEEP_SKY_VISIBLE_NIGHT
+    deep_sky_transit_night: bool = DEFAULT_DEEP_SKY_TRANSIT_NIGHT
+    deep_sky_exclude_polar_circle: bool = DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE
+    deep_sky_exclude_suspect_magnitudes: bool = DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES
     deep_sky_magnitude_band: str = DEFAULT_DEEP_SKY_MAGNITUDE_BAND
     star_search_spectral_type: str = DEFAULT_STAR_SEARCH_SPECTRAL_TYPE
     star_search_magnitude_band: str = DEFAULT_STAR_SEARCH_MAGNITUDE_BAND
@@ -122,6 +133,9 @@ class AppSettings:
     star_search_max_magnitude: float = DEFAULT_STAR_SEARCH_MAX_MAGNITUDE
     star_search_min_max_altitude: float = DEFAULT_STAR_SEARCH_MIN_MAX_ALTITUDE
     star_search_visible_night: bool = DEFAULT_STAR_SEARCH_VISIBLE_NIGHT
+    star_search_transit_night: bool = DEFAULT_STAR_SEARCH_TRANSIT_NIGHT
+    star_search_exclude_polar_circle: bool = DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE
+    star_search_exclude_suspect_magnitudes: bool = DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES
 
 
 def _clamp(value, minimum, maximum):
@@ -267,6 +281,10 @@ def normalize_settings(settings):
             getattr(settings, "double_visible_night", DEFAULT_DOUBLE_VISIBLE_NIGHT),
             DEFAULT_DOUBLE_VISIBLE_NIGHT,
         ),
+        double_transit_night=_coerce_bool(
+            getattr(settings, "double_transit_night", DEFAULT_DOUBLE_TRANSIT_NIGHT),
+            DEFAULT_DOUBLE_TRANSIT_NIGHT,
+        ),
         double_include_physical=_coerce_bool(
             getattr(settings, "double_include_physical", DEFAULT_DOUBLE_INCLUDE_PHYSICAL),
             DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
@@ -311,6 +329,26 @@ def normalize_settings(settings):
             getattr(settings, "deep_sky_visible_night", DEFAULT_DEEP_SKY_VISIBLE_NIGHT),
             DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
         ),
+        deep_sky_transit_night=_coerce_bool(
+            getattr(settings, "deep_sky_transit_night", DEFAULT_DEEP_SKY_TRANSIT_NIGHT),
+            DEFAULT_DEEP_SKY_TRANSIT_NIGHT,
+        ),
+        deep_sky_exclude_polar_circle=_coerce_bool(
+            getattr(
+                settings,
+                "deep_sky_exclude_polar_circle",
+                DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE,
+            ),
+            DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE,
+        ),
+        deep_sky_exclude_suspect_magnitudes=_coerce_bool(
+            getattr(
+                settings,
+                "deep_sky_exclude_suspect_magnitudes",
+                DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES,
+            ),
+            DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES,
+        ),
         deep_sky_magnitude_band=deep_sky_magnitude_band,
         star_search_spectral_type=star_search_spectral_type,
         star_search_magnitude_band=star_search_magnitude_band,
@@ -332,6 +370,30 @@ def normalize_settings(settings):
         star_search_visible_night=_coerce_bool(
             getattr(settings, "star_search_visible_night", DEFAULT_STAR_SEARCH_VISIBLE_NIGHT),
             DEFAULT_STAR_SEARCH_VISIBLE_NIGHT,
+        ),
+        star_search_transit_night=_coerce_bool(
+            getattr(
+                settings,
+                "star_search_transit_night",
+                DEFAULT_STAR_SEARCH_TRANSIT_NIGHT,
+            ),
+            DEFAULT_STAR_SEARCH_TRANSIT_NIGHT,
+        ),
+        star_search_exclude_polar_circle=_coerce_bool(
+            getattr(
+                settings,
+                "star_search_exclude_polar_circle",
+                DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
+            ),
+            DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
+        ),
+        star_search_exclude_suspect_magnitudes=_coerce_bool(
+            getattr(
+                settings,
+                "star_search_exclude_suspect_magnitudes",
+                DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES,
+            ),
+            DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES,
         ),
     )
 
@@ -414,6 +476,10 @@ def load_app_settings():
                 "double_visible_night",
                 DEFAULT_DOUBLE_VISIBLE_NIGHT,
             ),
+            double_transit_night=data.get(
+                "double_transit_night",
+                DEFAULT_DOUBLE_TRANSIT_NIGHT,
+            ),
             double_include_physical=data.get(
                 "double_include_physical",
                 DEFAULT_DOUBLE_INCLUDE_PHYSICAL,
@@ -458,6 +524,18 @@ def load_app_settings():
                 "deep_sky_visible_night",
                 DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
             ),
+            deep_sky_transit_night=data.get(
+                "deep_sky_transit_night",
+                DEFAULT_DEEP_SKY_TRANSIT_NIGHT,
+            ),
+            deep_sky_exclude_polar_circle=data.get(
+                "deep_sky_exclude_polar_circle",
+                DEFAULT_DEEP_SKY_EXCLUDE_POLAR_CIRCLE,
+            ),
+            deep_sky_exclude_suspect_magnitudes=data.get(
+                "deep_sky_exclude_suspect_magnitudes",
+                DEFAULT_DEEP_SKY_EXCLUDE_SUSPECT_MAGNITUDES,
+            ),
             deep_sky_magnitude_band=data.get(
                 "deep_sky_magnitude_band",
                 DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
@@ -485,6 +563,18 @@ def load_app_settings():
             star_search_visible_night=data.get(
                 "star_search_visible_night",
                 DEFAULT_STAR_SEARCH_VISIBLE_NIGHT,
+            ),
+            star_search_transit_night=data.get(
+                "star_search_transit_night",
+                DEFAULT_STAR_SEARCH_TRANSIT_NIGHT,
+            ),
+            star_search_exclude_polar_circle=data.get(
+                "star_search_exclude_polar_circle",
+                DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
+            ),
+            star_search_exclude_suspect_magnitudes=data.get(
+                "star_search_exclude_suspect_magnitudes",
+                DEFAULT_STAR_SEARCH_EXCLUDE_SUSPECT_MAGNITUDES,
             ),
         )
     )

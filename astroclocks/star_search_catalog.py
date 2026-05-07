@@ -85,11 +85,30 @@ def _star_photometry_band_map(photometry):
     return {str(band).upper(): float(magnitude)}
 
 
+def _star_photometry_flag_map(photometry_flags):
+    if photometry_flags is None or not isinstance(photometry_flags, dict):
+        return {}
+    return {
+        str(band).upper(): str(flag).strip().upper()
+        for band, flag in photometry_flags.items()
+        if str(flag or "").strip()
+    }
+
+
 def _star_photometry(star):
     photometry = _star_photometry_band_map(star.get("photometry"))
     if photometry:
         return photometry
     return _star_photometry_band_map((star.get("magnitude"), star.get("magnitude_band")))
+
+
+def _star_photometry_flags(star):
+    flags = _star_photometry_flag_map(star.get("photometry_flags"))
+    band = str(star.get("magnitude_band") or "").upper()
+    flag = str(star.get("magnitude_flag") or "").strip().upper()
+    if band and flag:
+        flags.setdefault(band, flag)
+    return flags
 
 
 def _preferred_star_band_order(preferred_band):
@@ -116,10 +135,13 @@ def resolve_star_photometry(
 ):
     resolved = dict(star)
     photometry = _star_photometry(star)
+    photometry_flags = _star_photometry_flags(star)
     resolved["photometry"] = photometry
+    resolved["photometry_flags"] = photometry_flags
     magnitude, band = _resolved_star_photometry(photometry, preferred_band)
     resolved["magnitude"] = magnitude
     resolved["magnitude_band"] = band
+    resolved["magnitude_flag"] = photometry_flags.get(band, "")
     return resolved
 
 
@@ -137,9 +159,16 @@ def _normalize_star_record(star, default_source="SIMBAD/CDS"):
         normalized.get("magnitude_band")
     )
     photometry = _star_photometry_band_map(normalized.get("photometry"))
+    photometry_flags = _star_photometry_flag_map(normalized.get("photometry_flags"))
     if normalized.get("magnitude") is not None:
         photometry.setdefault(preferred_band, float(normalized["magnitude"]))
+        if str(normalized.get("magnitude_flag") or "").strip():
+            photometry_flags.setdefault(
+                preferred_band,
+                str(normalized["magnitude_flag"]).strip().upper(),
+            )
     normalized["photometry"] = photometry
+    normalized["photometry_flags"] = photometry_flags
     normalized["spectral_type"] = str(normalized.get("spectral_type", "")).strip()
     normalized["spectral_class"] = star_spectral_class(
         normalized.get("spectral_class")
@@ -237,6 +266,10 @@ def _merge_star_entries(existing, new_star):
     photometry.update(_star_photometry(new_star))
     if photometry:
         merged["photometry"] = photometry
+    photometry_flags = _star_photometry_flags(existing)
+    photometry_flags.update(_star_photometry_flags(new_star))
+    if photometry_flags:
+        merged["photometry_flags"] = photometry_flags
 
     if new_star.get("source") == "SIMBAD/CDS":
         for key in (
@@ -436,7 +469,7 @@ def _simbad_star_query(spectral_type, min_magnitude, max_magnitude, band, row_li
     band = normalize_star_magnitude_band(band)
     return (
         f"SELECT TOP {int(row_limit)} "
-        "basic.main_id, basic.ra, basic.dec, basic.otype, basic.sp_type, flux.flux AS mag\n"
+        "basic.main_id, basic.ra, basic.dec, basic.otype, basic.sp_type, flux.flux AS mag, flux.qual AS mag_qual\n"
         "FROM basic\n"
         "JOIN flux ON basic.oid = flux.oidref\n"
         f"WHERE flux.filter = '{band}'\n"
@@ -458,6 +491,7 @@ def _simbad_star_flux_columns_and_joins(bands):
     for index, band in enumerate(bands):
         alias = f"flux_{index}"
         columns.append(f"{alias}.flux AS flux_{band}")
+        columns.append(f"{alias}.qual AS qual_{band}")
         joins.append(
             f"LEFT JOIN flux AS {alias} ON basic.oid = {alias}.oidref AND {alias}.filter = '{band}'"
         )
@@ -489,10 +523,18 @@ def _fetch_simbad_json(query, timeout):
 
 def _simbad_star_photometry_from_row(row, band_order):
     photometry = {}
-    for band, magnitude in zip(band_order, row[5:]):
+    photometry_flags = {}
+    values = row[5:]
+    for index, band in enumerate(band_order):
+        magnitude_index = index * 2
+        quality_index = magnitude_index + 1
+        magnitude = values[magnitude_index] if magnitude_index < len(values) else None
+        quality = values[quality_index] if quality_index < len(values) else None
         if magnitude is not None:
             photometry[band] = float(magnitude)
-    return photometry
+        if str(quality or "").strip():
+            photometry_flags[band] = str(quality).strip().upper()
+    return photometry, photometry_flags
 
 
 def _fetch_simbad_star_photometry_by_id(source_ids, timeout):
@@ -503,12 +545,14 @@ def _fetch_simbad_star_photometry_by_id(source_ids, timeout):
         payload = _fetch_simbad_json(_simbad_star_photometry_query(batch_ids), timeout)
         for row in payload.get("data", []):
             source_id = str(row[0])
+            photometry, photometry_flags = _simbad_star_photometry_from_row(row, band_order)
             photometry_by_id[source_id] = {
                 "ra_hours": float(row[1]) / 15,
                 "declination": float(row[2]),
                 "object_type": str(row[3]),
                 "spectral_type": str(row[4] or "").strip(),
-                "photometry": _simbad_star_photometry_from_row(row, band_order),
+                "photometry": photometry,
+                "photometry_flags": photometry_flags,
             }
     return photometry_by_id
 
@@ -538,7 +582,8 @@ def fetch_simbad_stars(
     )
     stars = []
     for row in initial_rows:
-        name, ra_degrees, dec_degrees, object_type, spectral, magnitude = row
+        name, ra_degrees, dec_degrees, object_type, spectral, magnitude = row[:6]
+        magnitude_flag = row[6] if len(row) > 6 else ""
         stars.append(
             {
                 "name": str(name),
@@ -565,6 +610,22 @@ def fetch_simbad_stars(
                 "photometry": photometry_by_id.get(str(name), {}).get(
                     "photometry",
                     {magnitude_band: float(magnitude)} if magnitude is not None else {},
+                ),
+                "photometry_flags": photometry_by_id.get(str(name), {}).get(
+                    "photometry_flags",
+                    (
+                        {magnitude_band: str(magnitude_flag).strip().upper()}
+                        if magnitude is not None and str(magnitude_flag or "").strip()
+                        else {}
+                    ),
+                ),
+                "magnitude_flag": (
+                    photometry_by_id.get(str(name), {})
+                    .get("photometry_flags", {})
+                    .get(
+                        magnitude_band,
+                        str(magnitude_flag).strip().upper(),
+                    )
                 ),
                 "source": "SIMBAD/CDS",
                 "source_id": str(name),

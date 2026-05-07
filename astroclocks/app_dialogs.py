@@ -73,6 +73,7 @@ def _center_dialog_on_window(app, dialog, parent=None):
     else:
         y = monitor_y
 
+    app._apply_native_window_chrome(dialog)
     app._move_window_to(dialog, x, y)
     dialog.lift(anchor)
 
@@ -87,6 +88,7 @@ def show_error_dialog(app, title, message, parent=None):
     dialog.resizable(False, False)
     dialog.transient(anchor)
     dialog.grab_set()
+    app._apply_native_window_chrome(dialog)
 
     body = tk.Frame(
         dialog,
@@ -146,9 +148,7 @@ def show_error_dialog(app, title, message, parent=None):
     dialog.bind("<Return>", lambda _event: dialog.destroy())
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     _center_dialog_on_window(app, dialog, anchor)
-    dialog.deiconify()
-    dialog.lift(anchor)
-    dialog.focus_set()
+    app._reveal_dialog(dialog, anchor=anchor, focus=True)
 
 
 def open_about_dialog(app, app_version, release_date_text, author, email, phone):
@@ -160,6 +160,7 @@ def open_about_dialog(app, app_version, release_date_text, author, email, phone)
     dialog.resizable(False, False)
     dialog.transient(app.root)
     dialog.grab_set()
+    app._apply_native_window_chrome(dialog)
 
     body = tk.Frame(
         dialog,
@@ -231,9 +232,7 @@ def open_about_dialog(app, app_version, release_date_text, author, email, phone)
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     dialog.bind("<Return>", lambda _event: dialog.destroy())
     app._center_dialog_on_root(dialog)
-    dialog.deiconify()
-    dialog.lift(app.root)
-    dialog.focus_set()
+    app._reveal_dialog(dialog, anchor=app.root, focus=True)
 
 def open_visibility_calendar(app):
     selected_date = app.visibility_start_date or app._default_visibility_start_date()
@@ -245,6 +244,7 @@ def open_visibility_calendar(app):
     dialog.transient(app.root)
     dialog.grab_set()
     dialog.resizable(False, False)
+    app._apply_native_window_chrome(dialog)
 
     state = {"year": selected_date.year, "month": selected_date.month}
     header_var = tk.StringVar()
@@ -373,8 +373,7 @@ def open_visibility_calendar(app):
     )
     render_month()
     app._place_dialog_below_widget(dialog, app.visibility_calendar_button)
-    dialog.deiconify()
-    dialog.lift(app.root)
+    app._reveal_dialog(dialog, anchor=app.root, focus=False)
 
 def open_settings_dialog(app):
     dialog = tk.Toplevel(app.root)
@@ -385,6 +384,7 @@ def open_settings_dialog(app):
     dialog.transient(app.root)
     dialog.grab_set()
     dialog.resizable(False, False)
+    app._apply_native_window_chrome(dialog)
 
     preset_lookup = {preset_label(preset): preset for preset in LOCATION_PRESETS}
     preset_values = list(preset_lookup)
@@ -700,9 +700,7 @@ def open_settings_dialog(app):
     dialog.bind("<Return>", lambda _event: apply_settings())
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     app._center_dialog_on_root(dialog)
-    dialog.deiconify()
-    dialog.lift(app.root)
-    dialog.focus_set()
+    app._reveal_dialog(dialog, anchor=app.root, focus=True)
 
 def open_double_star_orbit_window(app, star):
     orbit = star.get("orb6_orbit")
@@ -716,6 +714,7 @@ def open_double_star_orbit_window(app, star):
     dialog.configure(bg=app.gbg)
     dialog.transient(app.root)
     _apply_app_icon(dialog)
+    app._apply_native_window_chrome(dialog)
     dialog.grid_columnconfigure(0, weight=1)
     dialog.grid_rowconfigure(1, weight=1)
 
@@ -798,8 +797,7 @@ def open_double_star_orbit_window(app, star):
     canvas.bind("<Leave>", lambda _event: app._clear_double_orbit_hover(state))
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     app._center_dialog_on_root(dialog)
-    dialog.deiconify()
-    dialog.lift(app.root)
+    app._reveal_dialog(dialog, anchor=app.root, focus=True)
     app._draw_double_star_orbit(state)
 
 def _set_wds_note_text(app, text_widget, content):
@@ -874,6 +872,7 @@ def open_double_star_wds_note_window(app, star):
     dialog.configure(bg=app.gbg)
     dialog.transient(app.root)
     _apply_app_icon(dialog)
+    app._apply_native_window_chrome(dialog)
     dialog.grid_columnconfigure(0, weight=1)
     dialog.grid_rowconfigure(1, weight=1)
 
@@ -940,8 +939,7 @@ def open_double_star_wds_note_window(app, star):
 
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     app._center_dialog_on_root(dialog)
-    dialog.deiconify()
-    dialog.lift(app.root)
+    app._reveal_dialog(dialog, anchor=app.root, focus=False)
 
     cached_notes = app.double_wds_note_cache.get(wds)
     if cached_notes is not None:

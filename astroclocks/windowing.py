@@ -1,12 +1,19 @@
 """Window placement helpers for multi-monitor Windows setups."""
 
 import ctypes
+import re
 
 
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 MONITOR_DEFAULTTONEAREST = 2
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
+DWMWA_BORDER_COLOR = 34
+DWMWA_CAPTION_COLOR = 35
+DWMWA_TEXT_COLOR = 36
+_HEX_COLOR_PATTERN = re.compile(r"^#([0-9a-fA-F]{6})$")
 
 
 class WinRect(ctypes.Structure):
@@ -39,6 +46,101 @@ def _windows_user32():
         return ctypes.windll.user32
     except AttributeError:
         return None
+
+
+def _windows_dwmapi():
+    try:
+        return ctypes.windll.dwmapi
+    except AttributeError:
+        return None
+
+
+def _window_handle(window):
+    user32 = _windows_user32()
+    hwnd = ctypes.c_void_p(int(window.winfo_id()))
+    if user32 is None:
+        return hwnd
+    try:
+        user32.GetParent.argtypes = [ctypes.c_void_p]
+        user32.GetParent.restype = ctypes.c_void_p
+        parent_hwnd = user32.GetParent(hwnd)
+        if parent_hwnd:
+            return parent_hwnd
+    except Exception:
+        pass
+    return hwnd
+
+
+def _colorref_from_hex(color):
+    match = _HEX_COLOR_PATTERN.match(str(color or "").strip())
+    if match is None:
+        raise ValueError(f"Unsupported color format: {color!r}")
+    red = int(match.group(1)[0:2], 16)
+    green = int(match.group(1)[2:4], 16)
+    blue = int(match.group(1)[4:6], 16)
+    return blue << 16 | green << 8 | red
+
+
+def _dwm_set_window_attribute(hwnd, attribute, value):
+    dwmapi = _windows_dwmapi()
+    if dwmapi is None:
+        return False
+    dwmapi.DwmSetWindowAttribute.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        ctypes.c_uint,
+    ]
+    dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
+    result = dwmapi.DwmSetWindowAttribute(
+        hwnd,
+        attribute,
+        ctypes.byref(value),
+        ctypes.sizeof(value),
+    )
+    return result == 0
+
+
+def apply_windows_title_bar_theme(
+    window,
+    caption_color=None,
+    text_color=None,
+    border_color=None,
+    immersive_dark=True,
+):
+    if _windows_dwmapi() is None:
+        return False
+    try:
+        window.update_idletasks()
+        hwnd = _window_handle(window)
+    except Exception:
+        return False
+
+    applied = False
+    dark_mode = ctypes.c_int(1 if immersive_dark else 0)
+    for attribute in (
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1,
+    ):
+        if _dwm_set_window_attribute(hwnd, attribute, dark_mode):
+            applied = True
+            break
+
+    for attribute, color in (
+        (DWMWA_CAPTION_COLOR, caption_color),
+        (DWMWA_TEXT_COLOR, text_color),
+        (DWMWA_BORDER_COLOR, border_color),
+    ):
+        if color is None:
+            continue
+        try:
+            colorref = ctypes.c_uint(_colorref_from_hex(color))
+        except ValueError:
+            continue
+        if _dwm_set_window_attribute(hwnd, attribute, colorref):
+            applied = True
+
+    return applied
 
 
 def fallback_screen_geometry(window):

@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from astroclocks.app import AstroClocksApp
 from astroclocks.settings import AppSettings, normalize_settings
 from astroclocks.star_search_catalog import (
     fetch_simbad_stars,
@@ -36,12 +37,13 @@ class StarSearchCatalogTests(unittest.TestCase):
             queries.append(query)
             if "WHERE flux.filter = 'V'" in query:
                 return {
-                    "data": [["HD 146233", 219.902058, -37.793467, "*", "G2V", 5.49]]
+                    "data": [["HD 146233", 219.902058, -37.793467, "*", "G2V", 5.49, "E"]]
                 }
             return {
                 "data": [[
                     "HD 146233", 219.902058, -37.793467, "*", "G2V",
-                    5.49, None, 5.70, None, None, None, None, None
+                    5.49, "E", None, None, 5.70, None, None, None, None, None,
+                    None, None, None, None, None, None
                 ]]
             }
 
@@ -58,6 +60,7 @@ class StarSearchCatalogTests(unittest.TestCase):
         self.assertEqual(stars[0]["magnitude_band"], "V")
         self.assertEqual(stars[0]["photometry"]["B"], 5.70)
         self.assertEqual(stars[0]["photometry"]["V"], 5.49)
+        self.assertEqual(stars[0]["magnitude_flag"], "E")
         self.assertIn("flux.filter = 'V'", queries[0])
         self.assertIn("basic.sp_type LIKE 'G%'", queries[0])
         self.assertIn("ORDER BY mag ASC, main_id ASC", queries[0])
@@ -197,6 +200,50 @@ class StarSearchCatalogTests(unittest.TestCase):
 
         self.assertEqual(resolved["magnitude_band"], "B")
         self.assertEqual(resolved["magnitude"], 5.70)
+
+    def test_star_search_filter_can_exclude_suspect_magnitude_flags(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app._deep_sky_visibility_context = lambda: []
+        app._deep_sky_visibility_metrics = lambda _star, _context: {
+            "max_altitude": 55,
+            "max_night_altitude": 48,
+            "visible_at_night": True,
+        }
+        app._stars_to_jnow = lambda stars: list(stars)
+
+        stars = [
+            {
+                "name": "Suspect star",
+                "spectral_class": "G",
+                "magnitude_band": "V",
+                "magnitude": 7.0,
+                "magnitude_flag": "E",
+                "ra_hours": 5.0,
+                "declination": 20.0,
+            },
+            {
+                "name": "Clean star",
+                "spectral_class": "G",
+                "magnitude_band": "V",
+                "magnitude": 7.1,
+                "magnitude_flag": "",
+                "ra_hours": 6.0,
+                "declination": 22.0,
+            },
+        ]
+        filters = {
+            "spectral_type": "G",
+            "magnitude_band": "V",
+            "min_magnitude": -2,
+            "max_magnitude": 8.5,
+            "min_altitude": 10,
+            "visible_night": True,
+            "exclude_suspect_magnitudes": True,
+        }
+
+        filtered = app._filter_star_search_list(stars, filters, [])
+
+        self.assertEqual([star["name"] for star in filtered], ["Clean star"])
 
 
 if __name__ == "__main__":

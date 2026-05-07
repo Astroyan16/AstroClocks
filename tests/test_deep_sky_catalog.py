@@ -127,6 +127,49 @@ class DeepSkyCatalogTests(unittest.TestCase):
 
         self.assertEqual([sky_object["name"] for sky_object in filtered], ["Galaxy K"])
 
+    def test_deep_sky_filter_can_exclude_suspect_magnitude_flags(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app._deep_sky_objects_to_jnow = lambda sky_objects: list(sky_objects)
+        app._deep_sky_visibility_metrics = lambda _sky_object, _context: {
+            "max_altitude": 55,
+            "max_night_altitude": 48,
+            "visible_at_night": True,
+        }
+        catalog = [
+            {
+                "name": "Z 75-118",
+                "category": "galaxy",
+                "magnitude": 7.0,
+                "magnitude_band": "V",
+                "magnitude_flag": "E",
+                "ra_hours": 5.0,
+                "declination": 20.0,
+            },
+            {
+                "name": "Galaxy clean",
+                "category": "galaxy",
+                "magnitude": 12.4,
+                "magnitude_band": "V",
+                "magnitude_flag": "",
+                "ra_hours": 6.0,
+                "declination": 22.0,
+            },
+        ]
+        filters = {
+            "category": "galaxy",
+            "use_magnitude": True,
+            "min_magnitude": -2,
+            "max_magnitude": 15,
+            "magnitude_band": "V",
+            "min_altitude": 10,
+            "visible_night": True,
+            "exclude_suspect_magnitudes": True,
+        }
+
+        filtered = app._filter_deep_sky_list(catalog, filters, [])
+
+        self.assertEqual([sky_object["name"] for sky_object in filtered], ["Galaxy clean"])
+
     def test_merge_deep_sky_objects_deduplicates_local_and_simbad_entries(self):
         local = {
             "name": "IC 10",
@@ -267,7 +310,7 @@ class DeepSkyCatalogTests(unittest.TestCase):
             if "WHERE flux.filter = 'V'" in query:
                 return {
                     "data": [
-                        ["M  31", 10.684708333333333, 41.26875, "AGN", "SA(s)b", 3.44]
+                        ["M  31", 10.684708333333333, 41.26875, "AGN", "SA(s)b", 3.44, ""]
                     ]
                 }
             return {
@@ -280,8 +323,9 @@ class DeepSkyCatalogTests(unittest.TestCase):
                         "SA(s)b",
                         3.44,
                         None,
-                        4.36,
                         None,
+                        None,
+                        4.36,
                         None,
                         None,
                         None,
@@ -306,6 +350,7 @@ class DeepSkyCatalogTests(unittest.TestCase):
         self.assertEqual(objects[0]["magnitude_band"], "V")
         self.assertEqual(objects[0]["magnitude"], 3.44)
         self.assertEqual(objects[0]["photometry"]["B"], 4.36)
+        self.assertEqual(objects[0]["magnitude_flag"], "")
         self.assertEqual(len(queries), 2)
         self.assertIn("WHERE flux.filter = 'V'", queries[0])
         self.assertIn("flux.flux BETWEEN -2 AND 8.5", queries[0])
@@ -318,7 +363,7 @@ class DeepSkyCatalogTests(unittest.TestCase):
             if "WHERE flux.filter = 'V'" in query:
                 return {
                     "data": [
-                        ["M 101", 210.80242916666667, 54.34875, "GiP", "S_AB", 7.86]
+                        ["M 101", 210.80242916666667, 54.34875, "GiP", "S_AB", 7.86, "E"]
                     ]
                 }
             return {
@@ -330,9 +375,10 @@ class DeepSkyCatalogTests(unittest.TestCase):
                         "GiP",
                         "S_AB",
                         7.86,
+                        "E",
+                        None,
                         None,
                         8.46,
-                        None,
                         None,
                         None,
                         None,
@@ -357,12 +403,13 @@ class DeepSkyCatalogTests(unittest.TestCase):
         self.assertEqual(objects[0]["magnitude_band"], "V")
         self.assertEqual(objects[0]["photometry"]["V"], 7.86)
         self.assertEqual(objects[0]["photometry"]["B"], 8.46)
+        self.assertEqual(objects[0]["magnitude_flag"], "E")
 
     def test_online_search_without_magnitude_skips_rows_without_coordinates(self):
         payload = {
             "data": [
-                ["Bad cloud", None, None, "Cld", "", None, None],
-                ["Good cloud", 120.0, -30.0, "DNe", "", None, None],
+                ["Bad cloud", None, None, "Cld", "", None, None, None, None],
+                ["Good cloud", 120.0, -30.0, "DNe", "", None, None, None, None],
             ]
         }
 

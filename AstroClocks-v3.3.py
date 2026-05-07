@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter.font import Font
 
 from astroclocks.utils import resource_path
-from astroclocks.windowing import center_window_on_pointer_monitor
+from astroclocks.windowing import apply_windows_title_bar_theme, center_window_on_pointer_monitor
 
 
 def apply_loading_icon(window, default=False):
@@ -26,6 +26,13 @@ def create_loading_window():
     apply_loading_icon(window)
     window.configure(bg="#101419")
     window.resizable(False, False)
+    apply_windows_title_bar_theme(
+        window,
+        caption_color="#101419",
+        text_color="#edf3f8",
+        border_color="#2b3a45",
+        immersive_dark=True,
+    )
 
     width = 440
     height = 170
@@ -63,6 +70,13 @@ def create_loading_window():
     )
     root._astroclocks_startup_monitor_geometry = startup_monitor_geometry
     window.deiconify()
+    apply_windows_title_bar_theme(
+        window,
+        caption_color="#101419",
+        text_color="#edf3f8",
+        border_color="#2b3a45",
+        immersive_dark=True,
+    )
     window.lift()
     window.update()
     return root, window, status_var

@@ -192,6 +192,16 @@ def _photometry_band_map(photometry):
     return {str(band).upper(): float(magnitude)}
 
 
+def _photometry_flag_map(photometry_flags):
+    if photometry_flags is None or not isinstance(photometry_flags, dict):
+        return {}
+    return {
+        str(band).upper(): str(flag).strip().upper()
+        for band, flag in photometry_flags.items()
+        if str(flag or "").strip()
+    }
+
+
 def _catalog_photometry_for_aliases(name, aliases):
     photometry = {}
     for alias in (name, *aliases):
@@ -210,6 +220,15 @@ def _deep_sky_photometry(sky_object):
     return _photometry_band_map(
         (sky_object.get("magnitude"), sky_object.get("magnitude_band"))
     )
+
+
+def _deep_sky_photometry_flags(sky_object):
+    flags = _photometry_flag_map(sky_object.get("photometry_flags"))
+    band = str(sky_object.get("magnitude_band") or "").upper()
+    flag = str(sky_object.get("magnitude_flag") or "").strip().upper()
+    if band and flag:
+        flags.setdefault(band, flag)
+    return flags
 
 
 def _preferred_deep_sky_band_order(preferred_band):
@@ -236,10 +255,13 @@ def resolve_deep_sky_object_photometry(
 ):
     resolved = dict(sky_object)
     photometry = _deep_sky_photometry(sky_object)
+    photometry_flags = _deep_sky_photometry_flags(sky_object)
     resolved["photometry"] = photometry
+    resolved["photometry_flags"] = photometry_flags
     magnitude, band = _resolved_deep_sky_photometry(photometry, preferred_band)
     resolved["magnitude"] = magnitude
     resolved["magnitude_band"] = band
+    resolved["magnitude_flag"] = photometry_flags.get(band, "")
     return resolved
 
 
@@ -312,6 +334,10 @@ def _merge_deep_sky_entry(existing, new_object):
     photometry.update(_deep_sky_photometry(new_object))
     if photometry:
         merged["photometry"] = photometry
+    photometry_flags = _deep_sky_photometry_flags(existing)
+    photometry_flags.update(_deep_sky_photometry_flags(new_object))
+    if photometry_flags:
+        merged["photometry_flags"] = photometry_flags
 
     if new_object.get("source") == "SIMBAD/CDS":
         merged["source_id"] = new_object.get("source_id", merged.get("source_id"))
@@ -381,6 +407,7 @@ def load_cached_simbad_deep_sky_objects():
                 normalized["magnitude"] = float(normalized["magnitude"])
             normalized["aliases"] = tuple(normalized.get("aliases", ()))
             normalized["photometry"] = _deep_sky_photometry(normalized)
+            normalized["photometry_flags"] = _deep_sky_photometry_flags(normalized)
             objects.append(normalized)
         except (KeyError, TypeError, ValueError):
             continue
@@ -436,7 +463,7 @@ def _simbad_type_condition(category):
 def _simbad_query(category, row_limit):
     columns = (
         "basic.main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, "
-        "v.flux AS v_mag, b.flux AS b_mag"
+        "v.flux AS v_mag, v.qual AS v_qual, b.flux AS b_mag, b.qual AS b_qual"
     )
     joins = (
         "LEFT OUTER JOIN flux v ON basic.oid = v.oidref AND v.filter = 'V'\n"
@@ -457,6 +484,7 @@ def _simbad_flux_columns_and_joins(bands):
     for band in bands:
         alias = f"flux_{str(band).lower()}"
         columns.append(f"{alias}.flux AS {str(band).lower()}_mag")
+        columns.append(f"{alias}.qual AS {str(band).lower()}_qual")
         joins.append(
             f"LEFT OUTER JOIN flux {alias} ON basic.oid = {alias}.oidref AND {alias}.filter = '{str(band).upper()}'"
         )
@@ -467,7 +495,7 @@ def _simbad_band_query(category, min_magnitude, max_magnitude, band, row_limit):
     band = str(band).upper()
     return (
         f"SELECT TOP {int(row_limit)} "
-        "basic.main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, flux.flux\n"
+        "basic.main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, flux.flux, flux.qual\n"
         "FROM flux\n"
         "JOIN basic ON basic.oid = flux.oidref\n"
         f"WHERE flux.filter = '{band}'\n"
@@ -510,13 +538,17 @@ def _append_simbad_band_rows(
     preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
 ):
     for row in rows:
-        name, ra_degrees, dec_degrees, object_type, morphology, magnitude = row
+        name, ra_degrees, dec_degrees, object_type, morphology, magnitude = row[:6]
+        magnitude_flag = row[6] if len(row) > 6 else ""
         source_id = str(name)
         band = normalize_deep_sky_magnitude_band(band)
         existing = objects_by_id.get(source_id)
         photometry = _deep_sky_photometry(existing or {})
+        photometry_flags = _deep_sky_photometry_flags(existing or {})
         if magnitude is not None:
             photometry[band] = float(magnitude)
+            if str(magnitude_flag or "").strip():
+                photometry_flags[band] = str(magnitude_flag).strip().upper()
         merged = {
             "name": source_id,
             "aliases": (),
@@ -528,6 +560,7 @@ def _append_simbad_band_rows(
             "source": "SIMBAD/CDS",
             "source_id": source_id,
             "photometry": photometry,
+            "photometry_flags": photometry_flags,
         }
         if existing is not None:
             merged = _merge_deep_sky_entry(existing, merged)
@@ -539,10 +572,18 @@ def _append_simbad_band_rows(
 
 def _simbad_photometry_from_row(row, band_order):
     photometry = {}
-    for band, magnitude in zip(band_order, row[5:]):
+    photometry_flags = {}
+    values = row[5:]
+    for index, band in enumerate(band_order):
+        magnitude_index = index * 2
+        quality_index = magnitude_index + 1
+        magnitude = values[magnitude_index] if magnitude_index < len(values) else None
+        quality = values[quality_index] if quality_index < len(values) else None
         if magnitude is not None:
             photometry[band] = float(magnitude)
-    return photometry
+        if str(quality or "").strip():
+            photometry_flags[band] = str(quality).strip().upper()
+    return photometry, photometry_flags
 
 
 def _fetch_simbad_photometry_by_id(source_ids, timeout):
@@ -553,12 +594,14 @@ def _fetch_simbad_photometry_by_id(source_ids, timeout):
         payload = _fetch_simbad_json(_simbad_photometry_query(batch_ids), timeout)
         for row in payload.get("data", []):
             source_id = str(row[0])
+            photometry, photometry_flags = _simbad_photometry_from_row(row, band_order)
             photometry_by_id[source_id] = {
                 "ra_hours": float(row[1]) / 15,
                 "declination": float(row[2]),
                 "object_type": str(row[3]),
                 "morphology": str(row[4]).strip() if row[4] else "",
-                "photometry": _simbad_photometry_from_row(row, band_order),
+                "photometry": photometry,
+                "photometry_flags": photometry_flags,
             }
     return photometry_by_id
 
@@ -593,8 +636,18 @@ def fetch_simbad_deep_sky_objects(
             source_id = str(name)
             enrichment = photometry_by_id.get(source_id, {})
             photometry = enrichment.get("photometry", {})
+            photometry_flags = enrichment.get("photometry_flags", {})
             if not photometry and row[5] is not None:
                 photometry = {preferred_band: float(row[5])}
+            if (
+                not photometry_flags
+                and len(row) > 6
+                and str(row[6] or "").strip()
+                and row[5] is not None
+            ):
+                photometry_flags = {
+                    preferred_band: str(row[6]).strip().upper()
+                }
             magnitude, band = _resolved_deep_sky_photometry(photometry, preferred_band)
             objects.append(
                 {
@@ -611,6 +664,8 @@ def fetch_simbad_deep_sky_objects(
                     "magnitude": float(magnitude) if magnitude is not None else None,
                     "magnitude_band": band,
                     "photometry": photometry,
+                    "photometry_flags": photometry_flags,
+                    "magnitude_flag": photometry_flags.get(band, ""),
                     "source": "SIMBAD/CDS",
                     "source_id": source_id,
                 }
@@ -629,14 +684,19 @@ def fetch_simbad_deep_sky_objects(
     payload = _fetch_simbad_json(_simbad_query(category, row_limit), timeout)
     objects = []
     for row in payload.get("data", []):
-        name, ra_degrees, dec_degrees, object_type, morphology, v_mag, b_mag = row
+        name, ra_degrees, dec_degrees, object_type, morphology, v_mag, v_qual, b_mag, b_qual = row
         if ra_degrees is None or dec_degrees is None:
             continue
         photometry = {}
+        photometry_flags = {}
         if v_mag is not None:
             photometry["V"] = float(v_mag)
+            if str(v_qual or "").strip():
+                photometry_flags["V"] = str(v_qual).strip().upper()
         if b_mag is not None:
             photometry["B"] = float(b_mag)
+            if str(b_qual or "").strip():
+                photometry_flags["B"] = str(b_qual).strip().upper()
         magnitude, band = _resolved_deep_sky_photometry(photometry, preferred_band)
         objects.append(
             {
@@ -650,6 +710,8 @@ def fetch_simbad_deep_sky_objects(
                 "magnitude": float(magnitude) if magnitude is not None else None,
                 "magnitude_band": band,
                 "photometry": photometry,
+                "photometry_flags": photometry_flags,
+                "magnitude_flag": photometry_flags.get(band, ""),
                 "source": "SIMBAD/CDS",
                 "source_id": str(name),
             }
