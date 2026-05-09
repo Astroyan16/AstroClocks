@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter.font import Font
 
 from astroclocks.utils import resource_path
+from astroclocks.version import APP_VERSION
 from astroclocks.windowing import apply_windows_title_bar_theme, center_window_on_pointer_monitor
 
 
@@ -39,7 +40,7 @@ def create_loading_window():
 
     tk.Label(
         window,
-        text="AstroClocks v3.3.1",
+        text=f"AstroClocks v{APP_VERSION}",
         bg="#101419",
         fg="#f6c451",
         font=Font(family="Segoe UI", size=22, weight="bold"),

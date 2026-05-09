@@ -1,3 +1,3 @@
 """AstroClocks package."""
 
-__version__ = "3.0"
+from astroclocks.version import __version__

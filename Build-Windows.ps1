@@ -2,9 +2,6 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$Version = "3.3.1"
-$AppName = "AstroClocks-v$Version"
-$InstallerName = "Install_AstroClocks$Version.exe"
 
 function Remove-GeneratedPath {
     param(
@@ -30,6 +27,13 @@ if (-not (Test-Path $Python)) {
 }
 
 Set-Location $ProjectRoot
+
+$Version = (& $Python -c "from astroclocks.version import APP_VERSION; print(APP_VERSION, end='')").Trim()
+if (-not $Version) {
+    throw "Unable to determine AstroClocks version from astroclocks.version"
+}
+$AppName = "AstroClocks-v$Version"
+$InstallerName = "Install_AstroClocks$Version.exe"
 
 & $Python -m pip install -e ".[build]"
 if ($LASTEXITCODE -ne 0) {

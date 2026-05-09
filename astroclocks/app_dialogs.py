@@ -196,6 +196,10 @@ def open_about_dialog(app, app_version, release_date_text, author, email, phone)
     label_font = Font(family="Segoe UI", size=10, weight="bold")
     value_font = Font(family="Segoe UI", size=11)
     email_font = Font(family="Segoe UI", size=11, underline=True)
+    section_font = Font(family="Segoe UI", size=11, weight="bold")
+    status_var = tk.StringVar(value=app._tr("about.update.idle"))
+    version_var = tk.StringVar(value=app._tr("about.current_version", version=app_version))
+    update_state = {"busy": False, "release": None}
 
     def add_row(row, label, value, link=False):
         tk.Label(
@@ -223,14 +227,180 @@ def open_about_dialog(app, app_version, release_date_text, author, email, phone)
     add_row(4, app._tr("about.email"), email, link=True)
     add_row(5, app._tr("about.phone"), phone)
 
+    tk.Frame(body, bg=app.card_edge, height=1).grid(
+        column=0, row=6, columnspan=2, sticky="ew", pady=(16, 14)
+    )
+    tk.Label(
+        body,
+        text=app._tr("about.updates"),
+        bg=app.card_bg,
+        fg=app.fg,
+        font=section_font,
+        anchor="w",
+    ).grid(column=0, row=7, columnspan=2, sticky="w")
+    tk.Label(
+        body,
+        textvariable=version_var,
+        bg=app.card_bg,
+        fg=app.text,
+        font=value_font,
+        anchor="w",
+        justify="left",
+    ).grid(column=0, row=8, columnspan=2, sticky="w", pady=(8, 2))
+    status_label = tk.Label(
+        body,
+        textvariable=status_var,
+        bg=app.card_bg,
+        fg=app.muted,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+        justify="left",
+        wraplength=420,
+    )
+    status_label.grid(column=0, row=9, columnspan=2, sticky="ew", pady=(0, 12))
+
     actions = tk.Frame(body, bg=app.card_bg)
-    actions.grid(column=0, row=6, columnspan=2, sticky="e", pady=(18, 0))
+    actions.grid(column=0, row=10, columnspan=2, sticky="e", pady=(8, 0))
+
+    def dialog_exists():
+        try:
+            return bool(dialog.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def set_busy(is_busy):
+        update_state["busy"] = is_busy
+        check_button.config(state=tk.DISABLED if is_busy else tk.NORMAL)
+        install_button.config(
+            state=tk.DISABLED if is_busy or update_state["release"] is None else tk.NORMAL
+        )
+
+    def apply_update_result(result=None, error=None):
+        if not dialog_exists():
+            return
+        set_busy(False)
+        if error is not None:
+            status_label.config(fg=app.danger)
+            status_var.set(app._tr("about.update.error", error=error))
+            version_var.set(app._tr("about.current_version", version=app_version))
+            return
+        if result is None:
+            status_label.config(fg=app.danger)
+            status_var.set(app._tr("about.update.error", error="Unknown update state"))
+            version_var.set(app._tr("about.current_version", version=app_version))
+            return
+        if result.update_available:
+            update_state["release"] = result.latest_release
+            status_label.config(fg=app.accent)
+            status_var.set(
+                app._tr("about.update.available", version=result.latest_release.version)
+            )
+            version_var.set(
+                app._tr(
+                    "about.update.available_detail",
+                    current=result.current_version,
+                    latest=result.latest_release.version,
+                )
+            )
+            install_button.config(state=tk.NORMAL)
+            return
+        update_state["release"] = None
+        status_label.config(fg=app.success)
+        status_var.set(app._tr("about.update.current"))
+        version_var.set(app._tr("about.current_version", version=result.current_version))
+
+    def run_update_check():
+        try:
+            result = app.check_for_updates()
+            error = None
+        except Exception as exc:
+            result = None
+            error = str(exc)
+
+        try:
+            app.root.after(0, lambda: apply_update_result(result=result, error=error))
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def check_for_updates():
+        if update_state["busy"]:
+            return
+        update_state["release"] = None
+        set_busy(True)
+        status_label.config(fg=app.muted)
+        status_var.set(app._tr("about.update.checking"))
+        version_var.set(app._tr("about.current_version", version=app_version))
+        threading.Thread(target=run_update_check, daemon=True).start()
+
+    def finish_install(installer_path=None, error=None):
+        if not dialog_exists():
+            return
+        if error is not None:
+            set_busy(False)
+            status_label.config(fg=app.danger)
+            status_var.set(app._tr("about.update.error", error=error))
+            return
+        status_label.config(fg=app.success)
+        status_var.set(
+            app._tr("about.update.launching", version=update_state["release"].version)
+        )
+        try:
+            app.launch_update_installer(installer_path)
+        except Exception as exc:
+            set_busy(False)
+            status_label.config(fg=app.danger)
+            status_var.set(app._tr("about.update.error", error=exc))
+            return
+        dialog.destroy()
+        try:
+            app.root.after(250, app.root.destroy)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def run_update_install():
+        try:
+            installer_path = app.download_update_installer(update_state["release"])
+            error = None
+        except Exception as exc:
+            installer_path = None
+            error = str(exc)
+
+        try:
+            app.root.after(
+                0,
+                lambda: finish_install(installer_path=installer_path, error=error),
+            )
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def install_update():
+        if update_state["busy"] or update_state["release"] is None:
+            return
+        set_busy(True)
+        status_label.config(fg=app.muted)
+        status_var.set(
+            app._tr("about.update.downloading", version=update_state["release"].version)
+        )
+        threading.Thread(target=run_update_install, daemon=True).start()
+
+    check_button = app._build_button(
+        actions,
+        app._tr("about.update.check"),
+        check_for_updates,
+    )
+    check_button.grid(column=0, row=0, padx=(0, 8))
+    install_button = app._build_button(
+        actions,
+        app._tr("about.update.install"),
+        install_update,
+    )
+    install_button.grid(column=1, row=0, padx=(0, 8))
+    install_button.config(state=tk.DISABLED)
     app._build_button(actions, app._tr("button.close"), dialog.destroy).grid(
-        column=0, row=0
+        column=2, row=0
     )
 
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
-    dialog.bind("<Return>", lambda _event: dialog.destroy())
     app._center_dialog_on_root(dialog)
     app._reveal_dialog(dialog, anchor=app.root, focus=True)
 

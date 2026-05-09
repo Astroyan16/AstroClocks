@@ -15,7 +15,7 @@ from zoneinfo import available_timezones
 
 from astroplan import download_IERS_A
 from astropy.coordinates import name_resolve
-from astroclocks import app_deep_sky, app_dialogs, app_star_search
+from astroclocks import app_deep_sky, app_dialogs, app_star_search, updater
 try:
     from PIL import Image, ImageTk
 except ImportError:
@@ -92,11 +92,7 @@ from astroclocks.windowing import (
     move_window_to as window_move_window_to,
     pointer_monitor_geometry as window_pointer_monitor_geometry,
 )
-
-
-APP_VERSION = "3.3"
-APP_RELEASE_MONTH = 5
-APP_YEAR = "2026"
+from astroclocks.version import APP_RELEASE_DATE, APP_VERSION
 APP_AUTHOR = "Yannis Benazza"
 APP_EMAIL = "yannis.benazza@obspm.fr"
 APP_PHONE = "01 45 07 71 59"
@@ -532,7 +528,7 @@ class AstroClocksApp:
             pass
 
     def _release_date_text(self):
-        return f"{self._tr(f'about.month.{APP_RELEASE_MONTH}')} {APP_YEAR}"
+        return f"{self._tr(f'about.month.{APP_RELEASE_DATE.month}')} {APP_RELEASE_DATE.year}"
 
     def _normalize_timezone_name(self, timezone_name):
         timezone_name = str(timezone_name or "").strip()
@@ -1014,6 +1010,15 @@ class AstroClocksApp:
             APP_EMAIL,
             APP_PHONE,
         )
+
+    def check_for_updates(self, timeout=10):
+        return updater.check_for_updates(APP_VERSION, timeout=timeout)
+
+    def download_update_installer(self, release, timeout=30):
+        return updater.download_installer(release, timeout=timeout)
+
+    def launch_update_installer(self, installer_path):
+        updater.launch_installer(installer_path)
 
     def _build_labelframe(
         self,
