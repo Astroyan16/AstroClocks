@@ -44,6 +44,7 @@ Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 [InstallDelete]
 Type: files; Name: "{app}\AstroClocks-v3.0.exe"
 Type: files; Name: "{app}\AstroClocks-v3.1.exe"
+Type: files; Name: "{app}\AstroClocks-v3.2.exe"
 Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
