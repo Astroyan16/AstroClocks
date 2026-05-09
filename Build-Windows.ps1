@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$Version = "3.3"
+$Version = "3.3.1"
 $AppName = "AstroClocks-v$Version"
 $InstallerName = "Install_AstroClocks$Version.exe"
 
@@ -52,7 +52,7 @@ Remove-GeneratedPath (Join-Path $ProjectRoot "output\$AppName")
     --collect-all "astroplan" `
     --collect-all "zeep" `
     --collect-all "tzdata" `
-    ".\$AppName.py"
+    ".\AstroClocks-v3.3.py"
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
 }
@@ -69,7 +69,7 @@ if ($env:ProgramFiles) {
 
 $InnoCompiler = $InnoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($InnoCompiler) {
-    & $InnoCompiler ".\$AppName.iss"
+    & $InnoCompiler ".\AstroClocks-v3.3.iss"
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup build failed with exit code $LASTEXITCODE"
     }

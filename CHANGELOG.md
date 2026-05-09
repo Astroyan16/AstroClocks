@@ -1,5 +1,16 @@
 # Changelog
 
+## AstroClocks v3.3.1 stable - 2026-05-09
+
+### Corrige
+
+- L'installeur Windows supprime maintenant correctement `AstroClocks-v3.2.exe` et `AstroClocks-v3.3.exe` lors d'une mise a jour vers `v3.3.1`.
+
+### Verification
+
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.1.exe`.
+
 ## AstroClocks v3.3 stable - 2026-05-08
 
 ### Ajoute
