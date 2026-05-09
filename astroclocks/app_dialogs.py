@@ -151,7 +151,15 @@ def show_error_dialog(app, title, message, parent=None):
     app._reveal_dialog(dialog, anchor=anchor, focus=True)
 
 
-def open_about_dialog(app, app_version, release_date_text, author, email, phone):
+def open_about_dialog(
+    app,
+    app_version,
+    release_date_text,
+    author,
+    email,
+    phone,
+    initial_update_result=None,
+):
     dialog = tk.Toplevel(app.root)
     dialog.withdraw()
     dialog.title(app._tr("about.title"))
@@ -399,6 +407,9 @@ def open_about_dialog(app, app_version, release_date_text, author, email, phone)
     app._build_button(actions, app._tr("button.close"), dialog.destroy).grid(
         column=2, row=0
     )
+
+    if initial_update_result is not None:
+        apply_update_result(result=initial_update_result)
 
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     app._center_dialog_on_root(dialog)

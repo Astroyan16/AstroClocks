@@ -268,6 +268,9 @@ class AstroClocksApp:
         self.connectivity_label = None
         self.network_online = None
         self.connectivity_check_pending = False
+        self.startup_update_check_scheduled = False
+        self.startup_update_check_pending = False
+        self.startup_update_check_completed = False
         self.sky_canvas = None
         self.sky_status = None
         self.named_stars_jnow = []
@@ -471,6 +474,7 @@ class AstroClocksApp:
 
     def _start_deferred_startup_work(self):
         self._start_named_star_catalog_conversion()
+        self._schedule_startup_update_check()
 
     def _preload_search_tab_widgets(self):
         if not self.double_star_tab_initialized:
@@ -1010,6 +1014,48 @@ class AstroClocksApp:
             APP_EMAIL,
             APP_PHONE,
         )
+
+    def _schedule_startup_update_check(self, delay_ms=2500):
+        if self.startup_update_check_scheduled or self.startup_update_check_completed:
+            return
+        self.startup_update_check_scheduled = True
+        self.root.after(delay_ms, self._start_startup_update_check)
+
+    def _start_startup_update_check(self):
+        self.startup_update_check_scheduled = False
+        if self.startup_update_check_pending or self.startup_update_check_completed:
+            return
+        self.startup_update_check_pending = True
+        threading.Thread(target=self._run_startup_update_check, daemon=True).start()
+
+    def _run_startup_update_check(self):
+        try:
+            result = self.check_for_updates(timeout=6)
+        except Exception:
+            result = None
+
+        try:
+            self.root.after(0, lambda: self._apply_startup_update_check_result(result))
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _apply_startup_update_check_result(self, result):
+        self.startup_update_check_pending = False
+        self.startup_update_check_completed = True
+        if result is None or not result.update_available:
+            return
+        try:
+            app_dialogs.open_about_dialog(
+                self,
+                APP_VERSION,
+                self._release_date_text(),
+                APP_AUTHOR,
+                APP_EMAIL,
+                APP_PHONE,
+                initial_update_result=result,
+            )
+        except (tk.TclError, RuntimeError):
+            pass
 
     def check_for_updates(self, timeout=10):
         return updater.check_for_updates(APP_VERSION, timeout=timeout)
