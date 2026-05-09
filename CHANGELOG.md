@@ -1,5 +1,22 @@
 # Changelog
 
+## AstroClocks v3.3.2 stable - 2026-05-09
+
+### Ajoute
+
+- Vérification des mises à jour GitHub depuis la fenêtre "À propos", avec téléchargement direct de l'installateur Windows quand une nouvelle stable est disponible.
+- Vérification automatique et silencieuse des mises à jour au démarrage, avec ouverture de la fenêtre "À propos" seulement si une nouvelle version est détectée.
+
+### Corrige
+
+- L'installeur Windows supprime maintenant aussi `AstroClocks-v3.3.1.exe` lors d'une mise a jour vers `v3.3.2`.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.2.exe`.
+
 ## AstroClocks v3.3.1 stable - 2026-05-09
 
 ### Corrige
