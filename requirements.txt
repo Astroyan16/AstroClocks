@@ -1,6 +1,7 @@
 astropy>=6.0
 astroplan>=0.10
 Pillow>=10.0
+pywin32>=308; platform_system == "Windows"
 pytz>=2024.1
 zeep>=4.2
 tzdata>=2024.1

@@ -24,6 +24,7 @@ from astroclocks.settings import (
     DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
+    DEFAULT_MOUNT_SHOW_RETICLE,
     DEFAULT_SITE_NAME,
     DEFAULT_SKY_MAGNITUDE_LIMIT,
     DEFAULT_SKY_SHOW_ALTAZ_GRID,
@@ -195,10 +196,18 @@ def open_about_dialog(
         bg=app.card_bg,
         fg=app.muted,
         font=Font(family="Segoe UI", size=10),
-    ).grid(column=0, row=1, columnspan=2, sticky="w", pady=(2, 14))
+    ).grid(column=0, row=1, columnspan=2, sticky="w", pady=(2, 2))
+    tk.Label(
+        body,
+        text=app._tr("about.license_inline"),
+        bg=app.card_bg,
+        fg=app.muted,
+        font=Font(family="Segoe UI", size=9),
+        anchor="w",
+    ).grid(column=0, row=2, columnspan=2, sticky="w", pady=(0, 14))
 
     tk.Frame(body, bg=app.card_edge, height=1).grid(
-        column=0, row=2, columnspan=2, sticky="ew", pady=(0, 14)
+        column=0, row=3, columnspan=2, sticky="ew", pady=(0, 14)
     )
 
     label_font = Font(family="Segoe UI", size=10, weight="bold")
@@ -231,12 +240,12 @@ def open_about_dialog(
                 "<Button-1>", lambda _event: webbrowser.open(f"mailto:{email}")
             )
 
-    add_row(3, app._tr("about.author"), author)
-    add_row(4, app._tr("about.email"), email, link=True)
-    add_row(5, app._tr("about.phone"), phone)
+    add_row(4, app._tr("about.author"), author)
+    add_row(5, app._tr("about.email"), email, link=True)
+    add_row(6, app._tr("about.phone"), phone)
 
     tk.Frame(body, bg=app.card_edge, height=1).grid(
-        column=0, row=6, columnspan=2, sticky="ew", pady=(16, 14)
+        column=0, row=7, columnspan=2, sticky="ew", pady=(16, 14)
     )
     tk.Label(
         body,
@@ -245,7 +254,7 @@ def open_about_dialog(
         fg=app.fg,
         font=section_font,
         anchor="w",
-    ).grid(column=0, row=7, columnspan=2, sticky="w")
+    ).grid(column=0, row=8, columnspan=2, sticky="w")
     tk.Label(
         body,
         textvariable=version_var,
@@ -254,7 +263,7 @@ def open_about_dialog(
         font=value_font,
         anchor="w",
         justify="left",
-    ).grid(column=0, row=8, columnspan=2, sticky="w", pady=(8, 2))
+    ).grid(column=0, row=9, columnspan=2, sticky="w", pady=(8, 2))
     status_label = tk.Label(
         body,
         textvariable=status_var,
@@ -265,10 +274,10 @@ def open_about_dialog(
         justify="left",
         wraplength=420,
     )
-    status_label.grid(column=0, row=9, columnspan=2, sticky="ew", pady=(0, 12))
+    status_label.grid(column=0, row=10, columnspan=2, sticky="ew", pady=(0, 12))
 
     actions = tk.Frame(body, bg=app.card_bg)
-    actions.grid(column=0, row=10, columnspan=2, sticky="e", pady=(8, 0))
+    actions.grid(column=0, row=11, columnspan=2, sticky="e", pady=(8, 0))
 
     def dialog_exists():
         try:
@@ -587,16 +596,30 @@ def open_settings_dialog(app):
     sky_show_altaz_grid_var = tk.BooleanVar(value=app.sky_show_altaz_grid)
     sky_show_equatorial_grid_var = tk.BooleanVar(value=app.sky_show_equatorial_grid)
     sky_show_solar_system_var = tk.BooleanVar(value=app.sky_show_solar_system)
+    mount_show_reticle_var = tk.BooleanVar(value=app.mount_show_reticle)
     hour_angle_offset_var = tk.BooleanVar(value=app.hour_angle_offset_enabled)
     declination_offset_var = tk.BooleanVar(value=app.declination_offset_enabled)
 
     body = tk.Frame(dialog, bg=app.gbg, padx=18, pady=16)
     body.grid(column=0, row=0, sticky="nsew")
-    body.grid_columnconfigure(1, weight=1)
+    body.grid_columnconfigure(0, weight=1)
 
-    def add_label(row, text):
+    notebook = ttk.Notebook(body)
+    notebook.grid(column=0, row=0, sticky="nsew")
+
+    general_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
+    sky_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
+    mount_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
+    for tab in (general_tab, sky_tab, mount_tab):
+        tab.grid_columnconfigure(1, weight=1)
+
+    notebook.add(general_tab, text=app._tr("settings.tab.general"))
+    notebook.add(sky_tab, text=app._tr("settings.tab.sky"))
+    notebook.add(mount_tab, text=app._tr("settings.tab.mount"))
+
+    def add_label(parent, row, text):
         tk.Label(
-            body,
+            parent,
             text=text,
             bg=app.gbg,
             fg=app.muted,
@@ -604,9 +627,9 @@ def open_settings_dialog(app):
             anchor="w",
         ).grid(column=0, row=row, padx=(0, 10), pady=7, sticky="w")
 
-    def build_entry(row, variable):
+    def build_entry(parent, row, variable):
         entry = tk.Entry(
-            body,
+            parent,
             textvariable=variable,
             bg=app.ebg,
             fg=app.text,
@@ -638,9 +661,9 @@ def open_settings_dialog(app):
             relief="flat",
         )
 
-    add_label(0, app._tr("settings.preset"))
+    add_label(general_tab, 0, app._tr("settings.preset"))
     preset_combo = ttk.Combobox(
-        body,
+        general_tab,
         textvariable=preset_var,
         values=preset_values,
         font=Font(family="Segoe UI", size=10),
@@ -660,15 +683,15 @@ def open_settings_dialog(app):
 
     preset_combo.bind("<<ComboboxSelected>>", apply_preset)
 
-    add_label(1, app._tr("settings.site_name"))
-    build_entry(1, site_var)
+    add_label(general_tab, 1, app._tr("settings.site_name"))
+    build_entry(general_tab, 1, site_var)
 
-    add_label(2, app._tr("settings.country"))
-    build_entry(2, country_var)
+    add_label(general_tab, 2, app._tr("settings.country"))
+    build_entry(general_tab, 2, country_var)
 
-    add_label(3, app._tr("settings.language"))
+    add_label(general_tab, 3, app._tr("settings.language"))
     language_combo = ttk.Combobox(
-        body,
+        general_tab,
         textvariable=language_var,
         values=[label for _code, label in LANGUAGE_OPTIONS],
         font=Font(family="Segoe UI", size=10),
@@ -677,12 +700,12 @@ def open_settings_dialog(app):
     language_combo.grid(column=1, row=3, pady=7, sticky="ew")
     language_combo["state"] = "readonly"
 
-    add_label(4, app._tr("settings.latitude"))
-    build_entry(4, latitude_var)
-    add_label(5, app._tr("settings.longitude"))
-    build_entry(5, longitude_var)
-    add_label(6, app._tr("settings.timezone"))
-    timezone_options_frame = tk.Frame(body, bg=app.gbg)
+    add_label(general_tab, 4, app._tr("settings.latitude"))
+    build_entry(general_tab, 4, latitude_var)
+    add_label(general_tab, 5, app._tr("settings.longitude"))
+    build_entry(general_tab, 5, longitude_var)
+    add_label(general_tab, 6, app._tr("settings.timezone"))
+    timezone_options_frame = tk.Frame(general_tab, bg=app.gbg)
     timezone_options_frame.grid(column=1, row=6, pady=7, sticky="ew")
     timezone_options_frame.grid_columnconfigure(0, weight=1)
     timezone_combo = ttk.Combobox(
@@ -715,12 +738,12 @@ def open_settings_dialog(app):
     daylight_saving_check.grid(column=0, row=2, pady=(5, 0), sticky="w")
     sync_timezone_state()
 
-    add_label(7, app._tr("settings.aladin_fov"))
-    build_entry(7, fov_var)
+    add_label(sky_tab, 0, app._tr("settings.aladin_fov"))
+    build_entry(sky_tab, 0, fov_var)
 
-    add_label(8, app._tr("settings.sky_map"))
-    sky_options = tk.Frame(body, bg=app.gbg)
-    sky_options.grid(column=1, row=8, pady=7, sticky="ew")
+    add_label(sky_tab, 1, app._tr("settings.sky_map"))
+    sky_options = tk.Frame(sky_tab, bg=app.gbg)
+    sky_options.grid(column=1, row=1, pady=7, sticky="ew")
     sky_options.grid_columnconfigure(0, weight=1)
     magnitude_frame = tk.Frame(sky_options, bg=app.gbg)
     magnitude_frame.grid(column=0, row=0, sticky="ew")
@@ -762,9 +785,9 @@ def open_settings_dialog(app):
         app._tr("settings.sky_show_solar_system"),
     ).grid(column=0, row=3, sticky="w", pady=(4, 0))
 
-    add_label(9, app._tr("settings.instrument"))
-    instrument_options = tk.Frame(body, bg=app.gbg)
-    instrument_options.grid(column=1, row=9, pady=7, sticky="ew")
+    add_label(sky_tab, 2, app._tr("settings.instrument"))
+    instrument_options = tk.Frame(sky_tab, bg=app.gbg)
+    instrument_options.grid(column=1, row=2, pady=7, sticky="ew")
     build_checkbutton(
         instrument_options,
         hour_angle_offset_var,
@@ -776,6 +799,143 @@ def open_settings_dialog(app):
         app._tr("settings.declination_offset"),
     ).pack(anchor="w", pady=(4, 0))
 
+    add_label(mount_tab, 0, app._tr("settings.mount_driver"))
+    mount_options = tk.Frame(mount_tab, bg=app.gbg)
+    mount_options.grid(column=1, row=0, pady=7, sticky="ew")
+    mount_options.grid_columnconfigure(1, weight=1)
+
+    mount_state = app.mount_settings_state()
+    mount_driver_var = tk.StringVar(value=mount_state["driver_label"])
+    mount_status_var = tk.StringVar(value=mount_state["status_text"])
+
+    tk.Label(
+        mount_options,
+        text=app._tr("settings.mount"),
+        bg=app.gbg,
+        fg=app.muted,
+        font=Font(family="Segoe UI", size=10, weight="bold"),
+        anchor="w",
+    ).grid(column=0, row=0, padx=(0, 10), sticky="w")
+    mount_driver_label = tk.Label(
+        mount_options,
+        textvariable=mount_driver_var,
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+        justify="left",
+        wraplength=360,
+    )
+    mount_driver_label.grid(column=1, row=0, sticky="ew")
+    mount_reticle_row = tk.Frame(mount_options, bg=app.gbg)
+    mount_reticle_row.grid(column=0, row=1, columnspan=2, sticky="w", pady=(6, 0))
+    mount_reticle_toggle = tk.Checkbutton(
+        mount_reticle_row,
+        text="",
+        variable=mount_show_reticle_var,
+        bg=app.gbg,
+        fg=app.text,
+        disabledforeground=app.muted,
+        activebackground=app.gbg,
+        activeforeground=app.fg,
+        selectcolor=app.ebg,
+        relief="flat",
+        bd=0,
+        highlightthickness=0,
+        padx=0,
+        pady=0,
+        width=1,
+    )
+    mount_reticle_toggle.grid(column=0, row=0, sticky="w")
+    mount_reticle_label = tk.Label(
+        mount_reticle_row,
+        text=app._tr("settings.mount_show_reticle"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+        justify="left",
+    )
+    mount_reticle_label.grid(column=1, row=0, sticky="w", padx=(6, 0))
+
+    def toggle_mount_reticle(_event=None):
+        mount_show_reticle_var.set(not mount_show_reticle_var.get())
+
+    mount_reticle_label.bind("<Button-1>", toggle_mount_reticle)
+    mount_status_label = tk.Label(
+        mount_options,
+        textvariable=mount_status_var,
+        bg=app.gbg,
+        fg=mount_state["status_color"],
+        font=Font(family="Segoe UI", size=9),
+        anchor="w",
+        justify="left",
+        wraplength=420,
+    )
+    mount_status_label.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(8, 6))
+
+    mount_actions = tk.Frame(mount_options, bg=app.gbg)
+    mount_actions.grid(column=0, row=3, columnspan=2, sticky="w")
+
+    def refresh_mount_state(state=None):
+        state = state or app.mount_settings_state()
+        mount_driver_var.set(state["driver_label"])
+        mount_status_var.set(state["status_text"])
+        mount_status_label.config(fg=state["status_color"])
+        mount_driver_label.config(
+            fg=app.text if state["driver_label"] != app._tr("mount.driver.none") else app.muted
+        )
+        choose_mount_button.config(
+            state=tk.NORMAL if state["available"] else tk.DISABLED
+        )
+        connect_mount_button.config(
+            state=tk.NORMAL if state["available"] and not state["connected"] else tk.DISABLED
+        )
+        disconnect_mount_button.config(
+            state=tk.NORMAL if state["connected"] else tk.DISABLED
+        )
+
+    def choose_mount():
+        try:
+            refresh_mount_state(app.choose_ascom_mount_driver())
+        except Exception as exc:
+            mount_status_label.config(fg=app.danger)
+            mount_status_var.set(app._tr("mount.status.error", error=exc))
+
+    def connect_mount():
+        try:
+            refresh_mount_state(app.connect_ascom_mount())
+        except Exception as exc:
+            mount_status_label.config(fg=app.danger)
+            mount_status_var.set(app._tr("mount.status.error", error=exc))
+
+    def disconnect_mount():
+        try:
+            refresh_mount_state(app.disconnect_ascom_mount())
+        except Exception as exc:
+            mount_status_label.config(fg=app.danger)
+            mount_status_var.set(app._tr("mount.status.error", error=exc))
+
+    choose_mount_button = app._build_button(
+        mount_actions,
+        app._tr("settings.mount_choose"),
+        choose_mount,
+    )
+    choose_mount_button.grid(column=0, row=0, padx=(0, 8))
+    connect_mount_button = app._build_button(
+        mount_actions,
+        app._tr("settings.mount_connect"),
+        connect_mount,
+    )
+    connect_mount_button.grid(column=1, row=0, padx=(0, 8))
+    disconnect_mount_button = app._build_button(
+        mount_actions,
+        app._tr("settings.mount_disconnect"),
+        disconnect_mount,
+    )
+    disconnect_mount_button.grid(column=2, row=0)
+    refresh_mount_state(mount_state)
+
     hint = tk.Label(
         body,
         text=app._tr("settings.hint"),
@@ -784,10 +944,10 @@ def open_settings_dialog(app):
         font=Font(family="Segoe UI", size=9),
         anchor="w",
     )
-    hint.grid(column=0, row=10, columnspan=2, pady=(2, 12), sticky="ew")
+    hint.grid(column=0, row=1, pady=(10, 12), sticky="ew")
 
     actions = tk.Frame(body, bg=app.gbg)
-    actions.grid(column=0, row=11, columnspan=2, sticky="e")
+    actions.grid(column=0, row=2, sticky="e")
 
     def reset_defaults():
         site_var.set(DEFAULT_SITE_NAME)
@@ -803,6 +963,7 @@ def open_settings_dialog(app):
         sky_show_altaz_grid_var.set(DEFAULT_SKY_SHOW_ALTAZ_GRID)
         sky_show_equatorial_grid_var.set(DEFAULT_SKY_SHOW_EQUATORIAL_GRID)
         sky_show_solar_system_var.set(DEFAULT_SKY_SHOW_SOLAR_SYSTEM)
+        mount_show_reticle_var.set(DEFAULT_MOUNT_SHOW_RETICLE)
         hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
         declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
 
@@ -863,9 +1024,11 @@ def open_settings_dialog(app):
         app.sky_show_altaz_grid = sky_show_altaz_grid_var.get()
         app.sky_show_equatorial_grid = sky_show_equatorial_grid_var.get()
         app.sky_show_solar_system = sky_show_solar_system_var.get()
+        app.mount_show_reticle = mount_show_reticle_var.get()
         app.solar_system_cache_key = None
         app.hour_angle_offset_enabled = hour_angle_offset_var.get()
         app.declination_offset_enabled = declination_offset_var.get()
+        app.sky_map_cache_key = None
         app._save_current_settings()
         app._refresh_language_texts()
         dialog.destroy()

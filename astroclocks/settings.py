@@ -19,6 +19,7 @@ DEFAULT_SKY_MAGNITUDE_LIMIT = 4.0
 DEFAULT_SKY_SHOW_ALTAZ_GRID = True
 DEFAULT_SKY_SHOW_EQUATORIAL_GRID = True
 DEFAULT_SKY_SHOW_SOLAR_SYSTEM = False
+DEFAULT_MOUNT_SHOW_RETICLE = True
 MAX_SKY_MAGNITUDE_LIMIT = 6.2
 DEFAULT_TIMEZONE_NAME = ""
 DEFAULT_DAYLIGHT_SAVING_ENABLED = False
@@ -100,6 +101,9 @@ class AppSettings:
     sky_show_altaz_grid: bool = DEFAULT_SKY_SHOW_ALTAZ_GRID
     sky_show_equatorial_grid: bool = DEFAULT_SKY_SHOW_EQUATORIAL_GRID
     sky_show_solar_system: bool = DEFAULT_SKY_SHOW_SOLAR_SYSTEM
+    mount_ascom_driver_id: str = ""
+    mount_ascom_driver_name: str = ""
+    mount_show_reticle: bool = DEFAULT_MOUNT_SHOW_RETICLE
     timezone_name: str = DEFAULT_TIMEZONE_NAME
     daylight_saving_enabled: bool = DEFAULT_DAYLIGHT_SAVING_ENABLED
     language: str = DEFAULT_LANGUAGE
@@ -175,6 +179,12 @@ def normalize_settings(settings):
     if site_name in LEGACY_DEFAULT_SITE_NAMES:
         site_name = DEFAULT_SITE_NAME
     country = str(getattr(settings, "country", DEFAULT_COUNTRY) or DEFAULT_COUNTRY).strip()
+    mount_ascom_driver_id = str(
+        getattr(settings, "mount_ascom_driver_id", "") or ""
+    ).strip()
+    mount_ascom_driver_name = str(
+        getattr(settings, "mount_ascom_driver_name", "") or ""
+    ).strip()
     timezone_name = str(
         getattr(settings, "timezone_name", DEFAULT_TIMEZONE_NAME) or DEFAULT_TIMEZONE_NAME
     ).strip()
@@ -225,6 +235,12 @@ def normalize_settings(settings):
         sky_show_solar_system=_coerce_bool(
             getattr(settings, "sky_show_solar_system", DEFAULT_SKY_SHOW_SOLAR_SYSTEM),
             DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
+        ),
+        mount_ascom_driver_id=mount_ascom_driver_id,
+        mount_ascom_driver_name=mount_ascom_driver_name or mount_ascom_driver_id,
+        mount_show_reticle=_coerce_bool(
+            getattr(settings, "mount_show_reticle", DEFAULT_MOUNT_SHOW_RETICLE),
+            DEFAULT_MOUNT_SHOW_RETICLE,
         ),
         timezone_name=timezone_name,
         daylight_saving_enabled=_coerce_bool(
@@ -440,6 +456,12 @@ def load_app_settings():
             sky_show_solar_system=data.get(
                 "sky_show_solar_system",
                 DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
+            ),
+            mount_ascom_driver_id=data.get("mount_ascom_driver_id", ""),
+            mount_ascom_driver_name=data.get("mount_ascom_driver_name", ""),
+            mount_show_reticle=data.get(
+                "mount_show_reticle",
+                DEFAULT_MOUNT_SHOW_RETICLE,
             ),
             timezone_name=data.get("timezone_name", DEFAULT_TIMEZONE_NAME),
             daylight_saving_enabled=data.get(

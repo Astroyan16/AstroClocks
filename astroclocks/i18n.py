@@ -37,6 +37,9 @@ TRANSLATIONS = {
         "about.author": "Author",
         "about.email": "Email",
         "about.phone": "Phone",
+        "about.license_inline": "Licensed under GNU GPL v3.0 only",
+        "about.license": "License",
+        "about.license_value": "GNU GPL v3.0 only",
         "about.updates": "Updates",
         "about.current_version": "Installed version: {version}",
         "about.update.idle": "Check online whether a newer Windows installer is available.",
@@ -83,6 +86,9 @@ TRANSLATIONS = {
         "object_type.Natural Satellite": "Natural Satellite",
         "object_type.Star, Deep Sky Object": "Star, Deep Sky Object",
         "settings.title": "AstroClocks Settings",
+        "settings.tab.general": "General",
+        "settings.tab.sky": "Sky",
+        "settings.tab.mount": "Mount",
         "settings.preset": "Known place",
         "settings.site_name": "Site name",
         "settings.custom_site": "Custom site",
@@ -99,6 +105,12 @@ TRANSLATIONS = {
         "settings.sky_show_altaz_grid": "Show AltAz grid",
         "settings.sky_show_equatorial_grid": "Show equatorial grid",
         "settings.sky_show_solar_system": "Show main solar system objects",
+        "settings.mount": "ASCOM mount",
+        "settings.mount_driver": "Selected driver",
+        "settings.mount_show_reticle": "Show telescope reticle on the sky map",
+        "settings.mount_choose": "Choose...",
+        "settings.mount_connect": "Connect",
+        "settings.mount_disconnect": "Disconnect",
         "settings.hint": (
             "Latitude [-90, 90], longitude [-180, 180]. Magnitude limit max: 6.2. "
             "Automatic time zone uses Windows."
@@ -132,6 +144,7 @@ TRANSLATIONS = {
         "solar.Neptune": "Neptune",
         "sky.zenith": "Zenith",
         "sky.target": "Target",
+        "sky.telescope": "Telescope",
         "sky.pointer": "Pointer",
         "sky.hour_angle_short": "HA",
         "sky.target_set": "Target set from map",
@@ -146,7 +159,27 @@ TRANSLATIONS = {
             "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}\n"
             "Target visibility : {note} | {count} named stars visible"
         ),
+        "sky.mount_status": (
+            "{label} : RA = {ra} ; DEC = {dec} | "
+            "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}"
+        ),
         "sky.unavailable": "Sky map unavailable: {error}",
+        "mount.driver.none": "No ASCOM mount selected",
+        "mount.driver.unnamed": "ASCOM mount",
+        "mount.frame.topocentric": "Topocentric",
+        "mount.frame.j2000": "J2000",
+        "mount.frame.j2050": "J2050",
+        "mount.frame.b1950": "B1950",
+        "mount.frame.other": "Other frame",
+        "mount.status.unavailable_short": "ASCOM is unavailable",
+        "mount.status.unavailable": "ASCOM mount support is unavailable: {error}",
+        "mount.status.not_configured": "Select an ASCOM telescope driver to connect a mount.",
+        "mount.status.selected": "Selected driver: {name}",
+        "mount.status.connected": "Connected to mount: {name}",
+        "mount.status.connected_coords": (
+            "Connected to {name} | RA = {ra} ; DEC = {dec} | Frame: {frame}"
+        ),
+        "mount.status.error": "ASCOM mount error: {error}",
         "visibility.title": "Altitude curve, noon to noon",
         "visibility.title_named": "Altitude of {target} between {start_date} and {end_date}",
         "visibility.axis": "Local time",
@@ -415,6 +448,9 @@ TRANSLATIONS = {
         "about.author": "Auteur",
         "about.email": "Email",
         "about.phone": "Téléphone",
+        "about.license_inline": "Sous licence GNU GPL v3.0 only",
+        "about.license": "Licence",
+        "about.license_value": "GNU GPL v3.0 only",
         "about.updates": "Mises à jour",
         "about.current_version": "Version installée : {version}",
         "about.update.idle": "Vérifier en ligne si un nouvel installateur Windows est disponible.",
@@ -461,6 +497,9 @@ TRANSLATIONS = {
         "object_type.Natural Satellite": "Satellite naturel",
         "object_type.Star, Deep Sky Object": "Étoile, objet du ciel profond",
         "settings.title": "Paramètres AstroClocks",
+        "settings.tab.general": "Général",
+        "settings.tab.sky": "Ciel",
+        "settings.tab.mount": "Monture",
         "settings.preset": "Lieu connu",
         "settings.site_name": "Nom du site",
         "settings.custom_site": "Site personnalisé",
@@ -477,6 +516,12 @@ TRANSLATIONS = {
         "settings.sky_show_altaz_grid": "Afficher la grille AltAz",
         "settings.sky_show_equatorial_grid": "Afficher la grille équatoriale",
         "settings.sky_show_solar_system": "Afficher les principaux objets du système solaire",
+        "settings.mount": "Monture ASCOM",
+        "settings.mount_driver": "Driver sélectionné",
+        "settings.mount_show_reticle": "Afficher le réticule Télescope sur la carte du ciel",
+        "settings.mount_choose": "Choisir...",
+        "settings.mount_connect": "Connecter",
+        "settings.mount_disconnect": "Déconnecter",
         "settings.hint": (
             "Latitude [-90, 90], longitude [-180, 180]. Magnitude limite max : 6.2. "
             "Le fuseau automatique utilise Windows."
@@ -510,6 +555,7 @@ TRANSLATIONS = {
         "solar.Neptune": "Neptune",
         "sky.zenith": "Zénith",
         "sky.target": "Cible",
+        "sky.telescope": "Télescope",
         "sky.pointer": "Pointeur",
         "sky.hour_angle_short": "AH",
         "sky.target_set": "Cible définie depuis la carte",
@@ -524,7 +570,27 @@ TRANSLATIONS = {
             "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}\n"
             "Visibilité de la cible : {note} | {count} étoiles nommées visibles"
         ),
+        "sky.mount_status": (
+            "{label} : RA = {ra} ; DEC = {dec} | "
+            "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}"
+        ),
         "sky.unavailable": "Carte du ciel indisponible : {error}",
+        "mount.driver.none": "Aucune monture ASCOM sélectionnée",
+        "mount.driver.unnamed": "Monture ASCOM",
+        "mount.frame.topocentric": "Topocentrique",
+        "mount.frame.j2000": "J2000",
+        "mount.frame.j2050": "J2050",
+        "mount.frame.b1950": "B1950",
+        "mount.frame.other": "Repère inconnu",
+        "mount.status.unavailable_short": "ASCOM est indisponible",
+        "mount.status.unavailable": "Le support des montures ASCOM est indisponible : {error}",
+        "mount.status.not_configured": "Choisissez un driver ASCOM de télescope pour connecter une monture.",
+        "mount.status.selected": "Driver sélectionné : {name}",
+        "mount.status.connected": "Monture connectée : {name}",
+        "mount.status.connected_coords": (
+            "Connectée à {name} | RA = {ra} ; DEC = {dec} | Repère : {frame}"
+        ),
+        "mount.status.error": "Erreur de monture ASCOM : {error}",
         "visibility.title": "Courbe d'altitude 12h-12h",
         "visibility.title_named": "Altitude de {target} entre le {start_date} et le {end_date}",
         "visibility.axis": "Temps local",

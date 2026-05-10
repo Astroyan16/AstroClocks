@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astroclocks"
-version = "3.3.2"
+version = "3.3.3"
 description = "Astronomical clocks, sidereal time, JNow coordinates, and a live sky map."
 readme = "README.md"
+license = "GPL-3.0-only"
 requires-python = ">=3.10"
 dependencies = [
     "astropy>=6.0",
     "astroplan>=0.10",
     "Pillow>=10.0",
+    "pywin32>=308; platform_system == 'Windows'",
     "pytz>=2024.1",
     "zeep>=4.2",
     "tzdata>=2024.1",

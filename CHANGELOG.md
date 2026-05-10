@@ -1,5 +1,34 @@
 # Changelog
 
+## AstroClocks v3.3.3 stable - 2026-05-10
+
+### Ajoute
+
+- Support ASCOM sur Windows pour choisir une monture, se connecter a elle et lire ses coordonnees depuis AstroClocks.
+- Affichage d'un reticule `Telescope` sur la carte du ciel quand une monture ASCOM est connectee.
+- Nouvelle ligne d'etat dediee a la monture sous la carte du ciel.
+- Documentation du projet remise a niveau avec licence GPL v3, build Windows, lancement en environnement virtuel et dependances ASCOM.
+
+### Ameliore
+
+- Fenetre de parametres reorganisee en onglets `General`, `Sky` et `Mount`.
+- Zone de statut sous la carte du ciel agrandie pour afficher plus proprement les informations de cible et de monture.
+- Libelles de la carte du ciel mieux positionnes pres des bords pour eviter les coupures.
+- Refactorisation interne de `app.py` en sous-modules dedies (`app_visibility`, `app_double_stars`, `app_skymap`, `app_object_search`) pour faciliter la maintenance.
+
+### Corrige
+
+- Le packaging Windows embarque maintenant correctement `pywin32`, `win32com`, `pythoncom` et `pywintypes` pour que le support ASCOM fonctionne aussi dans l'executable package.
+- Le bouton de champ Aladin se met a jour immediatement apres modification du parametre correspondant.
+- Divers ajustements d'interface dans la fenetre `A propos`, l'onglet `Mount` et la carte du ciel.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Compilation Python des modules modifies.
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.3.exe`.
+
 ## AstroClocks v3.3.2 stable - 2026-05-09
 
 ### Ajoute

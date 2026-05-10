@@ -52,6 +52,12 @@ Remove-GeneratedPath (Join-Path $ProjectRoot "output\$AppName")
     --workpath "build" `
     --icon "AppIcon.ico" `
     --add-data "AppIcon.ico;." `
+    --hidden-import "win32com" `
+    --hidden-import "win32com.client" `
+    --hidden-import "pythoncom" `
+    --hidden-import "pywintypes" `
+    --collect-submodules "win32com" `
+    --collect-data "win32com" `
     --collect-all "astropy" `
     --collect-all "astroplan" `
     --collect-all "zeep" `
