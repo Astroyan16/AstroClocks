@@ -78,6 +78,7 @@ CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
 SKY_MAP_CANVAS_REFRESH_SECONDS = 8
+CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD = 2
 MOUNT_POLL_INTERVAL_MS = 250
 SKY_STAR_BRIGHTNESS_MULTIPLIER = 1.27
 SKY_RENDER_DEBUG = os.environ.get("ASTROCLOCKS_SKY_RENDER_DEBUG") == "1"
@@ -226,6 +227,7 @@ class AstroClocksApp:
         self.connectivity_label = None
         self.network_online = None
         self.connectivity_check_pending = False
+        self.connectivity_consecutive_failures = 0
         try:
             self.mount_ascom_available = ascom_mount.is_available()
             self.mount_availability_error = ""
@@ -1578,13 +1580,29 @@ class AstroClocksApp:
 
     def _apply_connectivity_result(self, is_online):
         self.connectivity_check_pending = False
-        self.network_online = is_online
+
+        if is_online:
+            self.connectivity_consecutive_failures = 0
+            effective_online = True
+        else:
+            self.connectivity_consecutive_failures += 1
+            if self.connectivity_consecutive_failures >= CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD:
+                effective_online = False
+            else:
+                effective_online = self.network_online
+
+        self.network_online = effective_online
 
         if self.connectivity_label is not None:
-            text_key = "network.connected" if is_online else "network.offline"
+            if effective_online is None:
+                text_key = "network.checking"
+                foreground = self.muted
+            else:
+                text_key = "network.connected" if effective_online else "network.offline"
+                foreground = self.success if effective_online else self.danger
             self.connectivity_label.config(
                 text=self._tr(text_key),
-                foreground=self.success if is_online else self.danger,
+                foreground=foreground,
             )
 
         self._update_aladin_button_state()
