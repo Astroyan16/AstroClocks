@@ -823,9 +823,10 @@ def _double_search_context(self):
     alpha_hh, alpha_mm, alpha_ss, _delta_dd, _delta_mm, _delta_ss = (
         self._current_jnow_coordinate_fields()
     )
+    active_latitude, active_longitude = self._active_site_coordinates()
     return {
-        "latitude": self.latitude,
-        "longitude": self.longitude,
+        "latitude": active_latitude,
+        "longitude": active_longitude,
         "alpha_hh": alpha_hh,
         "alpha_mm": alpha_mm,
         "alpha_ss": alpha_ss,

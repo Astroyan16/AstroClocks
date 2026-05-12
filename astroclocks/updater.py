@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -70,8 +71,38 @@ def compare_versions(left, right):
     return 0
 
 
+def _public_release(release):
+    return not release.get("draft") and not release.get("prerelease")
+
+
+def _release_declared_versions(release):
+    versions = []
+    for value in (release.get("tag_name"), release.get("name")):
+        version = _extract_version(value)
+        if version and version not in versions:
+            versions.append(version)
+    return versions
+
+
+def _release_metadata_is_coherent(release, asset_version):
+    declared_versions = _release_declared_versions(release)
+    if not declared_versions:
+        return True
+    return all(compare_versions(version, asset_version) == 0 for version in declared_versions)
+
+
+def _release_has_windows_installer_asset(release):
+    if not _public_release(release):
+        return False
+    for asset in release.get("assets", []):
+        asset_name = str(asset.get("name") or "")
+        if INSTALLER_NAME_PATTERN.match(asset_name):
+            return True
+    return False
+
+
 def _release_candidate(release):
-    if release.get("draft") or release.get("prerelease"):
+    if not _public_release(release):
         return None
 
     for asset in release.get("assets", []):
@@ -81,6 +112,8 @@ def _release_candidate(release):
         if not match or not installer_url:
             continue
         version = match.group("version")
+        if not _release_metadata_is_coherent(release, version):
+            continue
         return ReleaseInfo(
             version=version,
             tag_name=str(release.get("tag_name") or ""),
@@ -117,27 +150,67 @@ def _github_request(url, timeout):
             ) from exc
         if exc.code == 403:
             raise UpdateError(
-                "GitHub rate limit reached while checking for updates. Please try again later."
+                "GitHub rate limit reached while accessing the update server. Please try again later."
             ) from exc
         raise UpdateError(f"Update server returned HTTP {exc.code}.") from exc
+    except TimeoutError as exc:
+        raise UpdateError("Update request timed out.") from exc
+    except socket.timeout as exc:
+        raise UpdateError("Update request timed out.") from exc
     except URLError as exc:
-        raise UpdateError(f"Network error while checking for updates: {exc.reason}") from exc
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise UpdateError("Update request timed out.") from exc
+        raise UpdateError(f"Network error while accessing the update server: {exc.reason}") from exc
+
+
+def _read_json_response(response):
+    try:
+        payload_bytes = response.read()
+    except OSError as exc:
+        raise UpdateError(f"Unable to read the update feed: {exc}") from exc
+
+    try:
+        payload_text = payload_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UpdateError("Update feed returned unreadable data.") from exc
+
+    try:
+        return json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise UpdateError("Update feed returned invalid JSON.") from exc
+
+
+def _validate_release_info(release):
+    if not isinstance(release, ReleaseInfo):
+        raise UpdateError("Installer metadata is invalid.")
+    if not INSTALLER_NAME_PATTERN.match(str(release.installer_name or "")):
+        raise UpdateError("Installer metadata is invalid.")
+    if not str(release.installer_url or "").strip():
+        raise UpdateError("Installer metadata is invalid.")
+    installer_version = _extract_version(release.installer_name)
+    if installer_version is None or compare_versions(release.version, installer_version) != 0:
+        raise UpdateError("Installer metadata is invalid.")
 
 
 def fetch_latest_release(timeout=10):
     with _github_request(RELEASES_API_URL, timeout=timeout) as response:
-        payload = json.load(response)
+        payload = _read_json_response(response)
 
     if not isinstance(payload, list):
         raise UpdateError("Unexpected update feed format.")
 
     candidates = []
+    saw_incoherent_windows_release = False
     for release in payload:
         candidate = _release_candidate(release)
         if candidate is not None:
             candidates.append(candidate)
+        elif _release_has_windows_installer_asset(release):
+            saw_incoherent_windows_release = True
 
     if not candidates:
+        if saw_incoherent_windows_release:
+            raise UpdateError("Update feed contains incoherent Windows release metadata.")
         raise UpdateError("No installable public Windows release was found.")
 
     return max(candidates, key=lambda candidate: parse_version(candidate.version))
@@ -157,17 +230,30 @@ def check_for_updates(current_version, timeout=10):
 
 
 def download_installer(release, destination_dir=None, timeout=30, chunk_size=1024 * 128):
+    _validate_release_info(release)
     target_dir = Path(destination_dir or Path(tempfile.gettempdir()) / "AstroClocks-Updates")
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / release.installer_name
+    temp_path = target_path.with_suffix(f"{target_path.suffix}.part")
 
     with _github_request(release.installer_url, timeout=timeout) as response:
-        with open(target_path, "wb") as file:
+        with open(temp_path, "wb") as file:
+            wrote_bytes = 0
             while True:
                 chunk = response.read(chunk_size)
                 if not chunk:
                     break
                 file.write(chunk)
+                wrote_bytes += len(chunk)
+
+    if wrote_bytes <= 0:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise UpdateError("Downloaded installer is empty.")
+
+    temp_path.replace(target_path)
 
     return target_path
 

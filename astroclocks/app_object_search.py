@@ -163,7 +163,7 @@ def _coordinate_result_message(self, result):
 
 
 def _apply_coordinate_result(self, result):
-    self._set_result_text(self._coordinate_result_message(result))
+    result_message = self._coordinate_result_message(result)
     ra_hours = (
         float(result["alpha_hh"])
         + (float(result["alpha_mm"]) / 60)
@@ -183,6 +183,7 @@ def _apply_coordinate_result(self, result):
     self.visibility_start_date = None
     self._update_visibility_date_label()
     self.update_value(preserve_solar_target=self.target_solar_system_name is not None)
+    self._set_result_text(result_message, foreground=self._current_target_status_color())
 
 
 def _start_coordinate_search(self, selected_type, object_name, fallback_result=None):
@@ -301,14 +302,15 @@ def search_coordinates(self):
     if self.coordinate_search_pending:
         return
 
+    active_latitude, active_longitude = self._active_site_coordinates()
     if selected_type in solar_system_types:
         if not object_name:
             self._set_result_text("")
             return
         local_solar_result = resolve_local_solar_system_coordinates(
             object_name,
-            latitude=self.latitude,
-            longitude=self.longitude,
+            latitude=active_latitude,
+            longitude=active_longitude,
         )
         if self.network_online is False:
             if local_solar_result is not None:
@@ -321,8 +323,8 @@ def search_coordinates(self):
 
     local_solar_result = resolve_local_solar_system_coordinates(
         object_name,
-        latitude=self.latitude,
-        longitude=self.longitude,
+        latitude=active_latitude,
+        longitude=active_longitude,
     )
     if local_solar_result is not None:
         if self.network_online is False:

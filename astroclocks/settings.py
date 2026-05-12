@@ -20,6 +20,13 @@ DEFAULT_SKY_SHOW_ALTAZ_GRID = True
 DEFAULT_SKY_SHOW_EQUATORIAL_GRID = True
 DEFAULT_SKY_SHOW_SOLAR_SYSTEM = False
 DEFAULT_MOUNT_SHOW_RETICLE = True
+COORDINATE_SOURCE_APP = "app"
+COORDINATE_SOURCE_MOUNT = "mount"
+COORDINATE_SOURCE_CODES = {
+    COORDINATE_SOURCE_APP,
+    COORDINATE_SOURCE_MOUNT,
+}
+DEFAULT_COORDINATE_SOURCE = COORDINATE_SOURCE_APP
 MAX_SKY_MAGNITUDE_LIMIT = 6.2
 DEFAULT_TIMEZONE_NAME = ""
 DEFAULT_DAYLIGHT_SAVING_ENABLED = False
@@ -103,6 +110,7 @@ class AppSettings:
     sky_show_solar_system: bool = DEFAULT_SKY_SHOW_SOLAR_SYSTEM
     mount_ascom_driver_id: str = ""
     mount_ascom_driver_name: str = ""
+    coordinate_source: str = DEFAULT_COORDINATE_SOURCE
     mount_show_reticle: bool = DEFAULT_MOUNT_SHOW_RETICLE
     timezone_name: str = DEFAULT_TIMEZONE_NAME
     daylight_saving_enabled: bool = DEFAULT_DAYLIGHT_SAVING_ENABLED
@@ -185,6 +193,12 @@ def normalize_settings(settings):
     mount_ascom_driver_name = str(
         getattr(settings, "mount_ascom_driver_name", "") or ""
     ).strip()
+    coordinate_source = str(
+        getattr(settings, "coordinate_source", DEFAULT_COORDINATE_SOURCE)
+        or DEFAULT_COORDINATE_SOURCE
+    ).strip().lower()
+    if coordinate_source not in COORDINATE_SOURCE_CODES:
+        coordinate_source = DEFAULT_COORDINATE_SOURCE
     timezone_name = str(
         getattr(settings, "timezone_name", DEFAULT_TIMEZONE_NAME) or DEFAULT_TIMEZONE_NAME
     ).strip()
@@ -238,6 +252,7 @@ def normalize_settings(settings):
         ),
         mount_ascom_driver_id=mount_ascom_driver_id,
         mount_ascom_driver_name=mount_ascom_driver_name or mount_ascom_driver_id,
+        coordinate_source=coordinate_source,
         mount_show_reticle=_coerce_bool(
             getattr(settings, "mount_show_reticle", DEFAULT_MOUNT_SHOW_RETICLE),
             DEFAULT_MOUNT_SHOW_RETICLE,
@@ -459,6 +474,10 @@ def load_app_settings():
             ),
             mount_ascom_driver_id=data.get("mount_ascom_driver_id", ""),
             mount_ascom_driver_name=data.get("mount_ascom_driver_name", ""),
+            coordinate_source=data.get(
+                "coordinate_source",
+                DEFAULT_COORDINATE_SOURCE,
+            ),
             mount_show_reticle=data.get(
                 "mount_show_reticle",
                 DEFAULT_MOUNT_SHOW_RETICLE,

@@ -1,5 +1,30 @@
 # Changelog
 
+## AstroClocks v3.3.4 stable - 2026-05-12
+
+### Ajoute
+
+- Choix global de la source des coordonnees (`Parametres AstroClocks` ou `Monture ASCOM`) pour que toute l'application utilise la meme base de site active.
+
+### Ameliore
+
+- Integration ASCOM davantage fiabilisee : etats de connexion plus explicites, statut `Mount` plus clair, meilleure gestion des erreurs SynScan et rafraichissement de la monture plus reactif.
+- Mecanisme de mise a jour GitHub durci avec une meilleure gestion des cas `release` incoherente, JSON invalide, timeout, reseau indisponible et installeur vide.
+- Zone de statut sous la carte du ciel reorganisee : compteur d'etoiles sur une ligne dediee, formatage harmonise en `JNow / RA / DEC / Alt / Az`, et meilleur rendu des cibles sous l'horizon.
+
+### Corrige
+
+- La connexion ASCOM echoue maintenant proprement si le driver se declare connecte mais ne fournit pas encore de snapshot exploitable.
+- La deconnexion de monture en cours de route ne fait plus planter l'application.
+- Le reticule de monture et les coordonnees associees se rafraichissent correctement sur la carte du ciel.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Compilation Python des modules modifies.
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.4.exe`.
+
 ## AstroClocks v3.3.3 stable - 2026-05-10
 
 ### Ajoute

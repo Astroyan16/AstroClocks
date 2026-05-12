@@ -225,10 +225,11 @@ def _visibility_sample_from_position(self, position, sample_time, offset_hours):
 def _visibility_sample_at_offset(self, ra_hours, declination, start_utc, offset_hours):
     sample_time = start_utc + datetime.timedelta(hours=offset_hours)
     if self.target_solar_system_name:
+        active_latitude, active_longitude = self._active_site_coordinates()
         positions = compute_solar_system_body_positions(
             self.target_solar_system_name,
-            self.latitude,
-            self.longitude,
+            active_latitude,
+            active_longitude,
             [sample_time],
         )
         if positions:
@@ -256,14 +257,15 @@ def _visibility_sample_at_offset(self, ra_hours, declination, start_utc, offset_
 def _visibility_samples(self, ra_hours, declination, start_utc):
     offsets = [step / 2 for step in range(49)]
     if self.target_solar_system_name:
+        active_latitude, active_longitude = self._active_site_coordinates()
         utc_datetimes = [
             start_utc + datetime.timedelta(hours=offset)
             for offset in offsets
         ]
         positions = compute_solar_system_body_positions(
             self.target_solar_system_name,
-            self.latitude,
-            self.longitude,
+            active_latitude,
+            active_longitude,
             utc_datetimes,
         )
         if positions:
@@ -284,10 +286,11 @@ def _visibility_samples_for_solar_body(self, body_name, start_utc):
         start_utc + datetime.timedelta(hours=offset)
         for offset in offsets
     ]
+    active_latitude, active_longitude = self._active_site_coordinates()
     positions = compute_solar_system_body_positions(
         body_name,
-        self.latitude,
-        self.longitude,
+        active_latitude,
+        active_longitude,
         utc_datetimes,
     )
     if not positions:
@@ -451,7 +454,8 @@ def _visibility_samples_with_extrema(self, samples, *extrema):
 def _visibility_sun_samples(self, start_utc):
     offsets = [step / 4 for step in range(97)]
     utc_datetimes = [start_utc + datetime.timedelta(hours=offset) for offset in offsets]
-    altitudes = compute_sun_altitudes(self.latitude, self.longitude, utc_datetimes)
+    active_latitude, active_longitude = self._active_site_coordinates()
+    altitudes = compute_sun_altitudes(active_latitude, active_longitude, utc_datetimes)
     return [
         {"offset_hours": offset, "altitude": altitude}
         for offset, altitude in zip(offsets, altitudes)
@@ -1171,6 +1175,7 @@ def _update_visibility_chart(self, state=None):
         self._visibility_window_context()
     )
     minute_bucket = int(time.time() // 60)
+    active_latitude, active_longitude = self._active_site_coordinates()
     cache_key = (
         width,
         height,
@@ -1182,8 +1187,8 @@ def _update_visibility_chart(self, state=None):
         self._target_display_label(),
         round(ra_hours, 5),
         round(declination, 5),
-        round(self.latitude, 5),
-        round(self.longitude, 5),
+        round(active_latitude, 5),
+        round(active_longitude, 5),
     )
     if cache_key == self.visibility_cache_key:
         return

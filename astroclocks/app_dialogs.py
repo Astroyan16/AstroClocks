@@ -17,8 +17,11 @@ from astroclocks.double_star_catalog import build_wds_notes_url, fetch_wds_notes
 from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS
 from astroclocks.orbit_catalog import orbit_position_at_year, sample_orbit_points
 from astroclocks.settings import (
+    COORDINATE_SOURCE_APP,
+    COORDINATE_SOURCE_MOUNT,
     DEFAULT_ALADIN_FOV_DEG,
     DEFAULT_COUNTRY,
+    DEFAULT_COORDINATE_SOURCE,
     DEFAULT_DAYLIGHT_SAVING_ENABLED,
     DEFAULT_DECLINATION_OFFSET_ENABLED,
     DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
@@ -599,6 +602,19 @@ def open_settings_dialog(app):
     mount_show_reticle_var = tk.BooleanVar(value=app.mount_show_reticle)
     hour_angle_offset_var = tk.BooleanVar(value=app.hour_angle_offset_enabled)
     declination_offset_var = tk.BooleanVar(value=app.declination_offset_enabled)
+    coordinate_source_labels = {
+        COORDINATE_SOURCE_APP: app._tr("settings.coordinate_source_app"),
+        COORDINATE_SOURCE_MOUNT: app._tr("settings.coordinate_source_mount"),
+    }
+    coordinate_source_lookup = {
+        label: code for code, label in coordinate_source_labels.items()
+    }
+    coordinate_source_var = tk.StringVar(
+        value=coordinate_source_labels.get(
+            app.coordinate_source,
+            coordinate_source_labels[DEFAULT_COORDINATE_SOURCE],
+        )
+    )
 
     body = tk.Frame(dialog, bg=app.gbg, padx=18, pady=16)
     body.grid(column=0, row=0, sticky="nsew")
@@ -827,6 +843,19 @@ def open_settings_dialog(app):
         wraplength=360,
     )
     mount_driver_label.grid(column=1, row=0, sticky="ew")
+    add_label(mount_tab, 1, app._tr("settings.coordinate_source"))
+    coordinate_source_combo = ttk.Combobox(
+        mount_tab,
+        textvariable=coordinate_source_var,
+        values=[
+            coordinate_source_labels[COORDINATE_SOURCE_APP],
+            coordinate_source_labels[COORDINATE_SOURCE_MOUNT],
+        ],
+        font=Font(family="Segoe UI", size=10),
+        width=42,
+        state="readonly",
+    )
+    coordinate_source_combo.grid(column=1, row=1, pady=7, sticky="ew")
     mount_reticle_row = tk.Frame(mount_options, bg=app.gbg)
     mount_reticle_row.grid(column=0, row=1, columnspan=2, sticky="w", pady=(6, 0))
     mount_reticle_toggle = tk.Checkbutton(
@@ -877,14 +906,18 @@ def open_settings_dialog(app):
     mount_actions = tk.Frame(mount_options, bg=app.gbg)
     mount_actions.grid(column=0, row=3, columnspan=2, sticky="w")
 
-    def refresh_mount_state(state=None):
-        state = state or app.mount_settings_state()
-        mount_driver_var.set(state["driver_label"])
-        mount_status_var.set(state["status_text"])
-        mount_status_label.config(fg=state["status_color"])
-        mount_driver_label.config(
-            fg=app.text if state["driver_label"] != app._tr("mount.driver.none") else app.muted
-        )
+    def set_mount_busy(status_text):
+        mount_status_label.config(fg=app.accent)
+        mount_status_var.set(status_text)
+        choose_mount_button.config(state=tk.DISABLED)
+        connect_mount_button.config(state=tk.DISABLED)
+        disconnect_mount_button.config(state=tk.DISABLED)
+        try:
+            dialog.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def apply_mount_button_states(state):
         choose_mount_button.config(
             state=tk.NORMAL if state["available"] else tk.DISABLED
         )
@@ -895,26 +928,42 @@ def open_settings_dialog(app):
             state=tk.NORMAL if state["connected"] else tk.DISABLED
         )
 
+    def refresh_mount_state(state=None):
+        state = state or app.mount_settings_state()
+        mount_driver_var.set(state["driver_label"])
+        mount_status_var.set(state["status_text"])
+        mount_status_label.config(fg=state["status_color"])
+        mount_driver_label.config(
+            fg=app.text if state["driver_label"] != app._tr("mount.driver.none") else app.muted
+        )
+        apply_mount_button_states(state)
+
     def choose_mount():
         try:
+            set_mount_busy(app._tr("mount.status.choosing"))
             refresh_mount_state(app.choose_ascom_mount_driver())
         except Exception as exc:
             mount_status_label.config(fg=app.danger)
             mount_status_var.set(app._tr("mount.status.error", error=exc))
+            apply_mount_button_states(app.mount_settings_state())
 
     def connect_mount():
         try:
+            set_mount_busy(app._tr("mount.status.connecting"))
             refresh_mount_state(app.connect_ascom_mount())
         except Exception as exc:
             mount_status_label.config(fg=app.danger)
             mount_status_var.set(app._tr("mount.status.error", error=exc))
+            apply_mount_button_states(app.mount_settings_state())
 
     def disconnect_mount():
         try:
+            set_mount_busy(app._tr("mount.status.disconnecting"))
             refresh_mount_state(app.disconnect_ascom_mount())
         except Exception as exc:
             mount_status_label.config(fg=app.danger)
             mount_status_var.set(app._tr("mount.status.error", error=exc))
+            apply_mount_button_states(app.mount_settings_state())
 
     choose_mount_button = app._build_button(
         mount_actions,
@@ -935,6 +984,35 @@ def open_settings_dialog(app):
     )
     disconnect_mount_button.grid(column=2, row=0)
     refresh_mount_state(mount_state)
+
+    mount_refresh_job = {"id": None}
+
+    def refresh_mount_state_loop():
+        try:
+            if not dialog.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        refresh_mount_state()
+        try:
+            mount_refresh_job["id"] = dialog.after(500, refresh_mount_state_loop)
+        except tk.TclError:
+            mount_refresh_job["id"] = None
+
+    def cancel_mount_state_loop(event=None):
+        if event is not None and event.widget is not dialog:
+            return
+        job = mount_refresh_job["id"]
+        if job is None:
+            return
+        mount_refresh_job["id"] = None
+        try:
+            dialog.after_cancel(job)
+        except tk.TclError:
+            pass
+
+    refresh_mount_state_loop()
+    dialog.bind("<Destroy>", cancel_mount_state_loop, add="+")
 
     hint = tk.Label(
         body,
@@ -963,6 +1041,7 @@ def open_settings_dialog(app):
         sky_show_altaz_grid_var.set(DEFAULT_SKY_SHOW_ALTAZ_GRID)
         sky_show_equatorial_grid_var.set(DEFAULT_SKY_SHOW_EQUATORIAL_GRID)
         sky_show_solar_system_var.set(DEFAULT_SKY_SHOW_SOLAR_SYSTEM)
+        coordinate_source_var.set(coordinate_source_labels[DEFAULT_COORDINATE_SOURCE])
         mount_show_reticle_var.set(DEFAULT_MOUNT_SHOW_RETICLE)
         hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
         declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
@@ -1010,11 +1089,16 @@ def open_settings_dialog(app):
                 return
 
         selected_language = language_lookup.get(language_var.get(), app.language)
+        selected_coordinate_source = coordinate_source_lookup.get(
+            coordinate_source_var.get(),
+            DEFAULT_COORDINATE_SOURCE,
+        )
         app.language = selected_language
         app.site_name = site_var.get().strip() or app._tr("settings.custom_site")
         app.country = country_var.get().strip() or DEFAULT_COUNTRY
         app.latitude = latitude
         app.longitude = longitude
+        app.coordinate_source = selected_coordinate_source
         app.timezone_name = timezone_name
         app.daylight_saving_enabled = (
             daylight_saving_var.get() if timezone_name else DEFAULT_DAYLIGHT_SAVING_ENABLED
@@ -1025,10 +1109,9 @@ def open_settings_dialog(app):
         app.sky_show_equatorial_grid = sky_show_equatorial_grid_var.get()
         app.sky_show_solar_system = sky_show_solar_system_var.get()
         app.mount_show_reticle = mount_show_reticle_var.get()
-        app.solar_system_cache_key = None
         app.hour_angle_offset_enabled = hour_angle_offset_var.get()
         app.declination_offset_enabled = declination_offset_var.get()
-        app.sky_map_cache_key = None
+        app._invalidate_site_dependent_state()
         app._save_current_settings()
         app._refresh_language_texts()
         dialog.destroy()

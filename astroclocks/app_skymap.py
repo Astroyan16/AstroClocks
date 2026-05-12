@@ -519,18 +519,19 @@ def _collect_star_catalog(self, center_x, center_y, radius, lst_hours):
 
 
 def _solar_system_positions(self):
+    active_latitude, active_longitude = self._active_site_coordinates()
     cache_key = (
         int(time.time() // SOLAR_SYSTEM_CACHE_SECONDS),
-        round(self.latitude, 5),
-        round(self.longitude, 5),
+        round(active_latitude, 5),
+        round(active_longitude, 5),
     )
     if cache_key == self.solar_system_cache_key:
         return self.solar_system_cache
 
     try:
         self.solar_system_cache = compute_solar_system_positions(
-            self.latitude,
-            self.longitude,
+            active_latitude,
+            active_longitude,
         )
         self.solar_system_cache_key = cache_key
     except Exception:
@@ -583,10 +584,58 @@ def _collect_solar_system_objects(self, center_x, center_y, radius, lst_hours):
 
 def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azimuth, label):
     x, y, visible = self._project_target(center_x, center_y, radius, altitude, azimuth)
-    if visible and altitude < 10:
-        marker_color = app_visibility.TARGET_LOW_ALTITUDE_COLOR
-    else:
-        marker_color = self.success if visible else self.danger
+    marker_color = self._target_marker_color(altitude, visible)
+    label_font = Font(family="Segoe UI", size=9, weight="bold")
+    if not visible:
+        dx = x - center_x
+        dy = y - center_y
+        length = math.hypot(dx, dy) or 1
+        ux = dx / length
+        uy = dy / length
+        nx = -uy
+        ny = ux
+        start_x = x - ux * 24
+        start_y = y - uy * 24
+        end_x = x + ux * 10
+        end_y = y + uy * 10
+        canvas.create_line(
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            fill=marker_color,
+            width=3,
+            arrow=tk.LAST,
+            arrowshape=(12, 14, 6),
+        )
+        canvas_width = max(1, int(canvas.winfo_width()))
+        canvas_height = max(1, int(canvas.winfo_height()))
+        text_width = label_font.measure(label)
+        base_x = x - ux * 30
+        base_y = y - uy * 30
+        label_x = base_x + nx * 14
+        label_y = base_y + ny * 14
+        for side in (1, -1):
+            candidate_x = base_x + nx * 14 * side
+            candidate_y = base_y + ny * 14 * side
+            if (
+                14 + text_width / 2 <= candidate_x <= canvas_width - 14 - text_width / 2
+                and 14 <= candidate_y <= canvas_height - 14
+            ):
+                label_x = candidate_x
+                label_y = candidate_y
+                break
+        label_x = min(max(14 + text_width / 2, label_x), canvas_width - 14 - text_width / 2)
+        label_y = min(max(14, label_y), canvas_height - 14)
+        canvas.create_text(
+            label_x,
+            label_y,
+            text=label,
+            fill=marker_color,
+            font=label_font,
+            anchor="center",
+        )
+        return visible
     canvas.create_oval(x - 11, y - 11, x + 11, y + 11, outline=marker_color, width=2)
     canvas.create_line(x - 17, y, x + 17, y, fill=marker_color, width=2)
     canvas.create_line(x, y - 17, x, y + 17, fill=marker_color, width=2)
@@ -595,7 +644,7 @@ def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azim
         y + 26,
         text=label,
         fill=marker_color,
-        font=Font(family="Segoe UI", size=9, weight="bold"),
+        font=label_font,
     )
     return visible
 
@@ -680,7 +729,7 @@ def _draw_hover_overlay(self, x, y, sky_object=None):
         return
 
     self.sky_canvas.delete("sky-hover")
-    color = sky_object.get("hover_color", self.fg) if sky_object else self.accent
+    color = self.accent
     if sky_object:
         x = sky_object["x"]
         y = sky_object["y"]
@@ -744,7 +793,7 @@ def _draw_hover_overlay(self, x, y, sky_object=None):
         self.sky_canvas.tag_lower(rect_id, text_id)
 
 
-def _set_sky_status(self, text, highlights=()):
+def _set_sky_status(self, text, highlights=(), color_highlights=()):
     if self.sky_status is None:
         return
 
@@ -752,6 +801,22 @@ def _set_sky_status(self, text, highlights=()):
     self.sky_status.delete("1.0", tk.END)
     self.sky_status.insert("1.0", text)
     self.sky_status.tag_remove("danger", "1.0", tk.END)
+    for tag_name in self.sky_status.tag_names():
+        if tag_name.startswith("status-color-"):
+            self.sky_status.tag_remove(tag_name, "1.0", tk.END)
+    for highlight, color in color_highlights:
+        if not highlight or not color:
+            continue
+        tag_name = f"status-color-{color.lstrip('#')}"
+        self.sky_status.tag_configure(tag_name, foreground=color)
+        start = "1.0"
+        while True:
+            index = self.sky_status.search(highlight, start, tk.END)
+            if not index:
+                break
+            end = f"{index}+{len(highlight)}c"
+            self.sky_status.tag_add(tag_name, index, end)
+            start = end
     for highlight in highlights:
         if not highlight:
             continue
@@ -763,36 +828,51 @@ def _set_sky_status(self, text, highlights=()):
             end = f"{index}+{len(highlight)}c"
             self.sky_status.tag_add("danger", index, end)
             start = end
+    self.sky_status.tag_raise("danger")
     self.sky_status.config(state=tk.DISABLED)
 
 
+def _sky_star_count_line(self):
+    return self._tr("sky.star_count", count=len(self.sky_star_points))
+
+
 def _sky_inactive_status(self):
-    status = self._tr("sky.no_target", count=len(self.sky_star_points))
+    count_line = self._sky_star_count_line()
+    status = self._tr("sky.no_target")
     if not self.sky_geometry:
-        return status
+        return f"{count_line}\n{status}"
     mount_line = self._mount_status_line(self.sky_geometry["lst_hours"])
     if not mount_line:
-        return status
-    return f"{status}\n{mount_line}"
+        return f"{count_line}\n{status}"
+    return f"{count_line}\n{status}\n{mount_line}"
 
 
 def _update_sky_hover(self):
     if self.sky_hover_position is None:
         if self.sky_canvas is not None:
             self.sky_canvas.delete("sky-hover")
-        self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
+        self._set_sky_status(
+            self.sky_base_status,
+            self.sky_base_status_highlights,
+            self.sky_base_status_color_highlights,
+        )
         return
 
     x, y = self.sky_hover_position
     coordinates = self._sky_coordinates_from_canvas(x, y)
     if coordinates is None:
         self.sky_canvas.delete("sky-hover")
-        self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
+        self._set_sky_status(
+            self.sky_base_status,
+            self.sky_base_status_highlights,
+            self.sky_base_status_color_highlights,
+        )
         return
 
     sky_object = self._nearest_sky_object(x, y)
     self._draw_hover_overlay(x, y, sky_object)
 
+    line_color = self.accent
     if sky_object:
         jnow_status = self._format_jnow_horizontal_status(
             sky_object["ra_hours"],
@@ -800,10 +880,9 @@ def _update_sky_hover(self):
             sky_object["altitude"],
             sky_object["azimuth"],
             sky_object["hour_angle"],
+            include_hour_angle=False,
         )
         label = f"{sky_object.get('label', sky_object['name'])} | {jnow_status}"
-        if "magnitude" in sky_object:
-            label = f"{label} | mag {sky_object['magnitude']:.2f}"
     else:
         ra_hours, declination, hour_angle, altitude, azimuth = coordinates
         jnow_status = self._format_jnow_horizontal_status(
@@ -812,15 +891,25 @@ def _update_sky_hover(self):
             altitude,
             azimuth,
             hour_angle,
+            include_hour_angle=False,
         )
         label = f"{self._tr('sky.pointer')} | {jnow_status}"
 
     now = time.monotonic()
     if now - self.sky_last_status_update_time >= 0.12:
         self.sky_last_status_update_time = now
+        count_line = self._sky_star_count_line()
+        base_status = self.sky_base_status
+        if base_status.startswith(f"{count_line}\n"):
+            base_status = base_status[len(count_line) + 1 :]
         self._set_sky_status(
-            f"{label}\n{self.sky_base_status}",
+            f"{count_line}\n{label}\n{base_status}",
             self.sky_base_status_highlights,
+            (
+                (count_line, self.text),
+                (label, line_color),
+                *self.sky_base_status_color_highlights,
+            ),
         )
 
 
@@ -843,7 +932,11 @@ def _on_sky_leave(self, _event):
         self.sky_canvas.delete("sky-hover")
     if self.sky_status is not None:
         self.sky_last_status_update_time = 0
-        self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
+        self._set_sky_status(
+            self.sky_base_status,
+            self.sky_base_status_highlights,
+            self.sky_base_status_color_highlights,
+        )
 
 
 def _on_sky_click(self, event):
@@ -975,6 +1068,7 @@ def _update_sky_map(self, state=None):
     if not self.target_active:
         self.sky_base_status = self._sky_inactive_status()
         self.sky_base_status_highlights = ()
+        self.sky_base_status_color_highlights = ((self._sky_star_count_line(), self.text),)
         self._set_sky_status(self.sky_base_status)
         self._update_sky_hover()
         return
@@ -1011,25 +1105,32 @@ def _update_sky_map(self, state=None):
     else:
         chart_note = self._tr("sky.below_horizon")
     altitude_text = f"{target_altitude:+.2f}"
-    self.sky_base_status = self._tr(
+    target_status_line = self._tr(
         "sky.status",
         target=self._target_display_label(),
-        ha=self._format_unsigned_hms_compact(
-            self._display_hour_angle(target_ra_hours, lst_hours)
-        ),
+        ra=self._format_unsigned_hms_compact(target_ra_hours),
         dec=self._format_signed_dms_compact(target_declination),
         altitude=altitude_text,
         azimuth=f"{target_azimuth:05.1f}",
         note=chart_note,
-        count=len(self.sky_star_points),
     )
+    count_line = self._sky_star_count_line()
+    self.sky_base_status = f"{count_line}\n{target_status_line}"
     mount_line = self._mount_status_line(lst_hours)
     if mount_line:
         self.sky_base_status = f"{self.sky_base_status}\n{mount_line}"
     self.sky_base_status_highlights = (
         () if target_visible else (f"Alt = {altitude_text}\N{DEGREE SIGN}", chart_note)
     )
-    self._set_sky_status(self.sky_base_status, self.sky_base_status_highlights)
+    self.sky_base_status_color_highlights = (
+        (count_line, self.text),
+        (target_status_line, self._target_marker_color(target_altitude, target_visible)),
+    )
+    self._set_sky_status(
+        self.sky_base_status,
+        self.sky_base_status_highlights,
+        self.sky_base_status_color_highlights,
+    )
     self._update_sky_hover()
 
 def install_skymap_methods(app_class):
@@ -1060,6 +1161,7 @@ def install_skymap_methods(app_class):
     app_class._nearest_sky_object = _nearest_sky_object
     app_class._draw_hover_overlay = _draw_hover_overlay
     app_class._set_sky_status = _set_sky_status
+    app_class._sky_star_count_line = _sky_star_count_line
     app_class._sky_inactive_status = _sky_inactive_status
     app_class._update_sky_hover = _update_sky_hover
     app_class._run_sky_hover_update = _run_sky_hover_update

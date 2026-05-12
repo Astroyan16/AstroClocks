@@ -52,6 +52,22 @@ TRANSLATIONS = {
         "about.update.downloading": "Downloading installer for v{version}...",
         "about.update.launching": "Installer launched. AstroClocks will now close.",
         "about.update.error": "Unable to check for updates: {error}",
+        "update.error.feed_unavailable": "GitHub releases are unavailable or still private.",
+        "update.error.rate_limit": "GitHub is temporarily rate-limiting update checks.",
+        "update.error.timeout": "The update server did not respond in time.",
+        "update.error.invalid_format": "The update feed format is invalid.",
+        "update.error.unreadable_data": "The update feed returned unreadable data.",
+        "update.error.invalid_json": "The update feed returned invalid JSON.",
+        "update.error.incoherent_release": "The published Windows release metadata is inconsistent.",
+        "update.error.no_release": "No public Windows installer release is currently available.",
+        "update.error.invalid_metadata": "The installer metadata is invalid.",
+        "update.error.empty_installer": "The downloaded installer is empty.",
+        "update.error.http": "The update server returned an unexpected HTTP error.",
+        "update.error.network": "A network error occurred while contacting the update server.",
+        "update.error.read_failed": "The update feed could not be read.",
+        "update.error.installer_not_found": "The downloaded installer could not be found.",
+        "update.error.launch_failed": "The installer could not be launched.",
+        "update.error.generic": "An unexpected update error occurred.",
         "about.month.1": "January",
         "about.month.2": "February",
         "about.month.3": "March",
@@ -107,6 +123,9 @@ TRANSLATIONS = {
         "settings.sky_show_solar_system": "Show main solar system objects",
         "settings.mount": "ASCOM mount",
         "settings.mount_driver": "Selected driver",
+        "settings.coordinate_source": "Coordinate source",
+        "settings.coordinate_source_app": "AstroClocks settings",
+        "settings.coordinate_source_mount": "ASCOM mount",
         "settings.mount_show_reticle": "Show telescope reticle on the sky map",
         "settings.mount_choose": "Choose...",
         "settings.mount_connect": "Connect",
@@ -124,6 +143,7 @@ TRANSLATIONS = {
         "site.timezone": "Time zone : {value}",
         "timezone.daylight_saving_active": "daylight saving time",
         "site.local_date": "Local date : {value}",
+        "site.mount_location": "Mount location (ASCOM)",
         "site.latitude": "Latitude : {value}",
         "site.longitude": "Longitude : {value}",
         "button.aladin": "Aladin {value:.2f}\N{DEGREE SIGN}",
@@ -153,11 +173,12 @@ TRANSLATIONS = {
         "sky.above_horizon": "above horizon",
         "sky.low_horizon": "low above horizon",
         "sky.below_horizon": "below horizon",
-        "sky.no_target": "No target selected | {count} named stars visible",
+        "sky.star_count": "{count} named stars visible",
+        "sky.no_target": "No target selected",
         "sky.status": (
-            "{target} : HA = {ha} ; DEC = {dec} | "
+            "{target} | JNow : RA = {ra} ; DEC = {dec} | "
             "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}\n"
-            "Target visibility : {note} | {count} named stars visible"
+            "Target visibility : {note}"
         ),
         "sky.mount_status": (
             "{label} : RA = {ra} ; DEC = {dec} | "
@@ -171,15 +192,49 @@ TRANSLATIONS = {
         "mount.frame.j2050": "J2050",
         "mount.frame.b1950": "B1950",
         "mount.frame.other": "Other frame",
+        "coordinate_source.app": "AstroClocks settings",
+        "coordinate_source.mount": "ASCOM mount",
+        "coordinate_source.mount_fallback": "AstroClocks settings (ASCOM mount unavailable)",
         "mount.status.unavailable_short": "ASCOM is unavailable",
         "mount.status.unavailable": "ASCOM mount support is unavailable: {error}",
         "mount.status.not_configured": "Select an ASCOM telescope driver to connect a mount.",
         "mount.status.selected": "Selected driver: {name}",
+        "mount.status.choosing": "Opening the ASCOM driver chooser...",
+        "mount.status.connecting": "Connecting to the ASCOM mount...",
+        "mount.status.disconnecting": "Disconnecting the ASCOM mount...",
         "mount.status.connected": "Connected to mount: {name}",
+        "mount.status.connected_pending": "Connected to {name} | Waiting for coordinates...",
         "mount.status.connected_coords": (
-            "Connected to {name} | RA = {ra} ; DEC = {dec} | Frame: {frame}"
+            "Connected to {name} | Frame: {frame} | Tracking: {tracking}"
         ),
         "mount.status.error": "ASCOM mount error: {error}",
+        "mount.tracking.on": "on",
+        "mount.tracking.off": "off",
+        "mount.tracking.unknown": "unknown",
+        "mount.tracking.sidereal": "sidereal",
+        "mount.tracking.lunar": "lunar",
+        "mount.tracking.solar": "solar",
+        "mount.tracking.king": "king",
+        "mount.error.unavailable": "ASCOM is unavailable.",
+        "mount.error.unavailable_pywin32": "ASCOM support requires pywin32 on Windows.",
+        "mount.error.platform_missing": "The ASCOM Platform chooser is not installed on this computer.",
+        "mount.error.no_driver": "No ASCOM telescope driver is selected.",
+        "mount.error.chooser_failed": "Unable to open the ASCOM mount chooser.",
+        "mount.error.driver_create_failed": "Unable to initialize the selected ASCOM driver.",
+        "mount.error.connect_failed": (
+            "Unable to connect to the ASCOM mount. Check that it is powered on and "
+            "available through the selected driver."
+        ),
+        "mount.error.synscan_unavailable": (
+            "Unable to reach SynScan or the mount through SynScan. Check that SynScan is "
+            "running and that the mount is connected in SynScan."
+        ),
+        "mount.error.disconnect_failed": "Unable to disconnect the ASCOM mount cleanly.",
+        "mount.error.not_connected": "The ASCOM mount is not connected.",
+        "mount.error.disconnected": "The ASCOM mount is disconnected.",
+        "mount.error.read_state_failed": "Unable to read the ASCOM mount connection state.",
+        "mount.error.read_coordinates_failed": "Unable to read the ASCOM mount coordinates.",
+        "mount.error.generic": "The ASCOM mount returned an unexpected error.",
         "visibility.title": "Altitude curve, noon to noon",
         "visibility.title_named": "Altitude of {target} between {start_date} and {end_date}",
         "visibility.axis": "Local time",
@@ -463,6 +518,22 @@ TRANSLATIONS = {
         "about.update.downloading": "Téléchargement de l'installateur v{version}...",
         "about.update.launching": "Installateur lancé. AstroClocks va maintenant se fermer.",
         "about.update.error": "Impossible de vérifier les mises à jour : {error}",
+        "update.error.feed_unavailable": "Les releases GitHub sont indisponibles ou encore privées.",
+        "update.error.rate_limit": "GitHub limite temporairement les vérifications de mise à jour.",
+        "update.error.timeout": "Le serveur de mise à jour n'a pas répondu à temps.",
+        "update.error.invalid_format": "Le format du flux de mise à jour est invalide.",
+        "update.error.unreadable_data": "Le flux de mise à jour a renvoyé des données illisibles.",
+        "update.error.invalid_json": "Le flux de mise à jour a renvoyé un JSON invalide.",
+        "update.error.incoherent_release": "Les métadonnées de la release Windows publiée sont incohérentes.",
+        "update.error.no_release": "Aucune release publique d'installateur Windows n'est disponible pour le moment.",
+        "update.error.invalid_metadata": "Les métadonnées de l'installateur sont invalides.",
+        "update.error.empty_installer": "L'installateur téléchargé est vide.",
+        "update.error.http": "Le serveur de mise à jour a renvoyé une erreur HTTP inattendue.",
+        "update.error.network": "Une erreur réseau s'est produite lors du contact avec le serveur de mise à jour.",
+        "update.error.read_failed": "Le flux de mise à jour n'a pas pu être lu.",
+        "update.error.installer_not_found": "L'installateur téléchargé est introuvable.",
+        "update.error.launch_failed": "L'installateur n'a pas pu être lancé.",
+        "update.error.generic": "Une erreur inattendue est survenue pendant la mise à jour.",
         "about.month.1": "Janvier",
         "about.month.2": "Février",
         "about.month.3": "Mars",
@@ -518,6 +589,9 @@ TRANSLATIONS = {
         "settings.sky_show_solar_system": "Afficher les principaux objets du système solaire",
         "settings.mount": "Monture ASCOM",
         "settings.mount_driver": "Driver sélectionné",
+        "settings.coordinate_source": "Source des coordonnées",
+        "settings.coordinate_source_app": "Paramètres AstroClocks",
+        "settings.coordinate_source_mount": "Monture ASCOM",
         "settings.mount_show_reticle": "Afficher le réticule Télescope sur la carte du ciel",
         "settings.mount_choose": "Choisir...",
         "settings.mount_connect": "Connecter",
@@ -535,6 +609,7 @@ TRANSLATIONS = {
         "site.timezone": "Fuseau horaire : {value}",
         "timezone.daylight_saving_active": "heure d'été",
         "site.local_date": "Date locale : {value}",
+        "site.mount_location": "Localisation de la monture (ASCOM)",
         "site.latitude": "Latitude : {value}",
         "site.longitude": "Longitude : {value}",
         "button.aladin": "Aladin {value:.2f}\N{DEGREE SIGN}",
@@ -564,11 +639,12 @@ TRANSLATIONS = {
         "sky.above_horizon": "au-dessus de l'horizon",
         "sky.low_horizon": "basse sur l'horizon",
         "sky.below_horizon": "sous l'horizon",
-        "sky.no_target": "Aucune cible sélectionnée | {count} étoiles nommées visibles",
+        "sky.star_count": "{count} étoiles nommées visibles",
+        "sky.no_target": "Aucune cible sélectionnée",
         "sky.status": (
-            "{target} : AH = {ha} ; DEC = {dec} | "
+            "{target} | JNow : RA = {ra} ; DEC = {dec} | "
             "Alt = {altitude}\N{DEGREE SIGN} ; Az = {azimuth}\N{DEGREE SIGN}\n"
-            "Visibilité de la cible : {note} | {count} étoiles nommées visibles"
+            "Visibilité de la cible : {note}"
         ),
         "sky.mount_status": (
             "{label} : RA = {ra} ; DEC = {dec} | "
@@ -582,15 +658,49 @@ TRANSLATIONS = {
         "mount.frame.j2050": "J2050",
         "mount.frame.b1950": "B1950",
         "mount.frame.other": "Repère inconnu",
+        "coordinate_source.app": "Paramètres AstroClocks",
+        "coordinate_source.mount": "Monture ASCOM",
+        "coordinate_source.mount_fallback": "Paramètres AstroClocks (monture ASCOM indisponible)",
         "mount.status.unavailable_short": "ASCOM est indisponible",
         "mount.status.unavailable": "Le support des montures ASCOM est indisponible : {error}",
         "mount.status.not_configured": "Choisissez un driver ASCOM de télescope pour connecter une monture.",
         "mount.status.selected": "Driver sélectionné : {name}",
+        "mount.status.choosing": "Ouverture du sélecteur de driver ASCOM...",
+        "mount.status.connecting": "Connexion à la monture ASCOM...",
+        "mount.status.disconnecting": "Déconnexion de la monture ASCOM...",
         "mount.status.connected": "Monture connectée : {name}",
+        "mount.status.connected_pending": "Connectée à {name} | En attente des coordonnées...",
         "mount.status.connected_coords": (
-            "Connectée à {name} | RA = {ra} ; DEC = {dec} | Repère : {frame}"
+            "Connectée à {name} | Repère : {frame} | Suivi : {tracking}"
         ),
         "mount.status.error": "Erreur de monture ASCOM : {error}",
+        "mount.tracking.on": "activé",
+        "mount.tracking.off": "désactivé",
+        "mount.tracking.unknown": "inconnu",
+        "mount.tracking.sidereal": "sidéral",
+        "mount.tracking.lunar": "lunaire",
+        "mount.tracking.solar": "solaire",
+        "mount.tracking.king": "King",
+        "mount.error.unavailable": "ASCOM est indisponible.",
+        "mount.error.unavailable_pywin32": "Le support ASCOM nécessite pywin32 sous Windows.",
+        "mount.error.platform_missing": "Le sélecteur de la plateforme ASCOM n'est pas installé sur cet ordinateur.",
+        "mount.error.no_driver": "Aucun driver ASCOM de télescope n'est sélectionné.",
+        "mount.error.chooser_failed": "Impossible d'ouvrir le sélecteur de monture ASCOM.",
+        "mount.error.driver_create_failed": "Impossible d'initialiser le driver ASCOM sélectionné.",
+        "mount.error.connect_failed": (
+            "Impossible de connecter la monture ASCOM. Vérifiez qu'elle est allumée et "
+            "accessible via le driver sélectionné."
+        ),
+        "mount.error.synscan_unavailable": (
+            "Impossible de joindre SynScan ou la monture via SynScan. Vérifiez que "
+            "SynScan est lancé et que la monture y est connectée."
+        ),
+        "mount.error.disconnect_failed": "Impossible de déconnecter proprement la monture ASCOM.",
+        "mount.error.not_connected": "La monture ASCOM n'est pas connectée.",
+        "mount.error.disconnected": "La monture ASCOM est déconnectée.",
+        "mount.error.read_state_failed": "Impossible de lire l'état de connexion de la monture ASCOM.",
+        "mount.error.read_coordinates_failed": "Impossible de lire les coordonnées de la monture ASCOM.",
+        "mount.error.generic": "La monture ASCOM a renvoyé une erreur inattendue.",
         "visibility.title": "Courbe d'altitude 12h-12h",
         "visibility.title_named": "Altitude de {target} entre le {start_date} et le {end_date}",
         "visibility.axis": "Temps local",

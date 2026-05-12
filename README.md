@@ -1,6 +1,6 @@
 # AstroClocks
 
-AstroClocks v3.3.3 est une application d'aide a l'observation astronomique
+AstroClocks v3.3.4 est une application d'aide a l'observation astronomique
 pour Windows. Elle affiche en temps reel l'heure civile, l'UTC, les temps
 sideraux, les coordonnees JNow/J2000, l'angle horaire, une carte du ciel
 locale, ainsi que plusieurs outils de recherche et de preparation
@@ -18,6 +18,8 @@ d'observations.
 - Recherche d'etoiles avec filtres spectraux, photometriques et de visibilite.
 - Integration ASCOM sur Windows pour connecter une monture, recuperer ses
   coordonnees et afficher un reticule `Telescope` sur la carte du ciel.
+- Choix global entre les coordonnees du logiciel et celles de la monture ASCOM
+  pour garder une base de site coherente dans toute l'application.
 - Verification des mises a jour GitHub depuis la fenetre `A propos`, avec
   verification automatique silencieuse au demarrage.
 - Fenetre de parametres organisee par onglets (`General`, `Sky`, `Mount`).
@@ -76,6 +78,11 @@ depot.
 Les versions stables publiees sont reperees par des tags Git du type
 `vX.Y.Z-stable`. La version `v3.0-stable` reste egalement conservee dans
 l'historique.
+
+## Roadmap
+
+La feuille de route de maintenance et d'evolution est disponible dans
+[ROADMAP.md](ROADMAP.md).
 
 ## Licence
 

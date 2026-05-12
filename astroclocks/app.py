@@ -47,6 +47,8 @@ from astroclocks.i18n import translate
 from astroclocks.orbit_catalog import load_cached_orb6_ephemerides, load_cached_orb6_orbits
 from astroclocks.settings import (
     AppSettings,
+    COORDINATE_SOURCE_APP,
+    COORDINATE_SOURCE_MOUNT,
     DEFAULT_DEEP_SKY_CATEGORY,
     DEFAULT_TIMEZONE_NAME,
     format_latitude_display,
@@ -76,7 +78,7 @@ CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
 SKY_MAP_CANVAS_REFRESH_SECONDS = 8
-MOUNT_POLL_INTERVAL_MS = 1500
+MOUNT_POLL_INTERVAL_MS = 250
 SKY_STAR_BRIGHTNESS_MULTIPLIER = 1.27
 SKY_RENDER_DEBUG = os.environ.get("ASTROCLOCKS_SKY_RENDER_DEBUG") == "1"
 SOLAR_SYSTEM_CACHE_SECONDS = 10
@@ -208,6 +210,7 @@ class AstroClocksApp:
         self.sky_show_solar_system = self.settings.sky_show_solar_system
         self.mount_ascom_driver_id = self.settings.mount_ascom_driver_id
         self.mount_ascom_driver_name = self.settings.mount_ascom_driver_name
+        self.coordinate_source = self.settings.coordinate_source
         self.mount_show_reticle = self.settings.mount_show_reticle
         self.timezone_name = self._normalize_timezone_name(self.settings.timezone_name)
         self.daylight_saving_enabled = self.settings.daylight_saving_enabled
@@ -228,7 +231,7 @@ class AstroClocksApp:
             self.mount_availability_error = ""
         except Exception as exc:
             self.mount_ascom_available = False
-            self.mount_availability_error = str(exc)
+            self.mount_availability_error = self._mount_error_message(exc)
         self.mount_telescope = None
         self.mount_connected = False
         self.mount_last_error = ""
@@ -258,6 +261,7 @@ class AstroClocksApp:
         self.sky_last_status_update_time = 0
         self.sky_base_status = ""
         self.sky_base_status_highlights = ()
+        self.sky_base_status_color_highlights = ()
         self.target_jnow_cache_key = None
         self.target_jnow_cache = None
         self.solar_system_cache_key = None
@@ -1025,13 +1029,22 @@ class AstroClocksApp:
             pass
 
     def check_for_updates(self, timeout=10):
-        return updater.check_for_updates(APP_VERSION, timeout=timeout)
+        try:
+            return updater.check_for_updates(APP_VERSION, timeout=timeout)
+        except Exception as exc:
+            raise RuntimeError(self._update_error_message(exc)) from exc
 
     def download_update_installer(self, release, timeout=30):
-        return updater.download_installer(release, timeout=timeout)
+        try:
+            return updater.download_installer(release, timeout=timeout)
+        except Exception as exc:
+            raise RuntimeError(self._update_error_message(exc)) from exc
 
     def launch_update_installer(self, installer_path):
-        updater.launch_installer(installer_path)
+        try:
+            updater.launch_installer(installer_path)
+        except Exception as exc:
+            raise RuntimeError(self._update_error_message(exc)) from exc
 
     def _on_close_requested(self):
         try:
@@ -1066,6 +1079,197 @@ class AstroClocksApp:
         }
         return mapping.get(equatorial_system, self._tr("mount.frame.other"))
 
+    def _coordinate_source_label(self, source_code):
+        if source_code == COORDINATE_SOURCE_MOUNT:
+            return self._tr("coordinate_source.mount")
+        return self._tr("coordinate_source.app")
+
+    def _mount_tracking_label(self, snapshot):
+        if snapshot is None:
+            return self._tr("mount.tracking.unknown")
+        if snapshot.tracking is False:
+            return self._tr("mount.tracking.off")
+
+        tracking_rate = getattr(snapshot, "tracking_rate", None)
+        tracking_labels = {
+            ascom_mount.TRACKING_RATE_SIDEREAL: "mount.tracking.sidereal",
+            ascom_mount.TRACKING_RATE_LUNAR: "mount.tracking.lunar",
+            ascom_mount.TRACKING_RATE_SOLAR: "mount.tracking.solar",
+            ascom_mount.TRACKING_RATE_KING: "mount.tracking.king",
+        }
+        if tracking_rate in tracking_labels:
+            return self._tr(tracking_labels[tracking_rate])
+        if snapshot.tracking is True:
+            return self._tr("mount.tracking.on")
+        return self._tr("mount.tracking.unknown")
+
+    def _mount_error_message(self, error):
+        text = str(error or "").strip()
+        if not text:
+            return self._tr("mount.error.generic")
+
+        lower_text = text.casefold()
+
+        if "synscan" in lower_text and (
+            "not running" in lower_text
+            or "not launched" in lower_text
+            or "connection refused" in lower_text
+            or "actively refused" in lower_text
+            or "cannot connect" in lower_text
+            or "can't connect" in lower_text
+            or "app not connected" in lower_text
+        ):
+            return self._tr("mount.error.synscan_unavailable")
+
+        exact_messages = {
+            "ASCOM support requires pywin32 on Windows.": "mount.error.unavailable_pywin32",
+            "The ASCOM Platform chooser is not installed on this computer.": (
+                "mount.error.platform_missing"
+            ),
+            "No ASCOM mount driver is selected.": "mount.error.no_driver",
+            "The ASCOM mount is not connected.": "mount.error.not_connected",
+            "The ASCOM mount is disconnected.": "mount.error.disconnected",
+        }
+        if text in exact_messages:
+            return self._tr(exact_messages[text])
+
+        prefix_messages = (
+            ("Unable to open the ASCOM mount chooser:", "mount.error.chooser_failed"),
+            ("Unable to create the ASCOM mount driver:", "mount.error.driver_create_failed"),
+            ("Unable to connect to the ASCOM mount:", "mount.error.connect_failed"),
+            ("Unable to disconnect the ASCOM mount:", "mount.error.disconnect_failed"),
+            (
+                "Unable to read the ASCOM mount connection state:",
+                "mount.error.read_state_failed",
+            ),
+            (
+                "Unable to read the ASCOM mount coordinates:",
+                "mount.error.read_coordinates_failed",
+            ),
+        )
+        for prefix, key in prefix_messages:
+            if text.startswith(prefix):
+                return self._tr(key)
+
+        return self._tr("mount.error.generic")
+
+    def _mount_connect_error_message(self, error):
+        text = str(error or "").strip()
+        if not text:
+            return self._tr("mount.error.connect_failed")
+
+        lower_text = text.casefold()
+        if "synscan" in lower_text and (
+            "not running" in lower_text
+            or "not launched" in lower_text
+            or "connection refused" in lower_text
+            or "actively refused" in lower_text
+            or "cannot connect" in lower_text
+            or "can't connect" in lower_text
+            or "app not connected" in lower_text
+        ):
+            return self._tr("mount.error.synscan_unavailable")
+
+        if text in {
+            "The ASCOM mount is not connected.",
+            "The ASCOM mount is disconnected.",
+        }:
+            return self._mount_error_message(error)
+
+        for prefix in (
+            "Unable to read the ASCOM mount connection state:",
+            "Unable to read the ASCOM mount coordinates:",
+        ):
+            if text.startswith(prefix):
+                return self._tr("mount.error.connect_failed")
+
+        return self._mount_error_message(error)
+
+    def _update_error_message(self, error):
+        text = str(error or "").strip()
+        if not text:
+            return self._tr("update.error.generic")
+
+        exact_messages = {
+            "Update feed unavailable. GitHub releases may be private or missing.": (
+                "update.error.feed_unavailable"
+            ),
+            "GitHub rate limit reached while accessing the update server. Please try again later.": (
+                "update.error.rate_limit"
+            ),
+            "Update request timed out.": "update.error.timeout",
+            "Unexpected update feed format.": "update.error.invalid_format",
+            "Update feed returned unreadable data.": "update.error.unreadable_data",
+            "Update feed returned invalid JSON.": "update.error.invalid_json",
+            "Update feed contains incoherent Windows release metadata.": (
+                "update.error.incoherent_release"
+            ),
+            "No installable public Windows release was found.": "update.error.no_release",
+            "Installer metadata is invalid.": "update.error.invalid_metadata",
+            "Downloaded installer is empty.": "update.error.empty_installer",
+        }
+        if text in exact_messages:
+            return self._tr(exact_messages[text])
+
+        prefix_messages = (
+            ("Update server returned HTTP ", "update.error.http"),
+            ("Network error while accessing the update server:", "update.error.network"),
+            ("Unable to read the update feed:", "update.error.read_failed"),
+            ("Installer not found:", "update.error.installer_not_found"),
+            ("Unable to launch installer:", "update.error.launch_failed"),
+        )
+        for prefix, key in prefix_messages:
+            if text.startswith(prefix):
+                return self._tr(key)
+
+        return self._tr("update.error.generic")
+
+    def _mount_site_coordinates(self, snapshot=None):
+        snapshot = snapshot or self.mount_last_snapshot
+        if snapshot is None:
+            return None
+        site_latitude = getattr(snapshot, "site_latitude", None)
+        site_longitude = getattr(snapshot, "site_longitude", None)
+        if site_latitude is None or site_longitude is None:
+            return None
+        return site_latitude, site_longitude
+
+    def _active_site_context(self):
+        stored_coordinates = (self.latitude, self.longitude)
+        if self.coordinate_source == COORDINATE_SOURCE_MOUNT:
+            mount_coordinates = self._mount_site_coordinates()
+            if mount_coordinates is not None:
+                return {
+                    "requested_source": COORDINATE_SOURCE_MOUNT,
+                    "effective_source": COORDINATE_SOURCE_MOUNT,
+                    "label": self._coordinate_source_label(COORDINATE_SOURCE_MOUNT),
+                    "coordinates": mount_coordinates,
+                    "fallback": False,
+                }
+            return {
+                "requested_source": COORDINATE_SOURCE_MOUNT,
+                "effective_source": COORDINATE_SOURCE_APP,
+                "label": self._tr("coordinate_source.mount_fallback"),
+                "coordinates": stored_coordinates,
+                "fallback": True,
+            }
+        return {
+            "requested_source": COORDINATE_SOURCE_APP,
+            "effective_source": COORDINATE_SOURCE_APP,
+            "label": self._coordinate_source_label(COORDINATE_SOURCE_APP),
+            "coordinates": stored_coordinates,
+            "fallback": False,
+        }
+
+    def _active_site_coordinates(self):
+        return self._active_site_context()["coordinates"]
+
+    def _invalidate_site_dependent_state(self):
+        self.site_info_lines = None
+        self.solar_system_cache_key = None
+        self.sky_map_cache_key = None
+        self.visibility_cache_key = None
+
     def _mount_jnow_coordinates(self, snapshot):
         if snapshot is None:
             return None
@@ -1078,6 +1282,7 @@ class AstroClocksApp:
         if not self.mount_connected:
             return
 
+        previous_site_context = self._active_site_context()
         try:
             snapshot = ascom_mount.read_snapshot(
                 self.mount_telescope,
@@ -1086,22 +1291,45 @@ class AstroClocksApp:
             )
         except Exception as exc:
             self.mount_connected = False
+            self.mount_telescope = None
             self.mount_last_snapshot = None
-            self.mount_last_error = str(exc)
+            self.mount_last_error = self._mount_error_message(exc)
             self._cancel_mount_poll()
+            site_changed = self._active_site_context() != previous_site_context
+            if site_changed:
+                self._invalidate_site_dependent_state()
             self.sky_map_cache_key = None
-            self._update_sky_map()
+            try:
+                if site_changed:
+                    self.update_site_labels()
+                self._update_sky_map()
+                if site_changed:
+                    self._update_visibility_chart()
+            except (tk.TclError, RuntimeError):
+                pass
             return
 
         self.mount_last_snapshot = snapshot
         self.mount_last_error = ""
+        site_changed = self._active_site_context() != previous_site_context
+        if site_changed:
+            self._invalidate_site_dependent_state()
         self.sky_map_cache_key = None
-        self._update_sky_map()
+        try:
+            if site_changed:
+                self.update_site_labels()
+            self._update_sky_map()
+            if site_changed:
+                self._update_visibility_chart()
+        except (tk.TclError, RuntimeError):
+            return
         self._schedule_mount_poll()
 
     def mount_settings_state(self):
         driver_name = self.mount_ascom_driver_name or self.mount_ascom_driver_id
         driver_label = driver_name or self._tr("mount.driver.none")
+        has_driver = bool(driver_name)
+        snapshot_ready = self.mount_last_snapshot is not None
 
         if not self.mount_ascom_available:
             status_text = self._tr(
@@ -1109,22 +1337,21 @@ class AstroClocksApp:
                 error=self.mount_availability_error or self._tr("mount.status.unavailable_short"),
             )
             status_color = self.danger
-        elif self.mount_connected and self.mount_last_snapshot is not None:
+        elif self.mount_connected and snapshot_ready:
             snapshot = self.mount_last_snapshot
             status_text = self._tr(
                 "mount.status.connected_coords",
                 name=snapshot.driver_name or snapshot.driver_id,
-                ra=self._format_unsigned_hms_compact(snapshot.ra_hours),
-                dec=self._format_signed_dms_compact(snapshot.declination),
                 frame=self._mount_equatorial_frame_label(snapshot.equatorial_system),
+                tracking=self._mount_tracking_label(snapshot),
             )
             status_color = self.success
         elif self.mount_connected:
             status_text = self._tr(
-                "mount.status.connected",
+                "mount.status.connected_pending",
                 name=driver_name or self._tr("mount.driver.unnamed"),
             )
-            status_color = self.success
+            status_color = self.accent
         elif self.mount_last_error:
             status_text = self._tr("mount.status.error", error=self.mount_last_error)
             status_color = self.danger
@@ -1138,6 +1365,8 @@ class AstroClocksApp:
         return {
             "available": self.mount_ascom_available,
             "connected": self.mount_connected,
+            "has_driver": has_driver,
+            "snapshot_ready": snapshot_ready,
             "driver_label": driver_label,
             "status_text": status_text,
             "status_color": status_color,
@@ -1146,9 +1375,12 @@ class AstroClocksApp:
     def choose_ascom_mount_driver(self):
         if not self.mount_ascom_available:
             raise RuntimeError(
-                self.mount_availability_error or self._tr("mount.status.unavailable_short")
+                self.mount_availability_error or self._tr("mount.error.unavailable")
             )
-        driver_id, driver_name = ascom_mount.choose_driver(self.mount_ascom_driver_id)
+        try:
+            driver_id, driver_name = ascom_mount.choose_driver(self.mount_ascom_driver_id)
+        except Exception as exc:
+            raise RuntimeError(self._mount_error_message(exc)) from exc
         if not driver_id:
             return self.mount_settings_state()
         if self.mount_connected and driver_id != self.mount_ascom_driver_id:
@@ -1157,12 +1389,13 @@ class AstroClocksApp:
         self.mount_ascom_driver_name = driver_name or driver_id
         self.mount_last_error = ""
         self.mount_last_snapshot = None
+        self._invalidate_site_dependent_state()
         return self.mount_settings_state()
 
     def connect_ascom_mount(self):
         if not self.mount_ascom_available:
             raise RuntimeError(
-                self.mount_availability_error or self._tr("mount.status.unavailable_short")
+                self.mount_availability_error or self._tr("mount.error.unavailable")
             )
         if not self.mount_ascom_driver_id:
             driver_state = self.choose_ascom_mount_driver()
@@ -1172,13 +1405,44 @@ class AstroClocksApp:
             self._poll_ascom_mount()
             return self.mount_settings_state()
 
-        telescope, driver_name = ascom_mount.connect(self.mount_ascom_driver_id)
+        previous_site_context = self._active_site_context()
+        try:
+            telescope, driver_name = ascom_mount.connect(self.mount_ascom_driver_id)
+            snapshot = ascom_mount.read_snapshot(
+                telescope,
+                self.mount_ascom_driver_id,
+                driver_name or self.mount_ascom_driver_id,
+            )
+        except Exception as exc:
+            if "telescope" in locals() and telescope is not None:
+                try:
+                    ascom_mount.disconnect(telescope)
+                except Exception:
+                    pass
+            error_message = self._mount_connect_error_message(exc)
+            self.mount_telescope = None
+            self.mount_connected = False
+            self.mount_last_snapshot = None
+            self.mount_last_error = error_message
+            raise RuntimeError(error_message) from exc
         self.mount_telescope = telescope
         self.mount_connected = True
         self.mount_ascom_driver_name = driver_name or self.mount_ascom_driver_id
         self.mount_last_error = ""
-        self.mount_last_snapshot = None
-        self._poll_ascom_mount()
+        self.mount_last_snapshot = snapshot
+        site_changed = self._active_site_context() != previous_site_context
+        if site_changed:
+            self._invalidate_site_dependent_state()
+        self.sky_map_cache_key = None
+        try:
+            if site_changed:
+                self.update_site_labels()
+            self._update_sky_map()
+            if site_changed:
+                self._update_visibility_chart()
+        except (tk.TclError, RuntimeError):
+            pass
+        self._schedule_mount_poll()
         return self.mount_settings_state()
 
     def disconnect_ascom_mount(self, silent=False):
@@ -1188,13 +1452,14 @@ class AstroClocksApp:
                 ascom_mount.disconnect(self.mount_telescope)
             except Exception as exc:
                 if not silent:
-                    raise RuntimeError(str(exc)) from exc
+                    raise RuntimeError(self._mount_error_message(exc)) from exc
         self.mount_telescope = None
         self.mount_connected = False
         self.mount_last_snapshot = None
         if silent:
             self.mount_last_error = ""
-        self.sky_map_cache_key = None
+        self._invalidate_site_dependent_state()
+        self.update_site_labels()
         try:
             self._update_sky_map()
         except (tk.TclError, RuntimeError):
@@ -1906,8 +2171,9 @@ class AstroClocksApp:
 
     def _clock_state_at_time(self, now_utc=None, alpha_fields=(0, 0, 0)):
         alpha_hh, alpha_mm, alpha_ss = alpha_fields
+        _active_latitude, active_longitude = self._active_site_coordinates()
         return compute_clock_state(
-            self.longitude,
+            active_longitude,
             alpha_hh,
             alpha_mm,
             alpha_ss,
@@ -1942,7 +2208,8 @@ class AstroClocksApp:
         hour_angle = self._normalize_hour_angle(lst_hours - ra_hours)
         hour_angle_rad = math.radians(hour_angle * 15)
         dec_rad = math.radians(declination)
-        lat_rad = math.radians(self.latitude)
+        active_latitude, _active_longitude = self._active_site_coordinates()
+        lat_rad = math.radians(active_latitude)
 
         sin_altitude = (
             math.sin(dec_rad) * math.sin(lat_rad)
@@ -1962,7 +2229,8 @@ class AstroClocksApp:
     def _horizontal_to_equatorial(self, altitude, azimuth, lst_hours):
         altitude_rad = math.radians(altitude)
         azimuth_rad = math.radians(azimuth)
-        lat_rad = math.radians(self.latitude)
+        active_latitude, _active_longitude = self._active_site_coordinates()
+        lat_rad = math.radians(active_latitude)
 
         sin_declination = (
             math.sin(altitude_rad) * math.sin(lat_rad)
@@ -2019,6 +2287,37 @@ class AstroClocksApp:
         seconds = total_seconds % 60
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
+    def _target_marker_color(self, altitude, visible=None):
+        if visible is None:
+            visible = altitude >= 0
+        if visible and altitude < 10:
+            return app_visibility.TARGET_LOW_ALTITUDE_COLOR
+        return self.success if visible else self.danger
+
+    def _current_target_status_color(self):
+        if not self.target_active:
+            return self.text
+        try:
+            state = self._compute_target_clock_state()
+            lst_hours = self._parse_clock_hours(state["lst"])
+            solar_target = (
+                self._current_solar_system_target(lst_hours)
+                if self.target_solar_system_name
+                else None
+            )
+            if solar_target is not None:
+                altitude = solar_target["altitude"]
+            else:
+                ra_hours, declination = self._current_target_coordinates()
+                altitude, _azimuth, _hour_angle = self._equatorial_to_horizontal(
+                    ra_hours,
+                    declination,
+                    lst_hours,
+                )
+            return self._target_marker_color(altitude, altitude >= 0)
+        except Exception:
+            return self.success
+
     def _format_jnow_horizontal_status(
         self,
         ra_hours,
@@ -2026,15 +2325,20 @@ class AstroClocksApp:
         altitude,
         azimuth,
         hour_angle=None,
+        include_hour_angle=True,
     ):
-        return (
+        status = (
             f"JNow : RA = {self._format_unsigned_hms_compact(ra_hours)} ; "
             f"DEC = {self._format_signed_dms_compact(declination)} | "
             f"Alt = {altitude:+.2f}\N{DEGREE SIGN} ; "
-            f"Az = {azimuth:05.1f}\N{DEGREE SIGN} | "
-            f"{self._tr('sky.hour_angle_short')} = "
-            f"{self._format_unsigned_hms_compact(self._display_hour_angle(ra_hours))}"
+            f"Az = {azimuth:05.1f}\N{DEGREE SIGN}"
         )
+        if include_hour_angle:
+            status = (
+                f"{status} | {self._tr('sky.hour_angle_short')} = "
+                f"{self._format_unsigned_hms_compact(self._display_hour_angle(ra_hours))}"
+            )
+        return status
 
     def _mount_status_line(self, lst_hours):
         mount_coordinates = self._mount_jnow_coordinates(self.mount_last_snapshot)
@@ -2113,7 +2417,7 @@ class AstroClocksApp:
                 jnow_ra=self._format_ra(ra_hours),
                 jnow_dec=self._format_dec(dec_degrees),
             ),
-            foreground=self.success,
+            foreground=self._current_target_status_color(),
         )
 
     def _sanitize_coordinate_values(self):
@@ -2293,15 +2597,20 @@ class AstroClocksApp:
         date_format = "%d/%m/%Y" if self.language == "fr" else "%Y-%m-%d"
         if self.aladin_button is not None:
             self.aladin_button.config(text=self._tr("button.aladin", value=self.aladin_fov_deg))
+        active_site = self._active_site_context()
+        active_latitude, active_longitude = active_site["coordinates"]
+        site_title = self.site_name
+        if active_site["effective_source"] == COORDINATE_SOURCE_MOUNT:
+            site_title = self._tr("site.mount_location")
         lines = [
-            self.site_name,
+            site_title,
             self._tr("site.country", value=self.country or self._tr("settings.custom_site")),
             self._tr("site.timezone", value=self._timezone_label()),
             self._tr("site.local_date", value=local_now.strftime(date_format)),
             self._tr(
                 "site.latitude",
                 value=format_latitude_display(
-                    self.latitude,
+                    active_latitude,
                     self._tr("direction.north_short"),
                     self._tr("direction.south_short"),
                 ),
@@ -2309,7 +2618,7 @@ class AstroClocksApp:
             self._tr(
                 "site.longitude",
                 value=format_longitude_display(
-                    self.longitude,
+                    active_longitude,
                     self._tr("direction.east_short"),
                     self._tr("direction.west_short"),
                 ),
@@ -2421,6 +2730,7 @@ class AstroClocksApp:
             sky_show_solar_system=self.sky_show_solar_system,
             mount_ascom_driver_id=self.mount_ascom_driver_id,
             mount_ascom_driver_name=self.mount_ascom_driver_name,
+            coordinate_source=self.coordinate_source,
             mount_show_reticle=self.mount_show_reticle,
             timezone_name=self.timezone_name,
             daylight_saving_enabled=self.daylight_saving_enabled,
