@@ -93,6 +93,7 @@ def _create_sky_widgets(self):
     self.lf_sky.grid_columnconfigure(0, weight=1)
     self.lf_sky.grid_rowconfigure(0, weight=1)
     self.lf_sky.grid_rowconfigure(1, weight=0)
+    self.sky_status_payload = None
 
     self.sky_canvas = tk.Canvas(
         self.lf_sky,
@@ -336,17 +337,28 @@ def _sky_label_position(self, canvas, x, y, text, label_font, *, offset=7, margi
     canvas_width = max(1, int(canvas.winfo_width()))
     canvas_height = max(1, int(canvas.winfo_height()))
     text_width = label_font.measure(text)
+    line_height = max(10, int(label_font.metrics("linespace")))
+    half_height = max(5, line_height // 2)
 
-    label_x = x + offset
-    label_anchor = "w"
-    if label_x + text_width > canvas_width - margin:
-        label_x = x - offset
+    right_x = x + offset
+    right_fits = right_x + text_width <= canvas_width - margin
+    left_x = x - offset
+    left_fits = left_x - text_width >= margin
+
+    if right_fits or not left_fits:
+        label_x = min(right_x, canvas_width - margin - text_width)
+        label_x = max(margin, label_x)
+        label_anchor = "w"
+    else:
+        label_x = max(left_x, margin + text_width)
         label_anchor = "e"
 
     label_y = y - offset
-    if label_y < margin:
-        label_y = min(canvas_height - margin, y + offset)
-
+    min_y = margin + half_height
+    max_y = canvas_height - margin - half_height
+    if label_y < min_y:
+        label_y = y + offset
+    label_y = min(max(label_y, min_y), max_y)
     return label_x, label_y, label_anchor
 
 
@@ -636,12 +648,36 @@ def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azim
             anchor="center",
         )
         return visible
-    canvas.create_oval(x - 11, y - 11, x + 11, y + 11, outline=marker_color, width=2)
-    canvas.create_line(x - 17, y, x + 17, y, fill=marker_color, width=2)
-    canvas.create_line(x, y - 17, x, y + 17, fill=marker_color, width=2)
+    reticle_radius = max(8, min(11, int(round(radius * 0.045))))
+    crosshair_half = max(reticle_radius + 4, min(17, int(round(radius * 0.07))))
+    label_offset = crosshair_half + reticle_radius + 5
+    canvas.create_oval(
+        x - reticle_radius,
+        y - reticle_radius,
+        x + reticle_radius,
+        y + reticle_radius,
+        outline=marker_color,
+        width=2,
+    )
+    canvas.create_line(x - crosshair_half, y, x + crosshair_half, y, fill=marker_color, width=2)
+    canvas.create_line(x, y - crosshair_half, x, y + crosshair_half, fill=marker_color, width=2)
+    text_width = label_font.measure(label)
+    line_height = label_font.metrics("linespace")
+    canvas_width = max(1, int(canvas.winfo_width()))
+    canvas_height = max(1, int(canvas.winfo_height()))
+    label_x = x
+    label_y = y + label_offset
+    if label_y + line_height / 2 > canvas_height - 8:
+        label_y = y - label_offset
+    min_x = 8 + text_width / 2
+    max_x = max(min_x, canvas_width - 8 - text_width / 2)
+    min_y = 8 + line_height / 2
+    max_y = max(min_y, canvas_height - 8 - line_height / 2)
+    label_x = min(max(min_x, label_x), max_x)
+    label_y = min(max(min_y, label_y), max_y)
     canvas.create_text(
-        x,
-        y + 26,
+        label_x,
+        label_y,
         text=label,
         fill=marker_color,
         font=label_font,
@@ -651,16 +687,41 @@ def _draw_target_marker(self, canvas, center_x, center_y, radius, altitude, azim
 
 def _draw_mount_marker(self, canvas, center_x, center_y, radius, altitude, azimuth, label):
     x, y, visible = self._project_target(center_x, center_y, radius, altitude, azimuth)
-    marker_color = self.accent if visible else self.card_edge
-    canvas.create_oval(x - 9, y - 9, x + 9, y + 9, outline=marker_color, width=2)
-    canvas.create_line(x - 14, y, x + 14, y, fill=marker_color, width=2)
-    canvas.create_line(x, y - 14, x, y + 14, fill=marker_color, width=2)
+    marker_color = self._mount_marker_color(visible)
+    reticle_radius = max(6, min(9, int(round(radius * 0.04))))
+    crosshair_half = max(reticle_radius + 3, min(14, int(round(radius * 0.06))))
+    label_offset = crosshair_half + reticle_radius + 3
+    label_font = Font(family="Segoe UI", size=9, weight="bold")
+    canvas.create_oval(
+        x - reticle_radius,
+        y - reticle_radius,
+        x + reticle_radius,
+        y + reticle_radius,
+        outline=marker_color,
+        width=2,
+    )
+    canvas.create_line(x - crosshair_half, y, x + crosshair_half, y, fill=marker_color, width=2)
+    canvas.create_line(x, y - crosshair_half, x, y + crosshair_half, fill=marker_color, width=2)
+    text_width = label_font.measure(label)
+    line_height = label_font.metrics("linespace")
+    canvas_width = max(1, int(canvas.winfo_width()))
+    canvas_height = max(1, int(canvas.winfo_height()))
+    label_x = x
+    label_y = y - label_offset
+    if label_y - line_height / 2 < 8:
+        label_y = y + label_offset
+    min_x = 8 + text_width / 2
+    max_x = max(min_x, canvas_width - 8 - text_width / 2)
+    min_y = 8 + line_height / 2
+    max_y = max(min_y, canvas_height - 8 - line_height / 2)
+    label_x = min(max(min_x, label_x), max_x)
+    label_y = min(max(min_y, label_y), max_y)
     canvas.create_text(
-        x,
-        y - 22,
+        label_x,
+        label_y,
         text=label,
         fill=marker_color,
-        font=Font(family="Segoe UI", size=9, weight="bold"),
+        font=label_font,
     )
     return visible
 
@@ -768,6 +829,8 @@ def _draw_hover_overlay(self, x, y, sky_object=None):
     label_y = y - 20
     if label_y - padding_y < margin:
         label_y = min(canvas_height - margin, y + 20)
+    if label_y + padding_y > canvas_height - margin:
+        label_y = max(margin, y - 20)
 
     text_id = self.sky_canvas.create_text(
         label_x,
@@ -796,6 +859,14 @@ def _draw_hover_overlay(self, x, y, sky_object=None):
 def _set_sky_status(self, text, highlights=(), color_highlights=()):
     if self.sky_status is None:
         return
+    payload = (
+        text,
+        tuple(highlights),
+        tuple((highlight, color) for highlight, color in color_highlights),
+    )
+    if payload == self.sky_status_payload:
+        return
+    self.sky_status_payload = payload
 
     self.sky_status.config(state=tk.NORMAL)
     self.sky_status.delete("1.0", tk.END)
@@ -1069,6 +1140,11 @@ def _update_sky_map(self, state=None):
         self.sky_base_status = self._sky_inactive_status()
         self.sky_base_status_highlights = ()
         self.sky_base_status_color_highlights = ((self._sky_star_count_line(), self.text),)
+        mount_line = self._mount_status_line(lst_hours)
+        if mount_line and mount_coordinates is not None:
+            self.sky_base_status_color_highlights += (
+                (mount_line, self._mount_marker_color(mount_altitude >= 0)),
+            )
         self._set_sky_status(self.sky_base_status)
         self._update_sky_hover()
         return
@@ -1126,6 +1202,10 @@ def _update_sky_map(self, state=None):
         (count_line, self.text),
         (target_status_line, self._target_marker_color(target_altitude, target_visible)),
     )
+    if mount_line and mount_coordinates is not None:
+        self.sky_base_status_color_highlights += (
+            (mount_line, self._mount_marker_color(mount_altitude >= 0)),
+        )
     self._set_sky_status(
         self.sky_base_status,
         self.sky_base_status_highlights,

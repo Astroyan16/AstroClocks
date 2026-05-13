@@ -195,6 +195,7 @@ TRANSLATIONS = {
         "coordinate_source.app": "AstroClocks settings",
         "coordinate_source.mount": "ASCOM mount",
         "coordinate_source.mount_fallback": "AstroClocks settings (ASCOM mount unavailable)",
+        "coordinate_source.mount_disconnected": "AstroClocks settings (ASCOM mount not connected)",
         "mount.status.unavailable_short": "ASCOM is unavailable",
         "mount.status.unavailable": "ASCOM mount support is unavailable: {error}",
         "mount.status.not_configured": "Select an ASCOM telescope driver to connect a mount.",
@@ -466,6 +467,8 @@ TRANSLATIONS = {
             "Apparent JNow coordinates from local ephemerides:\n"
             "Alpha JNow: {ra}\nDelta JNow: {dec}"
         ),
+        "result.local_fallback_not_found": "Online lookup did not find this object. Local fallback used.",
+        "result.local_fallback_error": "Online lookup is unavailable. Local fallback used.",
         "result.sesame_coordinates": (
             "ICRS/J2000 coordinates from CDS Sesame:\nRA (Alpha): {ra}\nDec (Delta): {dec}"
         ),
@@ -661,6 +664,7 @@ TRANSLATIONS = {
         "coordinate_source.app": "Paramètres AstroClocks",
         "coordinate_source.mount": "Monture ASCOM",
         "coordinate_source.mount_fallback": "Paramètres AstroClocks (monture ASCOM indisponible)",
+        "coordinate_source.mount_disconnected": "Paramètres AstroClocks (monture ASCOM non connectée)",
         "mount.status.unavailable_short": "ASCOM est indisponible",
         "mount.status.unavailable": "Le support des montures ASCOM est indisponible : {error}",
         "mount.status.not_configured": "Choisissez un driver ASCOM de télescope pour connecter une monture.",
@@ -936,6 +940,8 @@ TRANSLATIONS = {
             "Coordonnées apparentes JNow depuis les éphémérides locales :\n"
             "Alpha JNow : {ra}\nDelta JNow : {dec}"
         ),
+        "result.local_fallback_not_found": "Recherche en ligne introuvable. Repli sur les coordonnées locales.",
+        "result.local_fallback_error": "Recherche en ligne indisponible. Repli sur les coordonnées locales.",
         "result.sesame_coordinates": (
             "Coordonnées ICRS/J2000 depuis CDS Sesame :\nRA (Alpha) : {ra}\nDéc (Delta) : {dec}"
         ),

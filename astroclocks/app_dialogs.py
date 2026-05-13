@@ -82,6 +82,41 @@ def _center_dialog_on_window(app, dialog, parent=None):
     dialog.lift(anchor)
 
 
+def _coordinate_source_combo_config(
+    selected_code,
+    mount_available,
+    mount_connected,
+    labels,
+    unavailable_label,
+    disconnected_label,
+):
+    selected_code = (
+        COORDINATE_SOURCE_MOUNT
+        if str(selected_code).strip().lower() == COORDINATE_SOURCE_MOUNT
+        else COORDINATE_SOURCE_APP
+    )
+    values = [labels[COORDINATE_SOURCE_APP], labels[COORDINATE_SOURCE_MOUNT]]
+    if mount_available and mount_connected:
+        selected_label = labels[selected_code]
+        state = "readonly"
+    else:
+        selected_label = (
+            (
+                disconnected_label
+                if mount_available
+                else unavailable_label
+            )
+            if selected_code == COORDINATE_SOURCE_MOUNT
+            else labels[COORDINATE_SOURCE_APP]
+        )
+        state = "disabled"
+    return {
+        "values": values,
+        "selected_label": selected_label,
+        "state": state,
+    }
+
+
 def show_error_dialog(app, title, message, parent=None):
     anchor = parent or app.root
     dialog = tk.Toplevel(app.root)
@@ -606,9 +641,15 @@ def open_settings_dialog(app):
         COORDINATE_SOURCE_APP: app._tr("settings.coordinate_source_app"),
         COORDINATE_SOURCE_MOUNT: app._tr("settings.coordinate_source_mount"),
     }
+    coordinate_source_mount_fallback_label = app._tr("coordinate_source.mount_fallback")
+    coordinate_source_mount_disconnected_label = app._tr("coordinate_source.mount_disconnected")
     coordinate_source_lookup = {
         label: code for code, label in coordinate_source_labels.items()
     }
+    coordinate_source_lookup[coordinate_source_mount_fallback_label] = COORDINATE_SOURCE_MOUNT
+    coordinate_source_lookup[
+        coordinate_source_mount_disconnected_label
+    ] = COORDINATE_SOURCE_MOUNT
     coordinate_source_var = tk.StringVar(
         value=coordinate_source_labels.get(
             app.coordinate_source,
@@ -840,57 +881,33 @@ def open_settings_dialog(app):
         font=Font(family="Segoe UI", size=10),
         anchor="w",
         justify="left",
-        wraplength=360,
+        wraplength=420,
     )
     mount_driver_label.grid(column=1, row=0, sticky="ew")
     add_label(mount_tab, 1, app._tr("settings.coordinate_source"))
     coordinate_source_combo = ttk.Combobox(
         mount_tab,
         textvariable=coordinate_source_var,
-        values=[
-            coordinate_source_labels[COORDINATE_SOURCE_APP],
-            coordinate_source_labels[COORDINATE_SOURCE_MOUNT],
-        ],
+        values=[],
         font=Font(family="Segoe UI", size=10),
         width=42,
         state="readonly",
     )
     coordinate_source_combo.grid(column=1, row=1, pady=7, sticky="ew")
-    mount_reticle_row = tk.Frame(mount_options, bg=app.gbg)
-    mount_reticle_row.grid(column=0, row=1, columnspan=2, sticky="w", pady=(6, 0))
-    mount_reticle_toggle = tk.Checkbutton(
-        mount_reticle_row,
-        text="",
-        variable=mount_show_reticle_var,
-        bg=app.gbg,
-        fg=app.text,
-        disabledforeground=app.muted,
-        activebackground=app.gbg,
-        activeforeground=app.fg,
-        selectcolor=app.ebg,
-        relief="flat",
+    mount_reticle_toggle = build_checkbutton(
+        mount_options,
+        mount_show_reticle_var,
+        app._tr("settings.mount_show_reticle"),
+    )
+    mount_reticle_toggle.config(
         bd=0,
+        highlightbackground=app.gbg,
+        highlightcolor=app.gbg,
         highlightthickness=0,
-        padx=0,
-        pady=0,
-        width=1,
+        takefocus=0,
+        cursor="hand2",
     )
-    mount_reticle_toggle.grid(column=0, row=0, sticky="w")
-    mount_reticle_label = tk.Label(
-        mount_reticle_row,
-        text=app._tr("settings.mount_show_reticle"),
-        bg=app.gbg,
-        fg=app.text,
-        font=Font(family="Segoe UI", size=10),
-        anchor="w",
-        justify="left",
-    )
-    mount_reticle_label.grid(column=1, row=0, sticky="w", padx=(6, 0))
-
-    def toggle_mount_reticle(_event=None):
-        mount_show_reticle_var.set(not mount_show_reticle_var.get())
-
-    mount_reticle_label.bind("<Button-1>", toggle_mount_reticle)
+    mount_reticle_toggle.grid(column=0, row=1, columnspan=2, sticky="w", pady=(6, 0))
     mount_status_label = tk.Label(
         mount_options,
         textvariable=mount_status_var,
@@ -902,6 +919,17 @@ def open_settings_dialog(app):
         wraplength=420,
     )
     mount_status_label.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(8, 6))
+
+    def sync_mount_wraplength(_event=None):
+        try:
+            available_width = max(240, mount_options.winfo_width() - 16)
+        except tk.TclError:
+            return
+        mount_driver_label.config(wraplength=available_width)
+        mount_status_label.config(wraplength=available_width)
+
+    mount_options.bind("<Configure>", sync_mount_wraplength, add="+")
+    sync_mount_wraplength()
 
     mount_actions = tk.Frame(mount_options, bg=app.gbg)
     mount_actions.grid(column=0, row=3, columnspan=2, sticky="w")
@@ -936,6 +964,22 @@ def open_settings_dialog(app):
         mount_driver_label.config(
             fg=app.text if state["driver_label"] != app._tr("mount.driver.none") else app.muted
         )
+        source_config = _coordinate_source_combo_config(
+            coordinate_source_lookup.get(
+                coordinate_source_var.get(),
+                app.coordinate_source,
+            ),
+            state["available"],
+            state["connected"],
+            coordinate_source_labels,
+            coordinate_source_mount_fallback_label,
+            coordinate_source_mount_disconnected_label,
+        )
+        coordinate_source_combo.config(
+            values=source_config["values"],
+            state=source_config["state"],
+        )
+        coordinate_source_var.set(source_config["selected_label"])
         apply_mount_button_states(state)
 
     def choose_mount():

@@ -1,5 +1,26 @@
 # Changelog
 
+## AstroClocks v3.3.5 stable - 2026-05-14
+
+### Ameliore
+
+- Detection reseau plus tolerante : l'etat `Hors-ligne` n'est active qu'apres deux echecs consecutifs afin d'eviter les bascules intempestives.
+- Carte du ciel polie sur les cas limites : meilleur placement des labels pres des bords, reticules cible et monture plus lisibles sur plusieurs tailles de carte, et zone de statut plus stable.
+- Onglet `Mount` des parametres affine visuellement avec un comportement plus coherent des options et un meilleur verrouillage de la source de coordonnees tant qu'aucune monture n'est connectee.
+- Affichage des recherches de coordonnees clarifie quand un resultat local est utilise en repli apres une tentative de recherche en ligne.
+
+### Corrige
+
+- Le rendu des petits dialogues et des lignes de statut a ete nettoye pour eviter plusieurs incoherences visuelles observees pendant les tests d'usage reel.
+- Le choix entre coordonnees locales et coordonnees en ligne pour les objets du systeme solaire reste maintenant coherent entre la recherche rapide et l'affichage sous la carte.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Compilation Python des modules modifies.
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.5.exe`.
+
 ## AstroClocks v3.3.4 stable - 2026-05-12
 
 ### Ajoute

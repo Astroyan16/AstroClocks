@@ -192,6 +192,7 @@ class AstroClocksApp:
         self.text = "#edf3f8"
         self.muted = "#93a6b7"
         self.accent = "#4cc9f0"
+        self.mount_accent = "#b892ff"
         self.success = "#7bd88f"
         self.danger = "#ff5c5c"
         self.button_bg = "#22303a"
@@ -264,6 +265,7 @@ class AstroClocksApp:
         self.sky_base_status = ""
         self.sky_base_status_highlights = ()
         self.sky_base_status_color_highlights = ()
+        self.sky_status_payload = None
         self.target_jnow_cache_key = None
         self.target_jnow_cache = None
         self.solar_system_cache_key = None
@@ -403,9 +405,9 @@ class AstroClocksApp:
         self.update_value(activate_target=False)
         self._schedule_connectivity_check(0)
         self._set_loading_status("Affichage de la fenêtre...")
-        self._place_initial_window()
-        self._update_dynamic_fonts()
         try:
+            self._place_initial_window()
+            self._update_dynamic_fonts()
             self.root.update()
         except (tk.TclError, RuntimeError):
             pass
@@ -798,6 +800,14 @@ class AstroClocksApp:
         self._move_window_to(dialog, x, y)
         dialog.lift(self.root)
 
+    def _restore_root_chrome_after_dialog_destroy(self, dialog, event=None):
+        if event is not None and getattr(event, "widget", None) is not dialog:
+            return
+        try:
+            self._apply_native_window_chrome(self.root)
+        except Exception:
+            pass
+
     def _reveal_dialog(self, dialog, anchor=None, focus=False):
         anchor = anchor or self.root
         alpha_supported = False
@@ -809,6 +819,7 @@ class AstroClocksApp:
 
         dialog.deiconify()
         self._apply_native_window_chrome(dialog)
+        self._apply_native_window_chrome(self.root)
         dialog.lift(anchor)
         try:
             dialog.update_idletasks()
@@ -825,6 +836,14 @@ class AstroClocksApp:
                 dialog.attributes("-alpha", 1.0)
             except (tk.TclError, RuntimeError):
                 pass
+        try:
+            dialog.bind(
+                "<Destroy>",
+                lambda _event: self._restore_root_chrome_after_dialog_destroy(dialog, _event),
+                add="+",
+            )
+        except (tk.TclError, RuntimeError):
+            pass
 
     def _enter_fullscreen(self):
         if self.is_fullscreen:
@@ -870,6 +889,10 @@ class AstroClocksApp:
             self.root.geometry(self.windowed_geometry)
         if self.windowed_state == "zoomed":
             self.root.after(50, lambda: self.root.state("zoomed"))
+        try:
+            self.root.update_idletasks()
+        except (tk.TclError, RuntimeError):
+            pass
         self.is_fullscreen = False
 
     def _create_header(self):
@@ -2311,6 +2334,9 @@ class AstroClocksApp:
         if visible and altitude < 10:
             return app_visibility.TARGET_LOW_ALTITUDE_COLOR
         return self.success if visible else self.danger
+
+    def _mount_marker_color(self, visible):
+        return self.mount_accent if visible else self.card_edge
 
     def _current_target_status_color(self):
         if not self.target_active:
