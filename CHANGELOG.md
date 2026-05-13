@@ -1,5 +1,19 @@
 # Changelog
 
+## AstroClocks v3.3.6 stable - 2026-05-14
+
+### Ameliore
+
+- L'executable Windows distribue garde maintenant un nom fixe `AstroClockV3.exe`, ce qui evite de casser les raccourcis epingles a chaque release.
+- La chaine de build et l'installeur ont ete re-alignes sur ce nom d'executable stable, tout en conservant des installeurs versionnes.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Compilation Python des modules modifies.
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.6.exe`.
+
 ## AstroClocks v3.3.5 stable - 2026-05-14
 
 ### Ameliore

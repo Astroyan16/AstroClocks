@@ -32,7 +32,11 @@ $Version = (& $Python -c "from astroclocks.version import APP_VERSION; print(APP
 if (-not $Version) {
     throw "Unable to determine AstroClocks version from astroclocks.version"
 }
-$AppName = "AstroClocks-v$Version"
+$ExecutableStem = (& $Python -c "from astroclocks.version import APP_EXECUTABLE_STEM; print(APP_EXECUTABLE_STEM, end='')").Trim()
+if (-not $ExecutableStem) {
+    throw "Unable to determine AstroClocks executable stem from astroclocks.version"
+}
+$ExecutableName = "$ExecutableStem.exe"
 $InstallerName = "Install_AstroClocks$Version.exe"
 
 & $Python -m pip install -e ".[build]"
@@ -40,14 +44,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Dependency installation failed with exit code $LASTEXITCODE"
 }
 
-Remove-GeneratedPath (Join-Path $ProjectRoot "build\$AppName")
-Remove-GeneratedPath (Join-Path $ProjectRoot "output\$AppName")
+Remove-GeneratedPath (Join-Path $ProjectRoot "build\$ExecutableStem")
+Remove-GeneratedPath (Join-Path $ProjectRoot "output\$ExecutableStem")
 
 & $Python -m PyInstaller `
     --noconfirm `
     --onedir `
     --windowed `
-    --name $AppName `
+    --name $ExecutableStem `
     --distpath "output" `
     --workpath "build" `
     --icon "AppIcon.ico" `
@@ -67,7 +71,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Built output\$AppName\$AppName.exe"
+Write-Host "Built output\$ExecutableStem\$ExecutableName"
 
 $InnoCandidates = @()
 if (${env:ProgramFiles(x86)}) {

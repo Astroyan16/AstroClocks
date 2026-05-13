@@ -3,10 +3,12 @@
 from datetime import date
 
 APP_NAME = "AstroClocks"
-APP_VERSION = "3.3.5"
+APP_VERSION = "3.3.6"
 APP_RELEASE_DATE = date(2026, 5, 14)
 UPDATE_REPOSITORY = "Astroyan16/AstroClocks"
 INSTALLER_NAME_PREFIX = "Install_AstroClocks"
+APP_EXECUTABLE_STEM = "AstroClockV3"
+APP_EXECUTABLE_NAME = f"{APP_EXECUTABLE_STEM}.exe"
 
 __version__ = APP_VERSION
 

@@ -1,6 +1,6 @@
 # AstroClocks
 
-AstroClocks v3.3.5 est une application d'aide a l'observation astronomique
+AstroClocks v3.3.6 est une application d'aide a l'observation astronomique
 pour Windows. Elle affiche en temps reel l'heure civile, l'UTC, les temps
 sideraux, les coordonnees JNow/J2000, l'angle horaire, une carte du ciel
 locale, ainsi que plusieurs outils de recherche et de preparation
@@ -58,7 +58,7 @@ Pour generer l'executable PyInstaller et l'installeur Inno Setup :
 
 Les artefacts sont produits dans :
 
-- `output/AstroClocks-v<version>/`
+- `output/AstroClockV3/`
 - `installer/Install_AstroClocks<version>.exe`
 
 ## Fonctions en ligne
