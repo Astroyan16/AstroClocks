@@ -366,6 +366,19 @@ def _create_deep_sky_widgets(self):
     self._update_deep_sky_tree_separators()
     if self.deep_sky_status_label is not None:
         self.deep_sky_status_label.config(text=self._tr("deep_sky.loading_objects"))
+    self._update_deep_sky_search_buttons_state()
+
+
+def _update_deep_sky_search_buttons_state(self):
+    search_pending = bool(self.deep_sky_search_pending)
+    online_available = self.network_online is not False
+    self._set_button_enabled(self.deep_sky_apply_button, not search_pending)
+    self._set_button_enabled(
+        self.deep_sky_online_button,
+        (not search_pending) and online_available,
+    )
+    self._set_button_enabled(self.deep_sky_reset_button, not search_pending)
+    self._set_button_enabled(self.deep_sky_clear_cache_button, not search_pending)
 
 
 def _ensure_deep_sky_tab_initialized(self):
@@ -769,6 +782,15 @@ def _deep_sky_catalog(self, preferred_band=None):
         preferred_band=preferred_band,
     )
 
+
+def _deep_sky_offline_cache_note(self):
+    if self.network_online is not False:
+        return None
+    cache_count = len(self.deep_sky_simbad_cached_objects or [])
+    if cache_count <= 0:
+        return None
+    return self._tr("deep_sky.offline_cached", count=cache_count)
+
 def _deep_sky_category_label(self, sky_object):
     label = self._tr(f"deep_sky.category.{sky_object.get('category', 'galaxy')}")
     morphology = str(sky_object.get("morphology", "") or "").strip()
@@ -886,13 +908,7 @@ def search_deep_sky_objects(self, allow_online=False):
         offline_note = None
     status_key = "deep_sky.searching_online" if allow_online else "deep_sky.filtering"
     self.deep_sky_status_label.config(text=self._tr(status_key))
-    for button in (
-        self.deep_sky_apply_button,
-        self.deep_sky_online_button,
-        self.deep_sky_reset_button,
-    ):
-        if button is not None:
-            button.config(state=tk.DISABLED)
+    self._update_deep_sky_search_buttons_state()
     search_context = self._double_search_context()
     threading.Thread(
         target=self._run_deep_sky_search,
@@ -912,6 +928,9 @@ def _run_deep_sky_search(
         visibility_context = self._deep_sky_visibility_context(search_context)
         catalog = self._deep_sky_catalog(filters["magnitude_band"])
         notes = [offline_note] if offline_note else []
+        offline_cache_note = self._deep_sky_offline_cache_note()
+        if offline_cache_note:
+            notes.append(offline_cache_note)
         simbad_cached_objects = None
         if allow_online:
             try:
@@ -1003,13 +1022,7 @@ def _apply_deep_sky_search_results(self, generation, payload):
     self.deep_sky_search_pending = False
     if payload.get("simbad_cached_objects") is not None:
         self.deep_sky_simbad_cached_objects = payload["simbad_cached_objects"]
-    for button in (
-        self.deep_sky_apply_button,
-        self.deep_sky_online_button,
-        self.deep_sky_reset_button,
-    ):
-        if button is not None:
-            button.config(state=tk.NORMAL)
+    self._update_deep_sky_search_buttons_state()
     self._render_deep_sky_results(
         payload["objects"],
         payload["total"],
@@ -1045,6 +1058,7 @@ def set_selected_deep_sky_target(self):
 
 DEEP_SKY_METHODS = (
     _create_deep_sky_widgets,
+    _update_deep_sky_search_buttons_state,
     _ensure_deep_sky_tab_initialized,
     _schedule_initial_deep_sky_load,
     _deep_sky_uses_magnitude_filter,
@@ -1074,6 +1088,7 @@ DEEP_SKY_METHODS = (
     _deep_sky_visibility_metrics,
     _filter_deep_sky_list,
     _deep_sky_catalog,
+    _deep_sky_offline_cache_note,
     _deep_sky_category_label,
     _format_deep_sky_aliases,
     _format_deep_sky_magnitude,

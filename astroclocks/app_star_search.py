@@ -276,6 +276,19 @@ def _create_star_search_widgets(self):
     self._refresh_star_search_headings()
     self._update_star_search_tree_separators()
     self.star_search_status_label.config(text=self._tr("star_search.loading_cache"))
+    self._update_star_search_buttons_state()
+
+
+def _update_star_search_buttons_state(self):
+    search_pending = bool(self.star_search_pending)
+    online_available = self.network_online is not False
+    self._set_button_enabled(self.star_search_apply_button, not search_pending)
+    self._set_button_enabled(
+        self.star_search_online_button,
+        (not search_pending) and online_available,
+    )
+    self._set_button_enabled(self.star_search_reset_button, not search_pending)
+    self._set_button_enabled(self.star_search_clear_cache_button, not search_pending)
 
 def _ensure_star_search_tab_initialized(self):
     if self.star_search_tab_initialized:
@@ -571,6 +584,15 @@ def _star_search_catalog(self, cached_stars=None, spectral_type=None, magnitude_
         preferred_band=magnitude_band or self._current_star_search_magnitude_band(),
     )
 
+
+def _star_search_offline_cache_note(self):
+    if self.network_online is not False:
+        return None
+    cache_count = len(self.star_search_cached_stars or [])
+    if cache_count <= 0:
+        return None
+    return self._tr("star_search.offline_cached", count=cache_count)
+
 def _stars_to_jnow(self, stars):
     normalized = []
     for star in stars:
@@ -710,14 +732,7 @@ def search_stars(self, allow_online=False):
         offline_note = None
     status_key = "star_search.searching_online" if allow_online else "star_search.filtering"
     self.star_search_status_label.config(text=self._tr(status_key))
-    for button in (
-        self.star_search_apply_button,
-        self.star_search_online_button,
-        self.star_search_reset_button,
-        self.star_search_clear_cache_button,
-    ):
-        if button is not None:
-            button.config(state=tk.DISABLED)
+    self._update_star_search_buttons_state()
     search_context = self._double_search_context()
     threading.Thread(
         target=self._run_star_search,
@@ -733,6 +748,9 @@ def _run_star_search(self, generation, filters, search_context, allow_online=Fal
             magnitude_band=filters["magnitude_band"],
         )
         notes = [offline_note] if offline_note else []
+        offline_cache_note = self._star_search_offline_cache_note()
+        if offline_cache_note:
+            notes.append(offline_cache_note)
         cached_stars = None
         if allow_online:
             try:
@@ -794,14 +812,7 @@ def _apply_star_search_results(self, generation, payload):
     self.star_search_pending = False
     if payload.get("cached_stars") is not None:
         self.star_search_cached_stars = payload["cached_stars"]
-    for button in (
-        self.star_search_apply_button,
-        self.star_search_online_button,
-        self.star_search_reset_button,
-        self.star_search_clear_cache_button,
-    ):
-        if button is not None:
-            button.config(state=tk.NORMAL)
+    self._update_star_search_buttons_state()
     self._render_star_search_results(payload["stars"], payload["total"], payload.get("note"))
 
 def _selected_star_search_star(self):
@@ -830,6 +841,7 @@ def set_selected_star_target(self):
 
 STAR_SEARCH_METHODS = (
     _create_star_search_widgets,
+    _update_star_search_buttons_state,
     _ensure_star_search_tab_initialized,
     _schedule_initial_star_search_load,
     _save_star_search_filters_if_valid,
@@ -850,6 +862,7 @@ STAR_SEARCH_METHODS = (
     _update_star_search_tree_separators,
     _ensure_star_search_cache_loaded,
     _star_search_catalog,
+    _star_search_offline_cache_note,
     _stars_to_jnow,
     _filter_star_search_list,
     _format_star_search_magnitude,

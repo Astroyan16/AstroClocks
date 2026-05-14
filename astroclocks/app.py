@@ -1552,6 +1552,14 @@ class AstroClocksApp:
             command=command,
         )
 
+    def _set_button_enabled(self, button, enabled):
+        if button is None:
+            return
+        button.config(
+            state=tk.NORMAL if enabled else tk.DISABLED,
+            cursor="hand2" if enabled else "arrow",
+        )
+
     def _register_translated_widget(self, widget, key, **kwargs):
         self.translated_widgets.append((widget, key, kwargs))
         widget.config(text=self._tr(key, **kwargs))
@@ -1636,23 +1644,14 @@ class AstroClocksApp:
         if self.aladin_button is None:
             return
 
-        is_offline = self.network_online is False
-        self.aladin_button.config(
-            state=tk.DISABLED if is_offline else tk.NORMAL,
-            cursor="arrow" if is_offline else "hand2",
-        )
+        self._set_button_enabled(self.aladin_button, self.network_online is not False)
 
     def _update_online_controls_state(self):
-        is_offline = self.network_online is False
         if self.combo_box is not None:
             self._set_object_type_values()
-        for button in (self.double_search_button, self.double_orbit_recompute_button):
-            if button is None:
-                continue
-            button.config(
-                state=tk.DISABLED if is_offline else tk.NORMAL,
-                cursor="arrow" if is_offline else "hand2",
-            )
+        self._update_double_search_buttons_state()
+        self._update_deep_sky_search_buttons_state()
+        self._update_star_search_buttons_state()
 
     def _hour_angle_title_kwargs(self):
         suffix = self._tr("frame.hour_angle_offset_suffix") if self.hour_angle_offset_enabled else ""
@@ -2752,6 +2751,8 @@ class AstroClocksApp:
         self._set_deep_sky_category_values()
         self._refresh_deep_sky_headings()
         self._refresh_star_search_headings()
+        self._update_aladin_button_state()
+        self._update_online_controls_state()
         self.update_site_labels()
         self.update_value(
             activate_target=self.target_active,

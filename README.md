@@ -54,12 +54,16 @@ Pour generer l'executable PyInstaller et l'installeur Inno Setup :
 
 ```powershell
 .\Build-Windows.ps1
+.\Verify-Release.ps1
 ```
 
 Les artefacts sont produits dans :
 
 - `output/AstroClockV3/`
 - `installer/Install_AstroClocks<version>.exe`
+
+La verification de release controle que la version, l'installeur, le nom fixe
+de l'executable et le changelog restent coherents avec les artefacts generes.
 
 ## Fonctions en ligne
 
@@ -83,6 +87,11 @@ l'historique.
 
 La feuille de route de maintenance et d'evolution est disponible dans
 [ROADMAP.md](ROADMAP.md).
+
+## Release
+
+La procedure de publication stable est documentee dans
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
 ## Licence
 

@@ -382,6 +382,23 @@ def _create_double_star_widgets(self):
     self._update_double_tree_separators()
     if self.double_status_label is not None:
         self.double_status_label.config(text=self._tr("double.loading_objects"))
+    self._update_double_search_buttons_state()
+
+
+def _update_double_search_buttons_state(self):
+    remote_search_pending = bool(self.double_remote_search_pending)
+    online_available = self.network_online is not False
+    self._set_button_enabled(self.double_apply_button, not remote_search_pending)
+    self._set_button_enabled(
+        self.double_search_button,
+        (not remote_search_pending) and online_available,
+    )
+    self._set_button_enabled(
+        self.double_orbit_recompute_button,
+        (not remote_search_pending) and online_available,
+    )
+    self._set_button_enabled(self.double_reset_button, not remote_search_pending)
+    self._set_button_enabled(self.double_clear_cache_button, not remote_search_pending)
 
 
 def _double_advanced_button_text(self):
@@ -1102,6 +1119,15 @@ def _double_local_catalog(self):
     return self._merge_double_star_results(DOUBLE_STARS, self.double_wds_cached_stars)
 
 
+def _double_offline_cache_note(self):
+    if self.network_online is not False:
+        return None
+    cache_count = len(self.double_wds_cached_stars or [])
+    if cache_count <= 0:
+        return None
+    return self._tr("double.offline_cached", count=cache_count)
+
+
 def _enrich_double_star_orbits(self, stars, orb6_index, orbit_index=None):
     active_orbit_index = orbit_index if orbit_index is not None else self.double_orb6_orbit_index
     if not orb6_index and not active_orbit_index:
@@ -1426,6 +1452,7 @@ def search_double_stars(self, allow_online=False, refresh_orbits=False):
     self.double_status_label.config(
         text=self._tr(status_key)
     )
+    self._update_double_search_buttons_state()
     threading.Thread(
         target=self._run_double_star_search,
         args=(generation, filters, allow_online, search_context, refresh_orbits),
@@ -1444,6 +1471,9 @@ def _run_double_star_search(
     try:
         visibility_context = self._double_visibility_context(search_context)
         notes = []
+        offline_cache_note = self._double_offline_cache_note()
+        if offline_cache_note:
+            notes.append(offline_cache_note)
         orb6_index = self.double_orb6_index
         orb6_orbit_index = self.double_orb6_orbit_index
 
@@ -1472,7 +1502,7 @@ def _run_double_star_search(
         wds_cached_stars = None
 
         if allow_online and self.network_online is False:
-            notes = [self._tr("double.online_offline")]
+            notes.insert(0, self._tr("double.online_offline"))
         elif allow_online:
             try:
                 remote_results = fetch_wds_double_stars(
@@ -1552,6 +1582,7 @@ def _apply_double_star_search_results(self, generation, payload):
     if generation != self.double_search_generation:
         return
     self.double_remote_search_pending = False
+    self._update_double_search_buttons_state()
     if payload.get("wds_cached_stars") is not None:
         self.double_wds_cached_stars = payload["wds_cached_stars"]
     if payload.get("orb6_index") is not None:
@@ -1980,6 +2011,7 @@ def _clear_double_orbit_hover(self, state):
 
 def install_double_star_methods(app_class):
     app_class._create_double_star_widgets = _create_double_star_widgets
+    app_class._update_double_search_buttons_state = _update_double_search_buttons_state
     app_class._double_advanced_button_text = _double_advanced_button_text
     app_class._toggle_double_advanced_options = _toggle_double_advanced_options
     app_class._restore_double_star_cached_results = _restore_double_star_cached_results
@@ -2016,6 +2048,7 @@ def install_double_star_methods(app_class):
     app_class._double_star_key = _double_star_key
     app_class._merge_double_star_results = _merge_double_star_results
     app_class._double_local_catalog = _double_local_catalog
+    app_class._double_offline_cache_note = _double_offline_cache_note
     app_class._enrich_double_star_orbits = _enrich_double_star_orbits
     app_class._double_orb6_status_note = _double_orb6_status_note
     app_class._double_star_nature_label = _double_star_nature_label
