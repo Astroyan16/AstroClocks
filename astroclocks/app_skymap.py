@@ -93,6 +93,7 @@ def _create_sky_widgets(self):
     self.lf_sky.grid_columnconfigure(0, weight=1)
     self.lf_sky.grid_rowconfigure(0, weight=1)
     self.lf_sky.grid_rowconfigure(1, weight=0)
+    self.lf_sky.grid_rowconfigure(2, weight=0)
     self.sky_status_payload = None
 
     self.sky_canvas = tk.Canvas(
@@ -125,6 +126,37 @@ def _create_sky_widgets(self):
     self.sky_status.tag_configure("danger", foreground=self.danger)
     self.sky_status.config(state=tk.DISABLED)
     self.sky_status.grid(column=0, row=1, padx=8, pady=(2, 8), sticky="ew")
+
+    self.sky_mount_controls_frame = tk.Frame(self.lf_sky, bg=self.card_bg)
+    self.sky_mount_controls_frame.grid(column=0, row=2, padx=8, pady=(0, 8), sticky="ew")
+    self.sky_mount_controls_frame.grid_columnconfigure(0, weight=1)
+
+    self.sky_mount_status_label = tk.Label(
+        self.sky_mount_controls_frame,
+        text="",
+        bg=self.card_bg,
+        fg=self.muted,
+        font=Font(family="Segoe UI", size=10, weight="bold"),
+        anchor="w",
+        justify="left",
+    )
+    self.sky_mount_status_label.grid(column=0, row=0, sticky="ew", pady=(0, 6))
+
+    self.sky_mount_buttons_frame = tk.Frame(self.sky_mount_controls_frame, bg=self.card_bg)
+    self.sky_mount_buttons_frame.grid(column=0, row=1, sticky="w")
+    self.sky_mount_goto_button = self._build_button(
+        self.sky_mount_buttons_frame,
+        self._tr("mount.control.goto"),
+        lambda: self._run_mount_control_action(self.slew_mount_to_target),
+    )
+    self.sky_mount_goto_button.grid(column=0, row=0, padx=(0, 8))
+    self.sky_mount_abort_button = self._build_button(
+        self.sky_mount_buttons_frame,
+        self._tr("mount.control.abort"),
+        lambda: self._run_mount_control_action(self.abort_mount_slew),
+    )
+    self.sky_mount_abort_button.grid(column=1, row=0)
+    self._refresh_sky_mount_controls()
 
 
 def _schedule_sky_map_resize(self, _event=None, delay=110):

@@ -1,5 +1,33 @@
 # Changelog
 
+## AstroClocks v3.3.7 stable - 2026-05-14
+
+### Ajoute
+
+- Bloc de controle `Monture ASCOM` sous la carte du ciel avec commandes `Pointer la cible` et `Arreter` pour les montures compatibles GoTo.
+- Boite de confirmation thematisee avant un `GoTo` vers une cible situee sous l'horizon.
+- Script `Verify-Release.ps1` et [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) pour verrouiller la coherence des publications Windows.
+
+### Ameliore
+
+- Recherche hors-ligne/en ligne plus robuste : les boutons de recherche en ligne se desactivent proprement hors-ligne ou pendant une requete, tandis que les actions locales restent disponibles.
+- Les onglets `Etoiles doubles`, `Ciel profond` et `Etoiles` indiquent maintenant explicitement quand des donnees enrichies en cache sont reutilisees hors-ligne.
+- Le statut monture distingue mieux les etats `Pointage en cours`, `Prete a pointer` et `Cible acquise`, avec affichage de la disponibilite GoTo dans `Parametres > Monture`.
+- Les erreurs et avertissements lies au bloc de controle de monture utilisent maintenant des dialogues AstroClocks harmonises avec le theme sombre.
+
+### Corrige
+
+- Le bouton `Arreter` fonctionne maintenant aussi avec les drivers ASCOM qui exposent `AbortSlew()` sans declarer correctement `CanAbortSlew`.
+- Le statut sous la carte reste coherent quand la cible active provient d'une recherche en ligne IMCCE plutot que d'un calcul local.
+
+### Verification
+
+- Suite de tests : `python -m unittest discover -s tests`.
+- Compilation Python des modules modifies.
+- Regeneration du build Windows via `Build-Windows.ps1`.
+- Verification de release via `Verify-Release.ps1`.
+- Artefact Windows distribue : `installer/Install_AstroClocks3.3.7.exe`.
+
 ## AstroClocks v3.3.6 stable - 2026-05-14
 
 ### Ameliore

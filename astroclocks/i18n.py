@@ -205,10 +205,28 @@ TRANSLATIONS = {
         "mount.status.disconnecting": "Disconnecting the ASCOM mount...",
         "mount.status.connected": "Connected to mount: {name}",
         "mount.status.connected_pending": "Connected to {name} | Waiting for coordinates...",
-        "mount.status.connected_coords": (
-            "Connected to {name} | Frame: {frame} | Tracking: {tracking}"
-        ),
+        "mount.status.connected_coords": "Connected to {name} | {details}",
+        "mount.status.segment_frame": "Frame: {frame}",
+        "mount.status.segment_tracking": "Tracking: {tracking}",
+        "mount.status.segment_goto": "GoTo: {value}",
+        "mount.status.segment_slewing": "Slew in progress",
         "mount.status.error": "ASCOM mount error: {error}",
+        "mount.control.title": "ASCOM mount",
+        "mount.control.goto": "Slew to target",
+        "mount.control.abort": "Stop",
+        "mount.control.pending": "Mount: {name} | Waiting for coordinates...",
+        "mount.control.unsupported": "Mount: {name} | GoTo is not supported",
+        "mount.control.unsupported_frame": (
+            "Mount: {name} | GoTo is unavailable for this coordinate frame"
+        ),
+        "mount.control.no_target": "Mount: {name} | No active target",
+        "mount.control.acquired": "Mount: {name} | Target acquired: {target}",
+        "mount.control.ready": "Mount: {name} | Ready to slew to {target}",
+        "mount.control.slewing": "Mount: {name} | Slew in progress...",
+        "mount.control.below_horizon_confirm": (
+            "Target {target} is below the horizon (Alt = {altitude}°). "
+            "Send the GoTo command anyway?"
+        ),
         "mount.tracking.on": "on",
         "mount.tracking.off": "off",
         "mount.tracking.unknown": "unknown",
@@ -216,6 +234,8 @@ TRANSLATIONS = {
         "mount.tracking.lunar": "lunar",
         "mount.tracking.solar": "solar",
         "mount.tracking.king": "king",
+        "mount.goto.available": "available",
+        "mount.goto.unavailable": "unavailable",
         "mount.error.unavailable": "ASCOM is unavailable.",
         "mount.error.unavailable_pywin32": "ASCOM support requires pywin32 on Windows.",
         "mount.error.platform_missing": "The ASCOM Platform chooser is not installed on this computer.",
@@ -231,10 +251,18 @@ TRANSLATIONS = {
             "running and that the mount is connected in SynScan."
         ),
         "mount.error.disconnect_failed": "Unable to disconnect the ASCOM mount cleanly.",
+        "mount.error.goto_unsupported": "This ASCOM mount does not support GoTo commands.",
+        "mount.error.goto_frame_unsupported": (
+            "This ASCOM mount exposes a coordinate frame that AstroClocks cannot use for GoTo yet."
+        ),
+        "mount.error.abort_unsupported": "This ASCOM mount cannot stop a GoTo command.",
         "mount.error.not_connected": "The ASCOM mount is not connected.",
         "mount.error.disconnected": "The ASCOM mount is disconnected.",
         "mount.error.read_state_failed": "Unable to read the ASCOM mount connection state.",
         "mount.error.read_coordinates_failed": "Unable to read the ASCOM mount coordinates.",
+        "mount.error.goto_failed": "Unable to send the GoTo command to the ASCOM mount.",
+        "mount.error.abort_failed": "Unable to stop the GoTo command on the ASCOM mount.",
+        "mount.error.no_target": "No active target is selected.",
         "mount.error.generic": "The ASCOM mount returned an unexpected error.",
         "visibility.title": "Altitude curve, noon to noon",
         "visibility.title_named": "Altitude of {target} between {start_date} and {end_date}",
@@ -677,10 +705,28 @@ TRANSLATIONS = {
         "mount.status.disconnecting": "Déconnexion de la monture ASCOM...",
         "mount.status.connected": "Monture connectée : {name}",
         "mount.status.connected_pending": "Connectée à {name} | En attente des coordonnées...",
-        "mount.status.connected_coords": (
-            "Connectée à {name} | Repère : {frame} | Suivi : {tracking}"
-        ),
+        "mount.status.connected_coords": "Connectée à {name} | {details}",
+        "mount.status.segment_frame": "Repère : {frame}",
+        "mount.status.segment_tracking": "Suivi : {tracking}",
+        "mount.status.segment_goto": "GoTo : {value}",
+        "mount.status.segment_slewing": "Pointage en cours",
         "mount.status.error": "Erreur de monture ASCOM : {error}",
+        "mount.control.title": "Monture ASCOM",
+        "mount.control.goto": "Pointer la cible",
+        "mount.control.abort": "Arrêter",
+        "mount.control.pending": "Monture : {name} | En attente des coordonnées...",
+        "mount.control.unsupported": "Monture : {name} | Pointage GoTo non pris en charge",
+        "mount.control.unsupported_frame": (
+            "Monture : {name} | Pointage indisponible pour ce repère de coordonnées"
+        ),
+        "mount.control.no_target": "Monture : {name} | Aucune cible active",
+        "mount.control.acquired": "Monture : {name} | Cible acquise : {target}",
+        "mount.control.ready": "Monture : {name} | Prête à pointer {target}",
+        "mount.control.slewing": "Monture : {name} | Pointage en cours...",
+        "mount.control.below_horizon_confirm": (
+            "La cible {target} est sous l'horizon (Alt = {altitude}°). "
+            "Envoyer quand même la commande GoTo ?"
+        ),
         "mount.tracking.on": "activé",
         "mount.tracking.off": "désactivé",
         "mount.tracking.unknown": "inconnu",
@@ -688,6 +734,8 @@ TRANSLATIONS = {
         "mount.tracking.lunar": "lunaire",
         "mount.tracking.solar": "solaire",
         "mount.tracking.king": "King",
+        "mount.goto.available": "disponible",
+        "mount.goto.unavailable": "indisponible",
         "mount.error.unavailable": "ASCOM est indisponible.",
         "mount.error.unavailable_pywin32": "Le support ASCOM nécessite pywin32 sous Windows.",
         "mount.error.platform_missing": "Le sélecteur de la plateforme ASCOM n'est pas installé sur cet ordinateur.",
@@ -703,10 +751,20 @@ TRANSLATIONS = {
             "SynScan est lancé et que la monture y est connectée."
         ),
         "mount.error.disconnect_failed": "Impossible de déconnecter proprement la monture ASCOM.",
+        "mount.error.goto_unsupported": "Cette monture ASCOM ne prend pas en charge les commandes GoTo.",
+        "mount.error.goto_frame_unsupported": (
+            "Cette monture ASCOM expose un repère de coordonnées que AstroClocks ne sait pas encore utiliser pour le GoTo."
+        ),
+        "mount.error.abort_unsupported": (
+            "Cette monture ASCOM ne permet pas d'arrêter une commande GoTo."
+        ),
         "mount.error.not_connected": "La monture ASCOM n'est pas connectée.",
         "mount.error.disconnected": "La monture ASCOM est déconnectée.",
         "mount.error.read_state_failed": "Impossible de lire l'état de connexion de la monture ASCOM.",
         "mount.error.read_coordinates_failed": "Impossible de lire les coordonnées de la monture ASCOM.",
+        "mount.error.goto_failed": "Impossible d'envoyer la commande GoTo à la monture ASCOM.",
+        "mount.error.abort_failed": "Impossible d'arrêter la commande GoTo sur la monture ASCOM.",
+        "mount.error.no_target": "Aucune cible active n'est sélectionnée.",
         "mount.error.generic": "La monture ASCOM a renvoyé une erreur inattendue.",
         "visibility.title": "Courbe d'altitude 12h-12h",
         "visibility.title_named": "Altitude de {target} entre le {start_date} et le {end_date}",

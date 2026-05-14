@@ -190,6 +190,96 @@ def show_error_dialog(app, title, message, parent=None):
     app._reveal_dialog(dialog, anchor=anchor, focus=True)
 
 
+def ask_confirmation_dialog(app, title, message, parent=None, confirm_text=None):
+    anchor = parent or app.root
+    dialog = tk.Toplevel(app.root)
+    dialog.withdraw()
+    dialog.title(title)
+    _apply_app_icon(dialog)
+    dialog.configure(bg=app.gbg)
+    dialog.resizable(False, False)
+    dialog.transient(anchor)
+    dialog.grab_set()
+    app._apply_native_window_chrome(dialog)
+
+    result = {"confirmed": False}
+
+    def close_with(value):
+        result["confirmed"] = value
+        dialog.destroy()
+
+    body = tk.Frame(
+        dialog,
+        bg=app.card_bg,
+        padx=18,
+        pady=18,
+        highlightbackground=app.card_edge,
+        highlightthickness=1,
+        bd=0,
+    )
+    body.grid(column=0, row=0, padx=12, pady=12, sticky="nsew")
+    body.grid_columnconfigure(1, weight=1)
+
+    icon_canvas = tk.Canvas(
+        body,
+        width=44,
+        height=44,
+        bg=app.card_bg,
+        highlightthickness=0,
+        bd=0,
+    )
+    icon_canvas.grid(column=0, row=0, padx=(0, 14), sticky="n")
+    icon_canvas.create_oval(4, 4, 40, 40, fill=app.fg, outline=app.fg)
+    icon_canvas.create_text(
+        22,
+        22,
+        text="?",
+        fill=app.ebg,
+        font=Font(family="Segoe UI", size=18, weight="bold"),
+    )
+
+    text_frame = tk.Frame(body, bg=app.card_bg)
+    text_frame.grid(column=1, row=0, sticky="ew")
+    tk.Label(
+        text_frame,
+        text=title,
+        bg=app.card_bg,
+        fg=app.fg,
+        font=Font(family="Segoe UI", size=12, weight="bold"),
+        anchor="w",
+    ).grid(column=0, row=0, sticky="ew")
+    tk.Label(
+        text_frame,
+        text=message,
+        bg=app.card_bg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+        justify="left",
+        wraplength=380,
+    ).grid(column=0, row=1, sticky="ew", pady=(8, 0))
+
+    actions = tk.Frame(body, bg=app.card_bg)
+    actions.grid(column=0, row=1, columnspan=2, sticky="e", pady=(18, 0))
+    app._build_button(
+        actions,
+        app._tr("button.cancel"),
+        lambda: close_with(False),
+    ).grid(column=0, row=0, padx=(0, 8))
+    app._build_button(
+        actions,
+        confirm_text or app._tr("button.close"),
+        lambda: close_with(True),
+    ).grid(column=1, row=0)
+
+    dialog.bind("<Return>", lambda _event: close_with(True))
+    dialog.bind("<Escape>", lambda _event: close_with(False))
+    _center_dialog_on_window(app, dialog, anchor)
+    app._reveal_dialog(dialog, anchor=anchor, focus=True)
+    dialog.wait_window()
+    return result["confirmed"]
+
+
 def open_about_dialog(
     app,
     app_version,

@@ -80,6 +80,7 @@ SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
 SKY_MAP_CANVAS_REFRESH_SECONDS = 8
 CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD = 2
 MOUNT_POLL_INTERVAL_MS = 250
+MOUNT_TARGET_ACQUIRED_THRESHOLD_DEG = 0.3
 SKY_STAR_BRIGHTNESS_MULTIPLIER = 1.27
 SKY_RENDER_DEBUG = os.environ.get("ASTROCLOCKS_SKY_RENDER_DEBUG") == "1"
 SOLAR_SYSTEM_CACHE_SECONDS = 10
@@ -240,6 +241,7 @@ class AstroClocksApp:
         self.mount_last_error = ""
         self.mount_last_snapshot = None
         self.mount_poll_job = None
+        self.mount_capabilities = ascom_mount.MountCapabilities()
         self.startup_update_check_scheduled = False
         self.startup_update_check_pending = False
         self.startup_update_check_completed = False
@@ -266,6 +268,11 @@ class AstroClocksApp:
         self.sky_base_status_highlights = ()
         self.sky_base_status_color_highlights = ()
         self.sky_status_payload = None
+        self.sky_mount_controls_frame = None
+        self.sky_mount_status_label = None
+        self.sky_mount_buttons_frame = None
+        self.sky_mount_goto_button = None
+        self.sky_mount_abort_button = None
         self.target_jnow_cache_key = None
         self.target_jnow_cache = None
         self.solar_system_cache_key = None
@@ -1128,6 +1135,15 @@ class AstroClocksApp:
             return self._tr("mount.tracking.on")
         return self._tr("mount.tracking.unknown")
 
+    def _mount_goto_label(self, snapshot=None):
+        if snapshot is None or not self._mount_frame_supports_goto(snapshot):
+            return self._tr("mount.goto.unavailable")
+        return (
+            self._tr("mount.goto.available")
+            if self._mount_goto_supported()
+            else self._tr("mount.goto.unavailable")
+        )
+
     def _mount_error_message(self, error):
         text = str(error or "").strip()
         if not text:
@@ -1154,6 +1170,10 @@ class AstroClocksApp:
             "No ASCOM mount driver is selected.": "mount.error.no_driver",
             "The ASCOM mount is not connected.": "mount.error.not_connected",
             "The ASCOM mount is disconnected.": "mount.error.disconnected",
+            "The ASCOM mount does not support GoTo commands.": "mount.error.goto_unsupported",
+            "The ASCOM mount does not support aborting a GoTo command.": (
+                "mount.error.abort_unsupported"
+            ),
         }
         if text in exact_messages:
             return self._tr(exact_messages[text])
@@ -1170,6 +1190,14 @@ class AstroClocksApp:
             (
                 "Unable to read the ASCOM mount coordinates:",
                 "mount.error.read_coordinates_failed",
+            ),
+            (
+                "Unable to send the ASCOM mount GoTo command:",
+                "mount.error.goto_failed",
+            ),
+            (
+                "Unable to stop the ASCOM mount GoTo command:",
+                "mount.error.abort_failed",
             ),
         )
         for prefix, key in prefix_messages:
@@ -1302,6 +1330,321 @@ class AstroClocksApp:
             return j2000_to_jnow_coordinates(snapshot.ra_hours, snapshot.declination)
         return snapshot.ra_hours, snapshot.declination
 
+    def _angular_separation_degrees(self, ra1_hours, dec1_degrees, ra2_hours, dec2_degrees):
+        ra1_rad = math.radians((ra1_hours % 24) * 15)
+        ra2_rad = math.radians((ra2_hours % 24) * 15)
+        dec1_rad = math.radians(dec1_degrees)
+        dec2_rad = math.radians(dec2_degrees)
+        cosine = (
+            math.sin(dec1_rad) * math.sin(dec2_rad)
+            + math.cos(dec1_rad) * math.cos(dec2_rad) * math.cos(ra1_rad - ra2_rad)
+        )
+        cosine = max(-1.0, min(1.0, cosine))
+        return math.degrees(math.acos(cosine))
+
+    def _current_target_jnow_coordinates(self, now_utc=None):
+        if not self.target_active:
+            raise RuntimeError(self._tr("mount.error.no_target"))
+
+        now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+        if self.target_solar_system_name:
+            _state, lst_hours = self._visibility_state_at_time(now_utc)
+            solar_target = self._current_solar_system_target(lst_hours)
+            if solar_target is None:
+                raise RuntimeError(self._tr("mount.error.no_target"))
+            return solar_target["ra_hours"], solar_target["declination"]
+        return self._current_target_coordinates(now_utc=now_utc)
+
+    def _current_target_horizontal_coordinates(self, now_utc=None):
+        now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+        ra_hours, declination = self._current_target_jnow_coordinates(now_utc=now_utc)
+        _state, lst_hours = self._visibility_state_at_time(now_utc)
+        altitude, azimuth, hour_angle = self._equatorial_to_horizontal(
+            ra_hours,
+            declination,
+            lst_hours,
+        )
+        return {
+            "ra_hours": ra_hours,
+            "declination": declination,
+            "altitude": altitude,
+            "azimuth": azimuth,
+            "hour_angle": hour_angle,
+        }
+
+    def _target_mount_separation_degrees(self, now_utc=None):
+        if not self.target_active:
+            return None
+        mount_coordinates = self._mount_jnow_coordinates(self.mount_last_snapshot)
+        if mount_coordinates is None:
+            return None
+
+        now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+        try:
+            target_ra_hours, target_declination = self._current_target_jnow_coordinates(
+                now_utc=now_utc
+            )
+        except RuntimeError:
+            return None
+
+        mount_ra_hours, mount_declination = mount_coordinates
+        return self._angular_separation_degrees(
+            mount_ra_hours,
+            mount_declination,
+            target_ra_hours,
+            target_declination,
+        )
+
+    def _mount_goto_supported(self):
+        return self.mount_connected and bool(self.mount_capabilities.can_slew_async)
+
+    def _mount_abort_supported(self):
+        return self.mount_connected and bool(self.mount_capabilities.can_abort_slew)
+
+    def _mount_frame_supports_goto(self, snapshot=None):
+        snapshot = snapshot or self.mount_last_snapshot
+        if snapshot is None:
+            return False
+        return snapshot.equatorial_system in {
+            ascom_mount.EQUATORIAL_SYSTEM_TOPOCENTRIC,
+            ascom_mount.EQUATORIAL_SYSTEM_J2000,
+        }
+
+    def _current_target_mount_coordinates(self, now_utc=None):
+        if not self.target_active:
+            raise RuntimeError(self._tr("mount.error.no_target"))
+
+        snapshot = self.mount_last_snapshot
+        if snapshot is None:
+            raise RuntimeError(self._tr("mount.error.not_connected"))
+        if not self._mount_frame_supports_goto(snapshot):
+            raise RuntimeError(self._tr("mount.error.goto_frame_unsupported"))
+
+        now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+        ra_hours, declination = self._current_target_jnow_coordinates(now_utc=now_utc)
+
+        if snapshot.equatorial_system == ascom_mount.EQUATORIAL_SYSTEM_J2000:
+            ra_hours, declination = jnow_to_j2000_coordinates(
+                ra_hours,
+                declination,
+                now_utc=now_utc,
+            )
+
+        return ra_hours % 24, max(-90.0, min(90.0, declination))
+
+    def _mount_control_state(self):
+        if not self.mount_connected:
+            return {
+                "visible": False,
+                "status_text": "",
+                "status_color": self.muted,
+                "show_goto": False,
+                "goto_enabled": False,
+                "show_abort": False,
+                "abort_enabled": False,
+            }
+
+        snapshot = self.mount_last_snapshot
+        driver_name = (
+            getattr(snapshot, "driver_name", "")
+            or self.mount_ascom_driver_name
+            or self.mount_ascom_driver_id
+            or self._tr("mount.driver.unnamed")
+        )
+
+        if snapshot is None:
+            return {
+                "visible": True,
+                "status_text": self._tr("mount.control.pending", name=driver_name),
+                "status_color": self.accent,
+                "show_goto": False,
+                "goto_enabled": False,
+                "show_abort": False,
+                "abort_enabled": False,
+            }
+
+        if not self._mount_goto_supported():
+            return {
+                "visible": True,
+                "status_text": self._tr("mount.control.unsupported", name=driver_name),
+                "status_color": self.muted,
+                "show_goto": False,
+                "goto_enabled": False,
+                "show_abort": False,
+                "abort_enabled": False,
+            }
+
+        if not self._mount_frame_supports_goto(snapshot):
+            return {
+                "visible": True,
+                "status_text": self._tr("mount.control.unsupported_frame", name=driver_name),
+                "status_color": self.muted,
+                "show_goto": False,
+                "goto_enabled": False,
+                "show_abort": False,
+                "abort_enabled": False,
+            }
+
+        slewing = bool(getattr(snapshot, "slewing", False))
+        abort_supported = self._mount_abort_supported()
+        if slewing:
+            return {
+                "visible": True,
+                "status_text": self._tr("mount.control.slewing", name=driver_name),
+                "status_color": self.accent,
+                "show_goto": True,
+                "goto_enabled": False,
+                "show_abort": True,
+                "abort_enabled": abort_supported,
+            }
+
+        if not self.target_active:
+            return {
+                "visible": True,
+                "status_text": self._tr("mount.control.no_target", name=driver_name),
+                "status_color": self.muted,
+                "show_goto": True,
+                "goto_enabled": False,
+                "show_abort": True,
+                "abort_enabled": False,
+            }
+
+        separation_degrees = self._target_mount_separation_degrees()
+        if (
+            separation_degrees is not None
+            and separation_degrees <= MOUNT_TARGET_ACQUIRED_THRESHOLD_DEG
+        ):
+            return {
+                "visible": True,
+                "status_text": self._tr(
+                    "mount.control.acquired",
+                    name=driver_name,
+                    target=self._target_display_label(),
+                ),
+                "status_color": self.success,
+                "show_goto": True,
+                "goto_enabled": True,
+                "show_abort": True,
+                "abort_enabled": False,
+            }
+
+        return {
+            "visible": True,
+            "status_text": self._tr(
+                "mount.control.ready",
+                name=driver_name,
+                target=self._target_display_label(),
+            ),
+            "status_color": self.mount_accent,
+            "show_goto": True,
+            "goto_enabled": True,
+            "show_abort": True,
+            "abort_enabled": False,
+        }
+
+    def _refresh_sky_mount_controls(self):
+        if self.sky_mount_controls_frame is None or self.sky_mount_status_label is None:
+            return
+
+        state = self._mount_control_state()
+        if not state["visible"]:
+            self.sky_mount_controls_frame.grid_remove()
+            return
+
+        self.sky_mount_controls_frame.grid()
+        self.sky_mount_status_label.config(
+            text=state["status_text"],
+            fg=state["status_color"],
+        )
+
+        if self.sky_mount_goto_button is not None:
+            if state["show_goto"]:
+                self.sky_mount_goto_button.grid()
+                self.sky_mount_goto_button.config(text=self._tr("mount.control.goto"))
+                self._set_button_enabled(
+                    self.sky_mount_goto_button,
+                    state["goto_enabled"],
+                )
+            else:
+                self.sky_mount_goto_button.grid_remove()
+
+        if self.sky_mount_abort_button is not None:
+            if state["show_abort"]:
+                self.sky_mount_abort_button.grid()
+                self.sky_mount_abort_button.config(text=self._tr("mount.control.abort"))
+                self._set_button_enabled(
+                    self.sky_mount_abort_button,
+                    state["abort_enabled"],
+                )
+            else:
+                self.sky_mount_abort_button.grid_remove()
+
+    def slew_mount_to_target(self):
+        if not self.mount_connected or self.mount_telescope is None:
+            raise RuntimeError(self._tr("mount.error.not_connected"))
+        if not self._mount_goto_supported():
+            raise RuntimeError(self._tr("mount.error.goto_unsupported"))
+
+        target_state = self._current_target_horizontal_coordinates()
+        if target_state["altitude"] < 0:
+            try:
+                confirmed = app_dialogs.ask_confirmation_dialog(
+                    self,
+                    self._tr("mount.control.title"),
+                    self._tr(
+                        "mount.control.below_horizon_confirm",
+                        target=self._target_display_label(),
+                        altitude=f"{target_state['altitude']:+.2f}",
+                    ),
+                    parent=self.root,
+                    confirm_text=self._tr("mount.control.goto"),
+                )
+            except (tk.TclError, RuntimeError):
+                confirmed = True
+            if not confirmed:
+                self._refresh_sky_mount_controls()
+                return
+
+        ra_hours, declination = self._current_target_mount_coordinates()
+        try:
+            ascom_mount.slew_to_coordinates(self.mount_telescope, ra_hours, declination)
+        except Exception as exc:
+            raise RuntimeError(self._mount_error_message(exc)) from exc
+
+        self.mount_last_error = ""
+        self._schedule_mount_poll(80)
+        self._refresh_sky_mount_controls()
+
+    def abort_mount_slew(self):
+        if not self.mount_connected or self.mount_telescope is None:
+            raise RuntimeError(self._tr("mount.error.not_connected"))
+        if not self._mount_abort_supported():
+            raise RuntimeError(self._tr("mount.error.abort_unsupported"))
+
+        try:
+            ascom_mount.abort_slew(self.mount_telescope)
+        except Exception as exc:
+            raise RuntimeError(self._mount_error_message(exc)) from exc
+
+        self.mount_last_error = ""
+        self._schedule_mount_poll(80)
+        self._refresh_sky_mount_controls()
+
+    def _run_mount_control_action(self, action):
+        try:
+            action()
+        except RuntimeError as exc:
+            try:
+                app_dialogs.show_error_dialog(
+                    self,
+                    self._tr("mount.control.title"),
+                    str(exc),
+                    parent=self.root,
+                )
+            except (tk.TclError, RuntimeError):
+                pass
+            self._refresh_sky_mount_controls()
+
     def _poll_ascom_mount(self):
         self.mount_poll_job = None
         if not self.mount_connected:
@@ -1318,6 +1661,7 @@ class AstroClocksApp:
             self.mount_connected = False
             self.mount_telescope = None
             self.mount_last_snapshot = None
+            self.mount_capabilities = ascom_mount.MountCapabilities()
             self.mount_last_error = self._mount_error_message(exc)
             self._cancel_mount_poll()
             site_changed = self._active_site_context() != previous_site_context
@@ -1328,6 +1672,7 @@ class AstroClocksApp:
                 if site_changed:
                     self.update_site_labels()
                 self._update_sky_map()
+                self._refresh_sky_mount_controls()
                 if site_changed:
                     self._update_visibility_chart()
             except (tk.TclError, RuntimeError):
@@ -1344,6 +1689,7 @@ class AstroClocksApp:
             if site_changed:
                 self.update_site_labels()
             self._update_sky_map()
+            self._refresh_sky_mount_controls()
             if site_changed:
                 self._update_visibility_chart()
         except (tk.TclError, RuntimeError):
@@ -1364,11 +1710,26 @@ class AstroClocksApp:
             status_color = self.danger
         elif self.mount_connected and snapshot_ready:
             snapshot = self.mount_last_snapshot
+            details = [
+                self._tr(
+                    "mount.status.segment_frame",
+                    frame=self._mount_equatorial_frame_label(snapshot.equatorial_system),
+                ),
+                self._tr(
+                    "mount.status.segment_tracking",
+                    tracking=self._mount_tracking_label(snapshot),
+                ),
+                self._tr(
+                    "mount.status.segment_goto",
+                    value=self._mount_goto_label(snapshot),
+                ),
+            ]
+            if getattr(snapshot, "slewing", False):
+                details.append(self._tr("mount.status.segment_slewing"))
             status_text = self._tr(
                 "mount.status.connected_coords",
                 name=snapshot.driver_name or snapshot.driver_id,
-                frame=self._mount_equatorial_frame_label(snapshot.equatorial_system),
-                tracking=self._mount_tracking_label(snapshot),
+                details=" | ".join(details),
             )
             status_color = self.success
         elif self.mount_connected:
@@ -1438,6 +1799,7 @@ class AstroClocksApp:
                 self.mount_ascom_driver_id,
                 driver_name or self.mount_ascom_driver_id,
             )
+            capabilities = ascom_mount.read_capabilities(telescope)
         except Exception as exc:
             if "telescope" in locals() and telescope is not None:
                 try:
@@ -1447,11 +1809,13 @@ class AstroClocksApp:
             error_message = self._mount_connect_error_message(exc)
             self.mount_telescope = None
             self.mount_connected = False
+            self.mount_capabilities = ascom_mount.MountCapabilities()
             self.mount_last_snapshot = None
             self.mount_last_error = error_message
             raise RuntimeError(error_message) from exc
         self.mount_telescope = telescope
         self.mount_connected = True
+        self.mount_capabilities = capabilities
         self.mount_ascom_driver_name = driver_name or self.mount_ascom_driver_id
         self.mount_last_error = ""
         self.mount_last_snapshot = snapshot
@@ -1463,6 +1827,7 @@ class AstroClocksApp:
             if site_changed:
                 self.update_site_labels()
             self._update_sky_map()
+            self._refresh_sky_mount_controls()
             if site_changed:
                 self._update_visibility_chart()
         except (tk.TclError, RuntimeError):
@@ -1480,6 +1845,7 @@ class AstroClocksApp:
                     raise RuntimeError(self._mount_error_message(exc)) from exc
         self.mount_telescope = None
         self.mount_connected = False
+        self.mount_capabilities = ascom_mount.MountCapabilities()
         self.mount_last_snapshot = None
         if silent:
             self.mount_last_error = ""
@@ -1487,6 +1853,7 @@ class AstroClocksApp:
         self.update_site_labels()
         try:
             self._update_sky_map()
+            self._refresh_sky_mount_controls()
         except (tk.TclError, RuntimeError):
             pass
         return self.mount_settings_state()
@@ -2633,6 +3000,7 @@ class AstroClocksApp:
         self.visibility_cache_key = None
         self.sky_map_cache_key = None
         self._update_sky_map()
+        self._refresh_sky_mount_controls()
         self._update_visibility_chart()
 
     def update_site_labels(self):

@@ -23,10 +23,18 @@ class MountSnapshot:
     ra_hours: float
     declination: float
     equatorial_system: int
+    slewing: bool | None = None
     tracking: bool | None = None
     tracking_rate: int | None = None
     site_latitude: float | None = None
     site_longitude: float | None = None
+
+
+@dataclass
+class MountCapabilities:
+    can_slew: bool = False
+    can_slew_async: bool = False
+    can_abort_slew: bool = False
 
 
 def _read_optional_float(value_getter):
@@ -60,6 +68,27 @@ def _read_optional_int(value_getter):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _read_optional_bool(value_getter):
+    try:
+        value = value_getter()
+    except Exception:
+        return None
+    if value is None:
+        return None
+    try:
+        return bool(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_callable_member(target, name):
+    try:
+        member = getattr(target, name)
+    except Exception:
+        return False
+    return callable(member)
 
 
 def _require_ascom():
@@ -132,6 +161,53 @@ def disconnect(telescope):
         raise AscomMountError(f"Unable to disconnect the ASCOM mount: {exc}") from exc
 
 
+def read_capabilities(telescope):
+    _require_ascom()
+    if telescope is None:
+        raise AscomMountError("The ASCOM mount is not connected.")
+    can_slew = _read_optional_bool(lambda: getattr(telescope, "CanSlew"))
+    can_slew_async = _read_optional_bool(lambda: getattr(telescope, "CanSlewAsync"))
+    can_abort_slew = _read_optional_bool(lambda: getattr(telescope, "CanAbortSlew"))
+    return MountCapabilities(
+        can_slew=bool(can_slew),
+        can_slew_async=bool(can_slew_async),
+        can_abort_slew=bool(can_abort_slew) or _has_callable_member(telescope, "AbortSlew"),
+    )
+
+
+def slew_to_coordinates(telescope, ra_hours, declination):
+    _require_ascom()
+    if telescope is None:
+        raise AscomMountError("The ASCOM mount is not connected.")
+    capabilities = read_capabilities(telescope)
+    if capabilities.can_slew_async:
+        method_name = "SlewToCoordinatesAsync"
+    elif capabilities.can_slew:
+        method_name = "SlewToCoordinates"
+    else:
+        raise AscomMountError("The ASCOM mount does not support GoTo commands.")
+    try:
+        getattr(telescope, method_name)(
+            float(ra_hours) % 24,
+            max(-90.0, min(90.0, float(declination))),
+        )
+    except Exception as exc:  # pragma: no cover - depends on driver behavior
+        raise AscomMountError(f"Unable to send the ASCOM mount GoTo command: {exc}") from exc
+
+
+def abort_slew(telescope):
+    _require_ascom()
+    if telescope is None:
+        raise AscomMountError("The ASCOM mount is not connected.")
+    capabilities = read_capabilities(telescope)
+    if not capabilities.can_abort_slew:
+        raise AscomMountError("The ASCOM mount does not support aborting a GoTo command.")
+    try:
+        telescope.AbortSlew()
+    except Exception as exc:  # pragma: no cover - depends on driver behavior
+        raise AscomMountError(f"Unable to stop the ASCOM mount GoTo command: {exc}") from exc
+
+
 def read_snapshot(telescope, driver_id, driver_name):
     _require_ascom()
     if telescope is None:
@@ -155,6 +231,7 @@ def read_snapshot(telescope, driver_id, driver_name):
         tracking = bool(getattr(telescope, "Tracking"))
     except Exception:
         tracking = None
+    slewing = _read_optional_bool(lambda: getattr(telescope, "Slewing"))
     tracking_rate = _read_optional_int(lambda: getattr(telescope, "TrackingRate"))
     site_latitude = _read_optional_float(lambda: getattr(telescope, "SiteLatitude"))
     if site_latitude is not None:
@@ -168,6 +245,7 @@ def read_snapshot(telescope, driver_id, driver_name):
         ra_hours=ra_hours % 24,
         declination=max(-90.0, min(90.0, declination)),
         equatorial_system=equatorial_system,
+        slewing=slewing,
         tracking=tracking,
         tracking_rate=tracking_rate,
         site_latitude=site_latitude,
