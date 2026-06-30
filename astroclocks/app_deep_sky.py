@@ -29,10 +29,12 @@ from astroclocks.settings import (
     DEFAULT_DEEP_SKY_VISIBLE_NIGHT,
     DEEP_SKY_MAGNITUDE_BANDS,
 )
+from astroclocks.runtime_logging import get_logger, log_exception
 
 
 DEEP_SKY_NIGHT_SUN_MAX_ALTITUDE = -6
 DEEP_SKY_NIGHT_TARGET_MIN_ALTITUDE = 10
+LOGGER = get_logger(__name__)
 
 
 def _create_deep_sky_widgets(self):
@@ -960,6 +962,7 @@ def _run_deep_sky_search(
                     )
                 )
             except Exception as exc:
+                log_exception(LOGGER, "Deep-sky online search failed", exc)
                 notes.append(self._tr("deep_sky.online_error", error=str(exc)))
 
         category_catalog = [
@@ -998,6 +1001,7 @@ def _run_deep_sky_search(
             },
         )
     except Exception as exc:
+        log_exception(LOGGER, "Deep-sky search pipeline failed", exc)
         self._queue_deep_sky_search_results(
             generation,
             {
@@ -1013,7 +1017,8 @@ def _queue_deep_sky_search_results(self, generation, payload):
             0,
             lambda: self._apply_deep_sky_search_results(generation, payload),
         )
-    except (tk.TclError, RuntimeError):
+    except (tk.TclError, RuntimeError) as exc:
+        log_exception(LOGGER, "Unable to schedule deep-sky search results on the UI thread", exc)
         self.deep_sky_search_pending = False
 
 def _apply_deep_sky_search_results(self, generation, payload):

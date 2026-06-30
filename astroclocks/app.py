@@ -45,6 +45,12 @@ from astroclocks.double_star_catalog import load_cached_wds_double_stars
 from astroclocks.deep_sky_catalog import load_cached_simbad_deep_sky_objects
 from astroclocks.i18n import translate
 from astroclocks.orbit_catalog import load_cached_orb6_ephemerides, load_cached_orb6_orbits
+from astroclocks.runtime_logging import (
+    configure_runtime_logging,
+    get_logger,
+    install_global_exception_hooks,
+    log_exception,
+)
 from astroclocks.settings import (
     AppSettings,
     COORDINATE_SOURCE_APP,
@@ -71,9 +77,11 @@ from astroclocks.windowing import (
     pointer_monitor_geometry as window_pointer_monitor_geometry,
 )
 from astroclocks.version import APP_RELEASE_DATE, APP_VERSION
+
 APP_AUTHOR = "Yannis Benazza"
 APP_EMAIL = "yannis.benazza@obspm.fr"
 APP_PHONE = "01 45 07 71 59"
+LOGGER = get_logger(__name__)
 CLOCK_REFRESH_HZ = 15
 CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
@@ -885,6 +893,15 @@ class AstroClocksApp:
 
         self._enter_fullscreen()
 
+    def _restore_root_chrome_after_fullscreen(self):
+        """Reapply DWM colors after Tk recreates the native window frame."""
+        self._apply_native_window_chrome(self.root)
+        try:
+            self.root.after_idle(lambda: self._apply_native_window_chrome(self.root))
+            self.root.after(75, lambda: self._apply_native_window_chrome(self.root))
+        except (tk.TclError, RuntimeError):
+            pass
+
     def _exit_fullscreen(self, _event=None):
         self.root.attributes("-topmost", False)
         self.root.attributes("-fullscreen", False)
@@ -900,6 +917,7 @@ class AstroClocksApp:
             self.root.update_idletasks()
         except (tk.TclError, RuntimeError):
             pass
+        self._restore_root_chrome_after_fullscreen()
         self.is_fullscreen = False
 
     def _create_header(self):
@@ -1658,6 +1676,7 @@ class AstroClocksApp:
                 self.mount_ascom_driver_name,
             )
         except Exception as exc:
+            log_exception(LOGGER, "ASCOM mount polling failed", exc)
             self.mount_connected = False
             self.mount_telescope = None
             self.mount_last_snapshot = None
@@ -1806,6 +1825,7 @@ class AstroClocksApp:
                     ascom_mount.disconnect(telescope)
                 except Exception:
                     pass
+            log_exception(LOGGER, "ASCOM mount connection failed", exc)
             error_message = self._mount_connect_error_message(exc)
             self.mount_telescope = None
             self.mount_connected = False
@@ -3396,8 +3416,11 @@ def _create_loading_window():
     return root, window, status_var
 
 def main(root=None, loading_window=None, loading_status_var=None):
+    configure_runtime_logging()
+    install_global_exception_hooks()
     if root is None and loading_window is None and loading_status_var is None:
         root, loading_window, loading_status_var = _create_loading_window()
+    install_global_exception_hooks(root)
     app = AstroClocksApp(
         root=root,
         loading_window=loading_window,

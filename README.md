@@ -69,6 +69,16 @@ Les artefacts sont produits dans :
 La verification de release controle que la version, l'installeur, le nom fixe
 de l'executable et le changelog restent coherents avec les artefacts generes.
 
+## Journaux runtime
+
+AstroClocks ecrit maintenant un journal runtime rotatif dans :
+
+- `%LOCALAPPDATA%\AstroClocks\logs\astroclocks.log` sous Windows ;
+- ou `ASTROCLOCKS_LOG_DIR` si cette variable d'environnement est definie.
+
+Ce fichier capture les exceptions non gerees Python, threads et callbacks Tk,
+ainsi que certains incidents ASCOM utiles au diagnostic.
+
 ## Fonctions en ligne
 
 Une connexion internet est necessaire pour :
