@@ -16,7 +16,16 @@ from tkinter.font import Font
 from astroclocks.double_star_catalog import build_wds_notes_url, fetch_wds_notes
 from astroclocks.i18n import LANGUAGE_NAMES, LANGUAGE_OPTIONS
 from astroclocks.orbit_catalog import orbit_position_at_year, sample_orbit_points
+from astroclocks.secure_store import (
+    SecureStoreUnavailable,
+    delete_meteofrance_application_id,
+    has_meteofrance_application_id,
+    save_meteofrance_application_id,
+)
 from astroclocks.settings import (
+    ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_NONE,
+    ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
     COORDINATE_SOURCE_APP,
     COORDINATE_SOURCE_MOUNT,
     DEFAULT_ALADIN_FOV_DEG,
@@ -28,6 +37,11 @@ from astroclocks.settings import (
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
     DEFAULT_MOUNT_SHOW_RETICLE,
+    DEFAULT_MOUNT_REFRACTION_MODEL,
+    DEFAULT_REFRACTION_ALTITUDE_M,
+    DEFAULT_REFRACTION_PRESSURE_HPA,
+    DEFAULT_REFRACTION_STATION_RADIUS_KM,
+    DEFAULT_REFRACTION_TEMPERATURE_C,
     DEFAULT_SITE_NAME,
     DEFAULT_SKY_MAGNITUDE_LIMIT,
     DEFAULT_SKY_SHOW_ALTAZ_GRID,
@@ -35,9 +49,15 @@ from astroclocks.settings import (
     DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
     DEFAULT_TIMEZONE_NAME,
     MAX_SKY_MAGNITUDE_LIMIT,
+    REFRACTION_STATION_RADIUS_OPTIONS_KM,
 )
 from astroclocks.sites import LOCATION_PRESETS, preset_label
 from astroclocks.utils import resource_path
+from astroclocks.weather import (
+    fetch_pressure_for_station,
+    nearest_pressure_station_options,
+    test_meteofrance_api_key,
+)
 
 
 def _apply_app_icon(window, default=False):
@@ -693,6 +713,181 @@ def open_visibility_calendar(app):
     app._place_dialog_below_widget(dialog, app.visibility_calendar_button)
     app._reveal_dialog(dialog, anchor=app.root, focus=False)
 
+def open_meteofrance_api_dialog(app, parent=None):
+    dialog = tk.Toplevel(parent or app.root)
+    dialog.withdraw()
+    dialog.title(app._tr("settings.meteofrance_api_title"))
+    _apply_app_icon(dialog)
+    dialog.configure(bg=app.gbg)
+    dialog.transient(parent or app.root)
+    dialog.grab_set()
+    dialog.resizable(False, False)
+    app._apply_native_window_chrome(dialog)
+
+    body = tk.Frame(dialog, bg=app.gbg, padx=18, pady=16)
+    body.grid(column=0, row=0, sticky="nsew")
+    body.grid_columnconfigure(0, weight=1)
+
+    tk.Label(
+        body,
+        text=app._tr("settings.meteofrance_api_help"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        justify="left",
+        wraplength=520,
+        anchor="w",
+    ).grid(column=0, row=0, sticky="ew")
+
+    key_var = tk.StringVar(value="")
+    try:
+        configured = has_meteofrance_application_id()
+    except SecureStoreUnavailable:
+        configured = False
+    status_var = tk.StringVar(
+        value=(
+            app._tr("settings.meteofrance_api_configured")
+            if configured
+            else app._tr("settings.meteofrance_api_missing")
+        )
+    )
+    key_entry = tk.Entry(
+        body,
+        textvariable=key_var,
+        bg=app.ebg,
+        fg=app.text,
+        insertbackground=app.fg,
+        font=Font(family="Segoe UI", size=10),
+        relief="flat",
+        highlightbackground=app.card_edge,
+        highlightcolor=app.accent,
+        highlightthickness=1,
+        width=72,
+        show="•",
+    )
+    key_entry.grid(column=0, row=1, pady=(12, 0), sticky="ew")
+
+    status_label = tk.Label(
+        body,
+        textvariable=status_var,
+        bg=app.gbg,
+        fg=app.muted,
+        font=Font(family="Segoe UI", size=9),
+        justify="left",
+        wraplength=520,
+        anchor="w",
+    )
+    status_label.grid(column=0, row=2, pady=(8, 12), sticky="ew")
+
+    def set_status(text, color=None):
+        status_var.set(text)
+        status_label.config(fg=color or app.muted)
+        try:
+            dialog.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def save_key():
+        try:
+            save_meteofrance_application_id(key_var.get())
+        except (ValueError, SecureStoreUnavailable, OSError) as exc:
+            set_status(app._tr("settings.meteofrance_api_save_error", error=exc), app.danger)
+            return False
+        key_var.set("")
+        set_status(app._tr("settings.meteofrance_api_saved"), app.success)
+        return True
+
+    def test_key():
+        if key_var.get().strip() and not save_key():
+            return
+        set_status(app._tr("settings.meteofrance_api_testing"), app.accent)
+
+        def worker():
+            try:
+                result = test_meteofrance_api_key()
+                error = None
+            except Exception as exc:
+                result = None
+                error = exc
+
+            def finish():
+                if error is not None:
+                    set_status(
+                        app._tr("settings.meteofrance_api_test_error", error=error),
+                        app.danger,
+                    )
+                    return
+                if not result:
+                    set_status(app._tr("settings.meteofrance_api_test_empty"), app.danger)
+                    return
+                if result.get("observations_available"):
+                    set_status(
+                        app._tr(
+                            "settings.meteofrance_api_test_ok",
+                            count=result.get("station_count", 0),
+                        ),
+                        app.success,
+                    )
+                    return
+                if result.get("climatology_available"):
+                    set_status(
+                        app._tr(
+                            "settings.meteofrance_api_test_climatology_only",
+                            count=result.get("station_count", 0),
+                            error=result.get("observation_error") or "—",
+                        ),
+                        app.danger,
+                    )
+                    return
+                set_status(
+                    app._tr(
+                        "settings.meteofrance_api_test_empty",
+                    ),
+                    app.danger,
+                )
+
+            try:
+                dialog.after(0, finish)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def clear_key():
+        try:
+            delete_meteofrance_application_id()
+        except OSError as exc:
+            set_status(app._tr("settings.meteofrance_api_save_error", error=exc), app.danger)
+            return
+        set_status(app._tr("settings.meteofrance_api_deleted"), app.success)
+
+    actions = tk.Frame(body, bg=app.gbg)
+    actions.grid(column=0, row=3, sticky="e")
+    app._build_button(actions, app._tr("button.save"), save_key).grid(
+        column=0,
+        row=0,
+        padx=(0, 8),
+    )
+    app._build_button(actions, app._tr("button.test"), test_key).grid(
+        column=1,
+        row=0,
+        padx=(0, 8),
+    )
+    app._build_button(actions, app._tr("button.delete"), clear_key).grid(
+        column=2,
+        row=0,
+        padx=(0, 8),
+    )
+    app._build_button(actions, app._tr("button.close"), dialog.destroy).grid(
+        column=3,
+        row=0,
+    )
+
+    dialog.bind("<Escape>", lambda _event: dialog.destroy())
+    _center_dialog_on_window(app, dialog, parent=parent)
+    app._reveal_dialog(dialog, anchor=parent or app.root, focus=True)
+
+
 def open_settings_dialog(app):
     dialog = tk.Toplevel(app.root)
     dialog.withdraw()
@@ -725,6 +920,43 @@ def open_settings_dialog(app):
     sky_show_equatorial_grid_var = tk.BooleanVar(value=app.sky_show_equatorial_grid)
     sky_show_solar_system_var = tk.BooleanVar(value=app.sky_show_solar_system)
     mount_show_reticle_var = tk.BooleanVar(value=app.mount_show_reticle)
+    refraction_model_labels = {
+        ATMOSPHERIC_REFRACTION_NONE: app._tr("settings.refraction_none"),
+        ATMOSPHERIC_REFRACTION_BENNETT: app._tr("settings.refraction_bennett"),
+        ATMOSPHERIC_REFRACTION_SAEMUNDSSON: app._tr("settings.refraction_saemundsson"),
+    }
+    refraction_model_lookup = {
+        label: code for code, label in refraction_model_labels.items()
+    }
+    mount_refraction_var = tk.StringVar(
+        value=refraction_model_labels.get(
+            app.mount_refraction_model,
+            refraction_model_labels[DEFAULT_MOUNT_REFRACTION_MODEL],
+        )
+    )
+    refraction_pressure_var = tk.StringVar(value=f"{app.refraction_pressure_hpa:.1f}")
+    refraction_temperature_var = tk.StringVar(value=f"{app.refraction_temperature_c:.1f}")
+    refraction_altitude_var = tk.StringVar(value=f"{app.refraction_altitude_m:.0f}")
+    refraction_radius_labels = {
+        app._tr("settings.refraction_station_radius_option", radius=radius): radius
+        for radius in REFRACTION_STATION_RADIUS_OPTIONS_KM
+    }
+    refraction_radius_value = getattr(
+        app,
+        "refraction_station_radius_km",
+        DEFAULT_REFRACTION_STATION_RADIUS_KM,
+    )
+    if refraction_radius_value not in REFRACTION_STATION_RADIUS_OPTIONS_KM:
+        refraction_radius_value = DEFAULT_REFRACTION_STATION_RADIUS_KM
+    refraction_radius_var = tk.StringVar(
+        value=app._tr(
+            "settings.refraction_station_radius_option",
+            radius=refraction_radius_value,
+        )
+    )
+    refraction_station_var = tk.StringVar(value="")
+    refraction_weather_status_var = tk.StringVar(value="")
+    refraction_station_choices = {}
     hour_angle_offset_var = tk.BooleanVar(value=app.hour_angle_offset_enabled)
     declination_offset_var = tk.BooleanVar(value=app.declination_offset_enabled)
     coordinate_source_labels = {
@@ -984,6 +1216,299 @@ def open_settings_dialog(app):
         state="readonly",
     )
     coordinate_source_combo.grid(column=1, row=1, pady=7, sticky="ew")
+    add_label(mount_tab, 2, app._tr("settings.mount_refraction_model"))
+    mount_refraction_combo = ttk.Combobox(
+        mount_tab,
+        textvariable=mount_refraction_var,
+        values=list(refraction_model_lookup),
+        font=Font(family="Segoe UI", size=10),
+        width=42,
+        state="readonly",
+    )
+    mount_refraction_combo.grid(column=1, row=2, pady=7, sticky="ew")
+    add_label(mount_tab, 3, app._tr("settings.refraction_parameters"))
+    refraction_options = tk.Frame(mount_tab, bg=app.gbg)
+    refraction_options.grid(column=1, row=3, pady=7, sticky="ew")
+    refraction_options.grid_columnconfigure(1, weight=1)
+    refraction_options.grid_columnconfigure(2, weight=1)
+    tk.Label(
+        refraction_options,
+        text=app._tr("settings.refraction_pressure"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+    ).grid(column=0, row=0, padx=(0, 10), sticky="w")
+    tk.Entry(
+        refraction_options,
+        textvariable=refraction_pressure_var,
+        bg=app.ebg,
+        fg=app.text,
+        insertbackground=app.fg,
+        font=Font(family="Segoe UI", size=10),
+        relief="flat",
+        highlightbackground=app.card_edge,
+        highlightcolor=app.accent,
+        highlightthickness=1,
+        width=8,
+    ).grid(column=1, row=0, sticky="w")
+    tk.Label(
+        refraction_options,
+        text=app._tr("settings.refraction_temperature"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+    ).grid(column=0, row=1, padx=(0, 10), pady=(5, 0), sticky="w")
+    tk.Entry(
+        refraction_options,
+        textvariable=refraction_temperature_var,
+        bg=app.ebg,
+        fg=app.text,
+        insertbackground=app.fg,
+        font=Font(family="Segoe UI", size=10),
+        relief="flat",
+        highlightbackground=app.card_edge,
+        highlightcolor=app.accent,
+        highlightthickness=1,
+        width=8,
+    ).grid(column=1, row=1, pady=(5, 0), sticky="w")
+    tk.Label(
+        refraction_options,
+        text=app._tr("settings.refraction_altitude"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+    ).grid(column=0, row=2, padx=(0, 10), pady=(5, 0), sticky="w")
+    tk.Entry(
+        refraction_options,
+        textvariable=refraction_altitude_var,
+        bg=app.ebg,
+        fg=app.text,
+        insertbackground=app.fg,
+        font=Font(family="Segoe UI", size=10),
+        relief="flat",
+        highlightbackground=app.card_edge,
+        highlightcolor=app.accent,
+        highlightthickness=1,
+        width=8,
+    ).grid(column=1, row=2, pady=(5, 0), sticky="w")
+    refraction_radius_frame = tk.Frame(refraction_options, bg=app.gbg)
+    refraction_radius_frame.grid(column=0, row=3, columnspan=3, pady=(8, 0), sticky="ew")
+    tk.Label(
+        refraction_radius_frame,
+        text=app._tr("settings.refraction_station_radius"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+    ).grid(column=0, row=0, padx=(0, 10), sticky="w")
+    refraction_radius_combo = ttk.Combobox(
+        refraction_radius_frame,
+        textvariable=refraction_radius_var,
+        values=list(refraction_radius_labels),
+        font=Font(family="Segoe UI", size=10),
+        width=10,
+        state="readonly",
+    )
+    refraction_radius_combo.grid(column=1, row=0, sticky="w")
+    refraction_station_actions = tk.Frame(refraction_options, bg=app.gbg)
+    refraction_station_actions.grid(column=0, row=4, columnspan=2, pady=(8, 0), sticky="ew")
+    refraction_station_actions.grid_columnconfigure(1, weight=1)
+    refraction_station_button = app._build_button(
+        refraction_station_actions,
+        app._tr("settings.refraction_find_stations"),
+        lambda: None,
+    )
+    refraction_station_button.grid(column=0, row=0, sticky="w")
+    app._build_button(
+        refraction_station_actions,
+        app._tr("settings.meteofrance_api_configure"),
+        lambda: open_meteofrance_api_dialog(app, parent=dialog),
+    ).grid(column=1, row=0, padx=(8, 0), sticky="w")
+    refraction_station_combo = ttk.Combobox(
+        refraction_options,
+        textvariable=refraction_station_var,
+        values=[],
+        font=Font(family="Segoe UI", size=10),
+        width=84,
+        state="disabled",
+    )
+    refraction_station_combo.grid(
+        column=0,
+        row=5,
+        columnspan=3,
+        pady=(8, 0),
+        sticky="ew",
+    )
+    refraction_weather_button = app._build_button(
+        refraction_options,
+        app._tr("settings.refraction_fetch_weather"),
+        lambda: None,
+    )
+    refraction_weather_button.config(state=tk.DISABLED)
+    refraction_weather_button.grid(column=0, row=6, columnspan=2, pady=(8, 0), sticky="w")
+    refraction_weather_status = tk.Label(
+        refraction_options,
+        textvariable=refraction_weather_status_var,
+        bg=app.gbg,
+        fg=app.muted,
+        font=Font(family="Segoe UI", size=9),
+        anchor="w",
+        justify="left",
+        wraplength=420,
+    )
+    refraction_weather_status.grid(column=0, row=7, columnspan=3, pady=(5, 0), sticky="ew")
+
+    def selected_refraction_station():
+        return refraction_station_choices.get(refraction_station_var.get())
+
+    def find_refraction_stations():
+        try:
+            latitude = app._parse_float_setting(
+                latitude_var.get(),
+                app._tr("settings.latitude"),
+                -90,
+                90,
+            )
+            longitude = app._parse_float_setting(
+                longitude_var.get(),
+                app._tr("settings.longitude"),
+                -180,
+                180,
+            )
+        except ValueError as exc:
+            show_error_dialog(app, app._tr("settings.invalid_title"), str(exc), parent=dialog)
+            return
+        radius_km = refraction_radius_labels.get(
+            refraction_radius_var.get(),
+            DEFAULT_REFRACTION_STATION_RADIUS_KM,
+        )
+
+        refraction_station_button.config(state=tk.DISABLED)
+        refraction_weather_button.config(state=tk.DISABLED)
+        refraction_weather_status.config(fg=app.accent)
+        refraction_weather_status_var.set(app._tr("settings.refraction_stations_loading"))
+
+        def worker():
+            try:
+                stations = nearest_pressure_station_options(
+                    latitude,
+                    longitude,
+                    limit=3,
+                    max_distance_km=radius_km,
+                )
+                error = None
+            except Exception as exc:
+                stations = []
+                error = exc
+
+            def finish():
+                refraction_station_button.config(state=tk.NORMAL)
+                if error is not None:
+                    refraction_weather_status.config(fg=app.danger)
+                    refraction_weather_status_var.set(
+                        app._tr("settings.refraction_weather_error", error=error)
+                    )
+                    return
+                if not stations:
+                    refraction_station_choices.clear()
+                    refraction_station_combo.config(values=[], state="disabled")
+                    refraction_station_var.set("")
+                    refraction_weather_status.config(fg=app.danger)
+                    refraction_weather_status_var.set(
+                        app._tr("settings.refraction_stations_unavailable")
+                    )
+                    return
+                station_labels = []
+                refraction_station_choices.clear()
+                for station in stations:
+                    label = app._tr(
+                        "settings.refraction_station_option",
+                        source=station["source"],
+                        station=station["station_id"],
+                        name=station["station_name"],
+                        distance=f"{station['distance_km']:.1f}",
+                        pressure=f"{station['pressure_hpa']:.1f}",
+                        time=(station.get("report_time") or app._tr("weather.time_unknown")),
+                    )
+                    station_labels.append(label)
+                    refraction_station_choices[label] = station
+                refraction_station_combo.config(values=station_labels, state="readonly")
+                refraction_station_var.set(station_labels[0])
+                refraction_weather_button.config(state=tk.NORMAL)
+                refraction_weather_status.config(fg=app.success)
+                refraction_weather_status_var.set(
+                    app._tr("settings.refraction_stations_loaded", count=len(station_labels))
+                )
+
+            try:
+                dialog.after(0, finish)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def fetch_refraction_weather():
+        station = selected_refraction_station()
+        if station is None:
+            refraction_weather_status.config(fg=app.danger)
+            refraction_weather_status_var.set(app._tr("settings.refraction_station_required"))
+            return
+
+        refraction_station_button.config(state=tk.DISABLED)
+        refraction_weather_button.config(state=tk.DISABLED)
+        refraction_weather_status.config(fg=app.accent)
+        refraction_weather_status_var.set(
+            app._tr("settings.refraction_weather_loading", station=station["station_id"])
+        )
+
+        def worker():
+            try:
+                result = fetch_pressure_for_station(station)
+                error = None
+            except Exception as exc:
+                result = None
+                error = exc
+
+            def finish():
+                refraction_station_button.config(state=tk.NORMAL)
+                refraction_weather_button.config(state=tk.NORMAL)
+                if error is not None:
+                    refraction_weather_status.config(fg=app.danger)
+                    refraction_weather_status_var.set(
+                        app._tr("settings.refraction_weather_error", error=error)
+                    )
+                    return
+                if result is None:
+                    refraction_weather_status.config(fg=app.danger)
+                    refraction_weather_status_var.set(
+                        app._tr("settings.refraction_weather_unavailable")
+                    )
+                    return
+                refraction_pressure_var.set(f"{result['pressure_hpa']:.1f}")
+                if result.get("temperature_c") is not None:
+                    refraction_temperature_var.set(f"{float(result['temperature_c']):.1f}")
+                refraction_weather_status.config(fg=app.success)
+                refraction_weather_status_var.set(
+                    app._tr(
+                        "settings.refraction_weather_loaded",
+                        station=result["station_id"],
+                        distance=f"{result['distance_km']:.0f}",
+                        pressure=f"{result['pressure_hpa']:.1f}",
+                    )
+                )
+
+            try:
+                dialog.after(0, finish)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    refraction_station_button.config(command=find_refraction_stations)
+    refraction_weather_button.config(command=fetch_refraction_weather)
     mount_reticle_toggle = build_checkbutton(
         mount_options,
         mount_show_reticle_var,
@@ -1158,6 +1683,19 @@ def open_settings_dialog(app):
     )
     hint.grid(column=0, row=1, pady=(10, 12), sticky="ew")
 
+    def sync_settings_hint(_event=None):
+        try:
+            current_tab = notebook.nametowidget(notebook.select())
+        except tk.TclError:
+            return
+        if current_tab is general_tab:
+            hint.grid()
+        else:
+            hint.grid_remove()
+
+    notebook.bind("<<NotebookTabChanged>>", sync_settings_hint, add="+")
+    sync_settings_hint()
+
     actions = tk.Frame(body, bg=app.gbg)
     actions.grid(column=0, row=2, sticky="e")
 
@@ -1177,6 +1715,16 @@ def open_settings_dialog(app):
         sky_show_solar_system_var.set(DEFAULT_SKY_SHOW_SOLAR_SYSTEM)
         coordinate_source_var.set(coordinate_source_labels[DEFAULT_COORDINATE_SOURCE])
         mount_show_reticle_var.set(DEFAULT_MOUNT_SHOW_RETICLE)
+        mount_refraction_var.set(refraction_model_labels[DEFAULT_MOUNT_REFRACTION_MODEL])
+        refraction_pressure_var.set(f"{DEFAULT_REFRACTION_PRESSURE_HPA:.1f}")
+        refraction_temperature_var.set(f"{DEFAULT_REFRACTION_TEMPERATURE_C:.1f}")
+        refraction_altitude_var.set(f"{DEFAULT_REFRACTION_ALTITUDE_M:.0f}")
+        refraction_radius_var.set(
+            app._tr(
+                "settings.refraction_station_radius_option",
+                radius=DEFAULT_REFRACTION_STATION_RADIUS_KM,
+            )
+        )
         hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
         declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
 
@@ -1196,6 +1744,24 @@ def open_settings_dialog(app):
                 app._tr("settings.sky_magnitude_limit"),
                 -2,
                 MAX_SKY_MAGNITUDE_LIMIT,
+            )
+            refraction_pressure = app._parse_float_setting(
+                refraction_pressure_var.get(),
+                app._tr("settings.refraction_pressure"),
+                0,
+                1100,
+            )
+            refraction_temperature = app._parse_float_setting(
+                refraction_temperature_var.get(),
+                app._tr("settings.refraction_temperature"),
+                -80,
+                60,
+            )
+            refraction_altitude = app._parse_float_setting(
+                refraction_altitude_var.get(),
+                app._tr("settings.refraction_altitude"),
+                -500,
+                9000,
             )
         except ValueError as exc:
             show_error_dialog(app, app._tr("settings.invalid_title"), str(exc), parent=dialog)
@@ -1227,6 +1793,14 @@ def open_settings_dialog(app):
             coordinate_source_var.get(),
             DEFAULT_COORDINATE_SOURCE,
         )
+        selected_refraction_model = refraction_model_lookup.get(
+            mount_refraction_var.get(),
+            DEFAULT_MOUNT_REFRACTION_MODEL,
+        )
+        selected_refraction_radius = refraction_radius_labels.get(
+            refraction_radius_var.get(),
+            DEFAULT_REFRACTION_STATION_RADIUS_KM,
+        )
         app.language = selected_language
         app.site_name = site_var.get().strip() or app._tr("settings.custom_site")
         app.country = country_var.get().strip() or DEFAULT_COUNTRY
@@ -1243,6 +1817,11 @@ def open_settings_dialog(app):
         app.sky_show_equatorial_grid = sky_show_equatorial_grid_var.get()
         app.sky_show_solar_system = sky_show_solar_system_var.get()
         app.mount_show_reticle = mount_show_reticle_var.get()
+        app.mount_refraction_model = selected_refraction_model
+        app.refraction_pressure_hpa = refraction_pressure
+        app.refraction_temperature_c = refraction_temperature
+        app.refraction_altitude_m = refraction_altitude
+        app.refraction_station_radius_km = selected_refraction_radius
         app.hour_angle_offset_enabled = hour_angle_offset_var.get()
         app.declination_offset_enabled = declination_offset_var.get()
         app._invalidate_site_dependent_state()

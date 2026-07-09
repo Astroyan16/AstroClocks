@@ -20,6 +20,20 @@ DEFAULT_SKY_SHOW_ALTAZ_GRID = True
 DEFAULT_SKY_SHOW_EQUATORIAL_GRID = True
 DEFAULT_SKY_SHOW_SOLAR_SYSTEM = False
 DEFAULT_MOUNT_SHOW_RETICLE = True
+ATMOSPHERIC_REFRACTION_NONE = "none"
+ATMOSPHERIC_REFRACTION_BENNETT = "bennett"
+ATMOSPHERIC_REFRACTION_SAEMUNDSSON = "saemundsson"
+ATMOSPHERIC_REFRACTION_MODELS = {
+    ATMOSPHERIC_REFRACTION_NONE,
+    ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
+}
+DEFAULT_MOUNT_REFRACTION_MODEL = ATMOSPHERIC_REFRACTION_NONE
+DEFAULT_REFRACTION_PRESSURE_HPA = 0.0
+DEFAULT_REFRACTION_TEMPERATURE_C = 10.0
+DEFAULT_REFRACTION_ALTITUDE_M = 0.0
+REFRACTION_STATION_RADIUS_OPTIONS_KM = (5, 10, 15, 20)
+DEFAULT_REFRACTION_STATION_RADIUS_KM = 20
 COORDINATE_SOURCE_APP = "app"
 COORDINATE_SOURCE_MOUNT = "mount"
 COORDINATE_SOURCE_CODES = {
@@ -112,6 +126,11 @@ class AppSettings:
     mount_ascom_driver_name: str = ""
     coordinate_source: str = DEFAULT_COORDINATE_SOURCE
     mount_show_reticle: bool = DEFAULT_MOUNT_SHOW_RETICLE
+    mount_refraction_model: str = DEFAULT_MOUNT_REFRACTION_MODEL
+    refraction_pressure_hpa: float = DEFAULT_REFRACTION_PRESSURE_HPA
+    refraction_temperature_c: float = DEFAULT_REFRACTION_TEMPERATURE_C
+    refraction_altitude_m: float = DEFAULT_REFRACTION_ALTITUDE_M
+    refraction_station_radius_km: int = DEFAULT_REFRACTION_STATION_RADIUS_KM
     timezone_name: str = DEFAULT_TIMEZONE_NAME
     daylight_saving_enabled: bool = DEFAULT_DAYLIGHT_SAVING_ENABLED
     language: str = DEFAULT_LANGUAGE
@@ -199,6 +218,24 @@ def normalize_settings(settings):
     ).strip().lower()
     if coordinate_source not in COORDINATE_SOURCE_CODES:
         coordinate_source = DEFAULT_COORDINATE_SOURCE
+    mount_refraction_model = str(
+        getattr(settings, "mount_refraction_model", DEFAULT_MOUNT_REFRACTION_MODEL)
+        or DEFAULT_MOUNT_REFRACTION_MODEL
+    ).strip().lower()
+    if mount_refraction_model not in ATMOSPHERIC_REFRACTION_MODELS:
+        mount_refraction_model = DEFAULT_MOUNT_REFRACTION_MODEL
+    try:
+        refraction_station_radius_km = int(
+            getattr(
+                settings,
+                "refraction_station_radius_km",
+                DEFAULT_REFRACTION_STATION_RADIUS_KM,
+            )
+        )
+    except (TypeError, ValueError):
+        refraction_station_radius_km = DEFAULT_REFRACTION_STATION_RADIUS_KM
+    if refraction_station_radius_km not in REFRACTION_STATION_RADIUS_OPTIONS_KM:
+        refraction_station_radius_km = DEFAULT_REFRACTION_STATION_RADIUS_KM
     timezone_name = str(
         getattr(settings, "timezone_name", DEFAULT_TIMEZONE_NAME) or DEFAULT_TIMEZONE_NAME
     ).strip()
@@ -257,6 +294,29 @@ def normalize_settings(settings):
             getattr(settings, "mount_show_reticle", DEFAULT_MOUNT_SHOW_RETICLE),
             DEFAULT_MOUNT_SHOW_RETICLE,
         ),
+        mount_refraction_model=mount_refraction_model,
+        refraction_pressure_hpa=_clamp(
+            float(getattr(settings, "refraction_pressure_hpa", DEFAULT_REFRACTION_PRESSURE_HPA)),
+            0,
+            1100,
+        ),
+        refraction_temperature_c=_clamp(
+            float(
+                getattr(
+                    settings,
+                    "refraction_temperature_c",
+                    DEFAULT_REFRACTION_TEMPERATURE_C,
+                )
+            ),
+            -80,
+            60,
+        ),
+        refraction_altitude_m=_clamp(
+            float(getattr(settings, "refraction_altitude_m", DEFAULT_REFRACTION_ALTITUDE_M)),
+            -500,
+            9000,
+        ),
+        refraction_station_radius_km=refraction_station_radius_km,
         timezone_name=timezone_name,
         daylight_saving_enabled=_coerce_bool(
             getattr(settings, "daylight_saving_enabled", DEFAULT_DAYLIGHT_SAVING_ENABLED),
@@ -481,6 +541,26 @@ def load_app_settings():
             mount_show_reticle=data.get(
                 "mount_show_reticle",
                 DEFAULT_MOUNT_SHOW_RETICLE,
+            ),
+            mount_refraction_model=data.get(
+                "mount_refraction_model",
+                DEFAULT_MOUNT_REFRACTION_MODEL,
+            ),
+            refraction_pressure_hpa=data.get(
+                "refraction_pressure_hpa",
+                DEFAULT_REFRACTION_PRESSURE_HPA,
+            ),
+            refraction_temperature_c=data.get(
+                "refraction_temperature_c",
+                DEFAULT_REFRACTION_TEMPERATURE_C,
+            ),
+            refraction_altitude_m=data.get(
+                "refraction_altitude_m",
+                DEFAULT_REFRACTION_ALTITUDE_M,
+            ),
+            refraction_station_radius_km=data.get(
+                "refraction_station_radius_km",
+                DEFAULT_REFRACTION_STATION_RADIUS_KM,
             ),
             timezone_name=data.get("timezone_name", DEFAULT_TIMEZONE_NAME),
             daylight_saving_enabled=data.get(

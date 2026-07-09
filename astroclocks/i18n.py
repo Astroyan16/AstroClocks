@@ -21,6 +21,9 @@ TRANSLATIONS = {
         "button.cancel": "Cancel",
         "button.apply": "Apply",
         "button.close": "Close",
+        "button.save": "Save",
+        "button.test": "Test",
+        "button.delete": "Delete",
         "button.clear_cache": "Clear cache",
         "network.checking": "● Checking connection",
         "network.connected": "● Connected",
@@ -127,6 +130,57 @@ TRANSLATIONS = {
         "settings.coordinate_source_app": "AstroClocks settings",
         "settings.coordinate_source_mount": "ASCOM mount",
         "settings.mount_show_reticle": "Show telescope reticle on the sky map",
+        "settings.mount_refraction_model": "Atmospheric refraction model",
+        "settings.refraction_parameters": "Refraction parameters",
+        "settings.refraction_pressure": "Sea-level pressure (hPa, 0 = standard)",
+        "settings.refraction_temperature": "Temperature (°C)",
+        "settings.refraction_altitude": "Site altitude (m)",
+        "settings.refraction_station_radius": "Search radius",
+        "settings.refraction_station_radius_option": "{radius} km",
+        "settings.refraction_find_stations": "Find nearby weather stations with pressure",
+        "settings.refraction_fetch_weather": "Fetch selected station data",
+        "settings.meteofrance_api_configure": "Configure Météo-France API",
+        "settings.refraction_station_option": (
+            "{source} {station} - {name} ({distance} km, {pressure} hPa, {time})"
+        ),
+        "settings.refraction_stations_loading": "Searching for nearby weather stations with pressure...",
+        "settings.refraction_stations_loaded": "{count} nearby weather stations with pressure loaded.",
+        "settings.refraction_stations_unavailable": (
+            "No recent pressure observation found within 150 km."
+        ),
+        "settings.refraction_station_required": "Select a weather station first.",
+        "settings.refraction_weather_loading": "Fetching pressure from {station}...",
+        "settings.refraction_weather_loaded": (
+            "Loaded pressure {pressure} hPa from {station}, {distance} km away."
+        ),
+        "settings.refraction_weather_unavailable": (
+            "No recent pressure observation is available for the selected station."
+        ),
+        "settings.refraction_weather_error": "Weather lookup failed: {error}",
+        "settings.meteofrance_api_title": "Météo-France API key",
+        "settings.meteofrance_api_help": (
+            "Paste the API key/token from your Météo-France API subscription. "
+            "AstroClocks stores it encrypted for this Windows user and uses it to "
+            "load current Météo-France observation stations and measurements when "
+            "the key is subscribed to the observation API."
+        ),
+        "settings.meteofrance_api_configured": "A Météo-France API key is already configured.",
+        "settings.meteofrance_api_missing": "No Météo-France API key is configured.",
+        "settings.meteofrance_api_save_error": "Unable to save the API key: {error}",
+        "settings.meteofrance_api_saved": "API key saved.",
+        "settings.meteofrance_api_testing": "Testing the Météo-France API key...",
+        "settings.meteofrance_api_test_error": "Météo-France API test failed: {error}",
+        "settings.meteofrance_api_test_empty": "The key works, but no station list was returned.",
+        "settings.meteofrance_api_test_ok": "API key OK: {count} stations loaded.",
+        "settings.meteofrance_api_test_climatology_only": (
+            "API key valid for climatological data ({count} stations in Paris), "
+            "but not for current observations: {error}"
+        ),
+        "settings.meteofrance_api_deleted": "API key deleted.",
+        "weather.time_unknown": "time unknown",
+        "settings.refraction_none": "Disabled",
+        "settings.refraction_bennett": "Bennett 1982",
+        "settings.refraction_saemundsson": "Saemundsson",
         "settings.mount_choose": "Choose...",
         "settings.mount_connect": "Connect",
         "settings.mount_disconnect": "Disconnect",
@@ -521,6 +575,9 @@ TRANSLATIONS = {
         "button.cancel": "Annuler",
         "button.apply": "Appliquer",
         "button.close": "Fermer",
+        "button.save": "Enregistrer",
+        "button.test": "Tester",
+        "button.delete": "Supprimer",
         "button.clear_cache": "Vider le cache",
         "network.checking": "● Vérification connexion",
         "network.connected": "● Connecté",
@@ -627,6 +684,57 @@ TRANSLATIONS = {
         "settings.coordinate_source_app": "Paramètres AstroClocks",
         "settings.coordinate_source_mount": "Monture ASCOM",
         "settings.mount_show_reticle": "Afficher le réticule Télescope sur la carte du ciel",
+        "settings.mount_refraction_model": "Modèle de réfraction atmosphérique",
+        "settings.refraction_parameters": "Paramètres de réfraction",
+        "settings.refraction_pressure": "Pression au niveau de la mer (hPa, 0 = standard)",
+        "settings.refraction_temperature": "Température (°C)",
+        "settings.refraction_altitude": "Altitude du site (m)",
+        "settings.refraction_station_radius": "Rayon de recherche",
+        "settings.refraction_station_radius_option": "{radius} km",
+        "settings.refraction_find_stations": "Trouver les stations météo proches avec pression",
+        "settings.refraction_fetch_weather": "Récupérer les données de la station",
+        "settings.meteofrance_api_configure": "Configurer l'API Météo-France",
+        "settings.refraction_station_option": (
+            "{source} {station} - {name} ({distance} km, {pressure} hPa, {time})"
+        ),
+        "settings.refraction_stations_loading": "Recherche des stations météo proches avec pression...",
+        "settings.refraction_stations_loaded": "{count} stations météo proches avec pression chargées.",
+        "settings.refraction_stations_unavailable": (
+            "Aucune observation récente de pression trouvée dans un rayon de 150 km."
+        ),
+        "settings.refraction_station_required": "Sélectionnez d'abord une station météo.",
+        "settings.refraction_weather_loading": "Récupération de la pression depuis {station}...",
+        "settings.refraction_weather_loaded": (
+            "Pression {pressure} hPa récupérée depuis {station}, à {distance} km."
+        ),
+        "settings.refraction_weather_unavailable": (
+            "Aucune observation récente de pression disponible pour la station sélectionnée."
+        ),
+        "settings.refraction_weather_error": "Récupération météo impossible : {error}",
+        "settings.meteofrance_api_title": "Clé API Météo-France",
+        "settings.meteofrance_api_help": (
+            "Collez la clé API / le token de votre abonnement API Météo-France. "
+            "AstroClocks l'enregistre chiffré pour cet utilisateur Windows et l'utilise "
+            "pour charger les stations et mesures d'observation Météo-France actuelles "
+            "si la clé est abonnée à l'API d'observation."
+        ),
+        "settings.meteofrance_api_configured": "Une clé API Météo-France est déjà configurée.",
+        "settings.meteofrance_api_missing": "Aucune clé API Météo-France n'est configurée.",
+        "settings.meteofrance_api_save_error": "Impossible d'enregistrer la clé API : {error}",
+        "settings.meteofrance_api_saved": "Clé API enregistrée.",
+        "settings.meteofrance_api_testing": "Test de la clé API Météo-France...",
+        "settings.meteofrance_api_test_error": "Échec du test de l'API Météo-France : {error}",
+        "settings.meteofrance_api_test_empty": "La clé fonctionne, mais aucune liste de stations n'a été renvoyée.",
+        "settings.meteofrance_api_test_ok": "Clé API valide : {count} stations chargées.",
+        "settings.meteofrance_api_test_climatology_only": (
+            "Clé API valide pour les données climatologiques ({count} stations à Paris), "
+            "mais pas pour les observations actuelles : {error}"
+        ),
+        "settings.meteofrance_api_deleted": "Clé API supprimée.",
+        "weather.time_unknown": "heure inconnue",
+        "settings.refraction_none": "Désactivée",
+        "settings.refraction_bennett": "Bennett 1982",
+        "settings.refraction_saemundsson": "Saemundsson",
         "settings.mount_choose": "Choisir...",
         "settings.mount_connect": "Connecter",
         "settings.mount_disconnect": "Déconnecter",

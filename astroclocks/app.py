@@ -52,6 +52,9 @@ from astroclocks.runtime_logging import (
     log_exception,
 )
 from astroclocks.settings import (
+    ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_NONE,
+    ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
     AppSettings,
     COORDINATE_SOURCE_APP,
     COORDINATE_SOURCE_MOUNT,
@@ -223,6 +226,11 @@ class AstroClocksApp:
         self.mount_ascom_driver_name = self.settings.mount_ascom_driver_name
         self.coordinate_source = self.settings.coordinate_source
         self.mount_show_reticle = self.settings.mount_show_reticle
+        self.mount_refraction_model = self.settings.mount_refraction_model
+        self.refraction_pressure_hpa = self.settings.refraction_pressure_hpa
+        self.refraction_temperature_c = self.settings.refraction_temperature_c
+        self.refraction_altitude_m = self.settings.refraction_altitude_m
+        self.refraction_station_radius_km = self.settings.refraction_station_radius_km
         self.timezone_name = self._normalize_timezone_name(self.settings.timezone_name)
         self.daylight_saving_enabled = self.settings.daylight_saving_enabled
         self.language = self.settings.language
@@ -1341,12 +1349,76 @@ class AstroClocksApp:
         self.sky_map_cache_key = None
         self.visibility_cache_key = None
 
-    def _mount_jnow_coordinates(self, snapshot):
+    def _mount_jnow_coordinates(self, snapshot, lst_hours=None):
         if snapshot is None:
             return None
         if snapshot.equatorial_system == ascom_mount.EQUATORIAL_SYSTEM_J2000:
-            return j2000_to_jnow_coordinates(snapshot.ra_hours, snapshot.declination)
-        return snapshot.ra_hours, snapshot.declination
+            ra_hours, declination = j2000_to_jnow_coordinates(
+                snapshot.ra_hours,
+                snapshot.declination,
+            )
+        else:
+            ra_hours, declination = snapshot.ra_hours, snapshot.declination
+        return self._apply_mount_refraction_to_equatorial(
+            ra_hours,
+            declination,
+            lst_hours=lst_hours,
+        )
+
+    def _refraction_atmosphere_scale(self):
+        pressure_hpa = self._effective_refraction_pressure_hpa()
+        temperature_c = max(-273.0, float(getattr(self, "refraction_temperature_c", 10.0)))
+        return (pressure_hpa / 1010.0) * (283.0 / (273.0 + temperature_c))
+
+    def _effective_refraction_pressure_hpa(self):
+        sea_level_pressure_hpa = max(
+            0.0,
+            float(getattr(self, "refraction_pressure_hpa", 0.0)),
+        )
+        if sea_level_pressure_hpa <= 0:
+            sea_level_pressure_hpa = 1013.25
+        altitude_m = float(getattr(self, "refraction_altitude_m", 0.0))
+        base = max(0.01, 1.0 - (2.25577e-5 * altitude_m))
+        return sea_level_pressure_hpa * (base ** 5.25588)
+
+    def _atmospheric_refraction_degrees(self, altitude, model):
+        if model == ATMOSPHERIC_REFRACTION_NONE or altitude < -1.0 or altitude >= 90.0:
+            return 0.0
+        if model == ATMOSPHERIC_REFRACTION_BENNETT:
+            corrected_argument = altitude + (7.31 / (altitude + 4.4))
+            arcminutes = 1.0 / math.tan(math.radians(corrected_argument))
+        elif model == ATMOSPHERIC_REFRACTION_SAEMUNDSSON:
+            corrected_argument = altitude + (10.3 / (altitude + 5.11))
+            arcminutes = 1.02 / math.tan(math.radians(corrected_argument))
+        else:
+            return 0.0
+        return max(0.0, (arcminutes / 60.0) * self._refraction_atmosphere_scale())
+
+    def _apply_mount_refraction_to_equatorial(self, ra_hours, declination, lst_hours=None):
+        model = getattr(self, "mount_refraction_model", ATMOSPHERIC_REFRACTION_NONE)
+        if model == ATMOSPHERIC_REFRACTION_NONE:
+            return ra_hours, declination
+        if lst_hours is None:
+            _state, lst_hours = self._visibility_state_at_time(
+                datetime.datetime.now(datetime.timezone.utc)
+            )
+        altitude, azimuth, _hour_angle = self._equatorial_to_horizontal(
+            ra_hours,
+            declination,
+            lst_hours,
+        )
+        refraction = self._atmospheric_refraction_degrees(altitude, model)
+        if refraction <= 0:
+            return ra_hours, declination
+        apparent_altitude = min(90.0, altitude + refraction)
+        apparent_ra_hours, apparent_declination, _apparent_hour_angle = (
+            self._horizontal_to_equatorial(
+                apparent_altitude,
+                azimuth,
+                lst_hours,
+            )
+        )
+        return apparent_ra_hours, apparent_declination
 
     def _angular_separation_degrees(self, ra1_hours, dec1_degrees, ra2_hours, dec2_degrees):
         ra1_rad = math.radians((ra1_hours % 24) * 15)
@@ -1390,6 +1462,43 @@ class AstroClocksApp:
             "hour_angle": hour_angle,
         }
 
+    def _current_pointing_jnow_coordinates(self, now_utc=None):
+        """Return JNow coordinates to use for telescope pointing displays/GoTo.
+
+        The target's physical JNow position stays unmodified for sky-map and
+        visibility calculations.  The pointing coordinates optionally include
+        the configured atmospheric refraction model so the displayed hour angle
+        and declination correspond to the telescope coordinates to use.
+        """
+        now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+        if getattr(self, "target_active", False) and getattr(
+            self,
+            "target_solar_system_name",
+            None,
+        ):
+            ra_hours, declination = self._current_target_jnow_coordinates(
+                now_utc=now_utc
+            )
+        else:
+            ra_hours, declination = self._current_target_coordinates(now_utc=now_utc)
+        if (
+            getattr(self, "mount_refraction_model", ATMOSPHERIC_REFRACTION_NONE)
+            == ATMOSPHERIC_REFRACTION_NONE
+        ):
+            return ra_hours, declination
+        _state, lst_hours = self._visibility_state_at_time(now_utc)
+        return self._apply_mount_refraction_to_equatorial(
+            ra_hours,
+            declination,
+            lst_hours=lst_hours,
+        )
+
+    def _current_pointing_coordinate_fields(self, now_utc=None):
+        ra_hours, dec_degrees = self._current_pointing_jnow_coordinates(
+            now_utc=now_utc
+        )
+        return self._coordinates_to_fields(ra_hours, dec_degrees)
+
     def _target_mount_separation_degrees(self, now_utc=None):
         if not self.target_active:
             return None
@@ -1399,7 +1508,7 @@ class AstroClocksApp:
 
         now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
         try:
-            target_ra_hours, target_declination = self._current_target_jnow_coordinates(
+            target_ra_hours, target_declination = self._current_pointing_jnow_coordinates(
                 now_utc=now_utc
             )
         except RuntimeError:
@@ -1439,7 +1548,9 @@ class AstroClocksApp:
             raise RuntimeError(self._tr("mount.error.goto_frame_unsupported"))
 
         now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
-        ra_hours, declination = self._current_target_jnow_coordinates(now_utc=now_utc)
+        ra_hours, declination = self._current_pointing_jnow_coordinates(
+            now_utc=now_utc
+        )
 
         if snapshot.equatorial_system == ascom_mount.EQUATORIAL_SYSTEM_J2000:
             ra_hours, declination = jnow_to_j2000_coordinates(
@@ -2612,7 +2723,7 @@ class AstroClocksApp:
 
     def _compute_target_clock_state(self, now_utc=None):
         alpha_hh, alpha_mm, alpha_ss, _delta_dd, _delta_mm, _delta_ss = (
-            self._current_jnow_coordinate_fields(now_utc=now_utc)
+            self._current_pointing_coordinate_fields(now_utc=now_utc)
         )
         return self._clock_state_at_time(
             now_utc=now_utc,
@@ -2771,7 +2882,10 @@ class AstroClocksApp:
         return status
 
     def _mount_status_line(self, lst_hours):
-        mount_coordinates = self._mount_jnow_coordinates(self.mount_last_snapshot)
+        mount_coordinates = self._mount_jnow_coordinates(
+            self.mount_last_snapshot,
+            lst_hours=lst_hours,
+        )
         if not self.mount_connected or mount_coordinates is None:
             return ""
 
@@ -3007,7 +3121,7 @@ class AstroClocksApp:
                     self.target_display_name = self._tr("sky.target")
         self._sanitize_coordinate_values()
         _alpha_hh, _alpha_mm, _alpha_ss, delta_dd, delta_mm, delta_ss = (
-            self._current_jnow_coordinate_fields()
+            self._current_pointing_coordinate_fields()
         )
         self.lbl_dec_angle.config(
             text=compute_declination_display(
@@ -3165,6 +3279,11 @@ class AstroClocksApp:
             mount_ascom_driver_name=self.mount_ascom_driver_name,
             coordinate_source=self.coordinate_source,
             mount_show_reticle=self.mount_show_reticle,
+            mount_refraction_model=self.mount_refraction_model,
+            refraction_pressure_hpa=self.refraction_pressure_hpa,
+            refraction_temperature_c=self.refraction_temperature_c,
+            refraction_altitude_m=self.refraction_altitude_m,
+            refraction_station_radius_km=self.refraction_station_radius_km,
             timezone_name=self.timezone_name,
             daylight_saving_enabled=self.daylight_saving_enabled,
             language=self.language,
@@ -3318,6 +3437,9 @@ class AstroClocksApp:
     def clocks(self):
         self._sanitize_coordinate_values()
         state = self._compute_target_clock_state()
+        _alpha_hh, _alpha_mm, _alpha_ss, delta_dd, delta_mm, delta_ss = (
+            self._current_pointing_coordinate_fields()
+        )
 
         self.update_site_labels()
         self.label_local.config(text=state["local"])
@@ -3325,6 +3447,14 @@ class AstroClocksApp:
         self.label_gmst.config(text=state["gmst"])
         self.label_lst.config(text=state["lst"])
         self.lbl_hour_angle.config(text=state["hour_angle"])
+        self.lbl_dec_angle.config(
+            text=compute_declination_display(
+                delta_dd,
+                delta_mm,
+                delta_ss,
+                apply_offset=self.declination_offset_enabled,
+            )
+        )
         try:
             self._update_sky_map(state)
             self._update_visibility_chart(state)
