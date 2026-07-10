@@ -20,6 +20,7 @@ from astroclocks.settings import (
     STAR_SEARCH_MAGNITUDE_BANDS,
     STAR_SEARCH_SPECTRAL_TYPES,
 )
+from astroclocks.runtime_logging import get_logger, log_exception
 from astroclocks.star_search_catalog import (
     clear_cached_simbad_stars,
     fetch_simbad_stars,
@@ -31,6 +32,8 @@ from astroclocks.star_search_catalog import (
     normalize_star_spectral_type,
 )
 from astroclocks.utils import is_float
+
+LOGGER = get_logger(__name__)
 
 
 def _create_star_search_widgets(self):
@@ -773,6 +776,7 @@ def _run_star_search(self, generation, filters, search_context, allow_online=Fal
                 notes.append(self._tr("star_search.online_loaded", count=len(remote_stars)))
                 notes.append(self._tr("star_search.cache_updated", count=len(cached_stars)))
             except Exception as exc:
+                log_exception(LOGGER, "Star online search failed", exc)
                 notes.append(self._tr("star_search.online_error", error=str(exc)))
         category_catalog = [
             star
@@ -791,6 +795,7 @@ def _run_star_search(self, generation, filters, search_context, allow_online=Fal
             },
         )
     except Exception as exc:
+        log_exception(LOGGER, "Star search pipeline failed", exc)
         self._queue_star_search_results(
             generation,
             {
@@ -803,7 +808,8 @@ def _run_star_search(self, generation, filters, search_context, allow_online=Fal
 def _queue_star_search_results(self, generation, payload):
     try:
         self.root.after(0, lambda: self._apply_star_search_results(generation, payload))
-    except (tk.TclError, RuntimeError):
+    except (tk.TclError, RuntimeError) as exc:
+        log_exception(LOGGER, "Unable to schedule star search results on the UI thread", exc)
         self.star_search_pending = False
 
 def _apply_star_search_results(self, generation, payload):

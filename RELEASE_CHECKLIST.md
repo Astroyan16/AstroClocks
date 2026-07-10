@@ -39,9 +39,16 @@ Windows sans oublier les points sensibles de version, packaging et changelog.
 
 1. Lancer `output\AstroClockV3\AstroClockV3.exe`.
 2. Verifier l'ouverture de `Parametres` et `A propos`.
-3. Verifier la carte du ciel et la recherche rapide.
-4. Si une monture est disponible, verifier connexion, deconnexion et reticule.
-5. Si un installeur precedent existe, verifier l'upgrade avec
+3. Verifier la carte du ciel, la recherche rapide et l'activation d'une cible
+   manuelle via les champs de coordonnees.
+4. Basculer la source de coordonnees entre `Parametres AstroClocks` et
+   `Monture ASCOM` puis verifier que les informations de site restent coherentes,
+   y compris en repli si la monture ne fournit pas sa localisation.
+5. Verifier qu'un fichier de log runtime est bien cree dans
+   `%LOCALAPPDATA%\AstroClocks\logs\astroclocks.log`.
+6. Si une monture est disponible, verifier connexion, deconnexion, reticule et
+   commande `Pointer la cible`.
+7. Si un installeur precedent existe, verifier l'upgrade avec
    `installer\Install_AstroClocks<version>.exe`.
 
 ## Publication

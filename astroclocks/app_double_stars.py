@@ -25,6 +25,7 @@ from astroclocks.orbit_catalog import (
     fetch_orb6_ephemerides,
     fetch_orb6_orbits,
 )
+from astroclocks.runtime_logging import get_logger, log_exception
 from astroclocks.settings import (
     DEFAULT_DOUBLE_EXCLUDE_POLAR_CIRCLE,
     DEFAULT_DOUBLE_INCLUDE_APPARENT,
@@ -40,6 +41,7 @@ from astroclocks.settings import (
     DEFAULT_DOUBLE_USE_ONLINE,
     DEFAULT_DOUBLE_VISIBLE_NIGHT,
 )
+LOGGER = get_logger(__name__)
 from astroclocks.utils import is_float
 
 
@@ -1482,6 +1484,7 @@ def _run_double_star_search(
                 orb6_index = fetch_orb6_ephemerides(timeout=8)
                 orb6_error = orb6_index.get("fetch_error")
             except Exception as exc:
+                log_exception(LOGGER, "Double-star ORB6 ephemerides refresh failed", exc)
                 orb6_index = self.double_orb6_index
                 orb6_error = str(exc)
 
@@ -1489,6 +1492,7 @@ def _run_double_star_search(
                 orb6_orbit_index = fetch_orb6_orbits(timeout=8)
                 orb6_orbit_error = orb6_orbit_index.get("fetch_error")
             except Exception as exc:
+                log_exception(LOGGER, "Double-star ORB6 orbit refresh failed", exc)
                 orb6_orbit_index = self.double_orb6_orbit_index
                 orb6_orbit_error = str(exc)
 
@@ -1526,6 +1530,7 @@ def _run_double_star_search(
                     ]
                 )
             except Exception as exc:
+                log_exception(LOGGER, "Double-star online search failed", exc)
                 notes.append(self._tr("double.online_error", error=str(exc)))
 
         local_source, _local_orb6_matches = self._enrich_double_star_orbits(
@@ -1557,6 +1562,7 @@ def _run_double_star_search(
             },
         )
     except Exception as exc:
+        log_exception(LOGGER, "Double-star search pipeline failed", exc)
         self._queue_double_star_search_results(
             generation,
             {
@@ -1574,7 +1580,8 @@ def _queue_double_star_search_results(self, generation, payload):
             0,
             lambda: self._apply_double_star_search_results(generation, payload),
         )
-    except (tk.TclError, RuntimeError):
+    except (tk.TclError, RuntimeError) as exc:
+        log_exception(LOGGER, "Unable to schedule double-star search results on the UI thread", exc)
         self.double_remote_search_pending = False
 
 

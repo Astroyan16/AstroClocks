@@ -1,5 +1,26 @@
 # Changelog
 
+## AstroClocks v3.4.1 stable - 2026-07-10
+
+### Ajoute
+
+- Journal runtime rotatif dans `%LOCALAPPDATA%\AstroClocks\logs\astroclocks.log`, avec possibilite de rediriger le dossier via `ASTROCLOCKS_LOG_DIR`.
+- Prise en charge ASCOM de `DoesRefraction`, avec statut lisible et choix de la responsabilite de correction : automatique, AstroClocks ou driver/monture.
+- Modeles de refraction Bennett 1982, Saemundsson 1986, ERFA/SOFA + Saemundsson et Hohenkerk–Sinclair a profil vertical moyen. Les deux derniers utilisent pression, temperature, humidite et longueur d’onde.
+- Recherche de stations meteo avec humidite lorsqu’elle est disponible, cache de session horodate et actualisation explicite.
+
+### Ameliore
+
+- Les exceptions non gerees Python, threads et callbacks Tk laissent maintenant une trace exploitable pour le diagnostic.
+- Les echecs de connexion et de polling ASCOM absorbés par l'interface sont journalises au lieu de disparaitre silencieusement.
+- La couverture de tests cible maintenant aussi les bascules de contexte de site, le cache JNow des coordonnees et les cibles dynamiques du systeme solaire.
+- Les recherches asynchrones `Etoiles`, `Ciel profond` et `Etoiles doubles` journalisent mieux leurs echecs critiques et sont couvertes sur l'application des resultats obsoletes ou valides.
+- Le modele hybride utilise Saemundsson sous 15° puis ERFA/SOFA au-dessus, avec une transition lissée. La boite Parametres ajuste maintenant les champs utilisables au modele et a la responsabilite de refraction choisis.
+- Les champs d’angle horaire et de déclinaison indiquent explicitement « apparent(e) » uniquement lorsqu’AstroClocks leur applique une correction locale de réfraction.
+- La recherche de stations météo propose désormais un rayon jusqu’à 150 km (50 km par défaut), afin de couvrir les sites isolés comme l’Observatoire de Haute-Provence.
+- La recherche affiche jusqu’à cinq stations météo les plus proches, au lieu de trois.
+- Les résultats de stations déjà trouvés sont restaurés à la réouverture des paramètres, même si le rayon avait été modifié pour la recherche.
+
 ## AstroClocks v3.3.7 stable - 2026-05-14
 
 ### Ajoute

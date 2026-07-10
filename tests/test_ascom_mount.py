@@ -15,6 +15,7 @@ class _FakeTelescope:
         tracking_rate=0,
         site_latitude=None,
         site_longitude=None,
+        does_refraction=False,
         can_slew=True,
         can_slew_async=True,
         can_abort_slew=True,
@@ -27,6 +28,7 @@ class _FakeTelescope:
         self.Slewing = slewing
         self.Tracking = True
         self.TrackingRate = tracking_rate
+        self.DoesRefraction = does_refraction
         self.CanSlew = can_slew
         self.CanSlewAsync = can_slew_async
         self.CanAbortSlew = can_abort_slew
@@ -74,6 +76,19 @@ class AscomMountTests(unittest.TestCase):
         self.assertEqual(snapshot.tracking_rate, 2)
         self.assertEqual(snapshot.site_latitude, 90.0)
         self.assertAlmostEqual(snapshot.site_longitude, -178.5)
+        self.assertFalse(snapshot.does_refraction)
+
+    def test_read_snapshot_reads_driver_refraction_state(self):
+        telescope = _FakeTelescope(does_refraction=True)
+
+        with patch("astroclocks.ascom_mount._require_ascom", return_value=object()):
+            snapshot = ascom_mount.read_snapshot(
+                telescope,
+                "ASCOM.Test.Driver",
+                "Test mount",
+            )
+
+        self.assertTrue(snapshot.does_refraction)
 
     def test_read_snapshot_rejects_disconnected_mount(self):
         telescope = _FakeTelescope(connected=False)

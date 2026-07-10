@@ -21,6 +21,9 @@ TRANSLATIONS = {
         "button.cancel": "Cancel",
         "button.apply": "Apply",
         "button.close": "Close",
+        "button.save": "Save",
+        "button.test": "Test",
+        "button.delete": "Delete",
         "button.clear_cache": "Clear cache",
         "network.checking": "● Checking connection",
         "network.connected": "● Connected",
@@ -93,8 +96,10 @@ TRANSLATIONS = {
         "frame.lst": "Local Sidereal Time",
         "frame.hour_angle": "Hour Angle{suffix}",
         "frame.hour_angle_offset_suffix": " (EAST circle +6h)",
+        "frame.hour_angle_refraction_suffix": " (apparent)",
         "frame.declination": "Declination{suffix}",
         "frame.declination_offset_suffix": " (+90°)",
+        "frame.declination_refraction_suffix": " (apparent)",
         "object_type.Asteroid": "Asteroid",
         "object_type.Comet": "Comet",
         "object_type.Dwarf Planet": "Dwarf Planet",
@@ -127,6 +132,75 @@ TRANSLATIONS = {
         "settings.coordinate_source_app": "AstroClocks settings",
         "settings.coordinate_source_mount": "ASCOM mount",
         "settings.mount_show_reticle": "Show telescope reticle on the sky map",
+        "settings.mount_refraction_model": "Atmospheric refraction model",
+        "settings.refraction_source": "Correction responsibility",
+        "settings.refraction_source_auto": "Automatic (ASCOM state)",
+        "settings.refraction_source_app": "Force AstroClocks",
+        "settings.refraction_source_driver": "Force ASCOM driver / mount",
+        "settings.refraction_sofa_note": "Hybrid model: Saemundsson 1986 below 15°, ERFA/SOFA refco above (smooth 14°–16° transition). 550 nm suits visible-light observation.",
+        "settings.refraction_app_note": "Use only when the driver is known not to apply refraction; otherwise this can double-correct pointing.",
+        "settings.refraction_driver_note": "AstroClocks sends uncorrected coordinates; atmospheric parameters are not used locally.",
+        "settings.refraction_parameters": "Refraction parameters",
+        "settings.refraction_pressure": "Sea-level pressure (hPa, 0 = standard)",
+        "settings.refraction_temperature": "Temperature (°C)",
+        "settings.refraction_humidity": "Relative humidity (%)",
+        "settings.refraction_wavelength": "Wavelength (nm)",
+        "settings.refraction_altitude": "Site altitude (m)",
+        "settings.refraction_station_radius": "Search radius",
+        "settings.refraction_station_radius_option": "{radius} km",
+        "settings.refraction_find_stations": "Find nearby weather stations with pressure",
+        "settings.refraction_fetch_weather": "Fetch selected station data",
+        "settings.meteofrance_api_configure": "Configure Météo-France API",
+        "settings.refraction_station_option": (
+            "{source} {station} - {name} ({distance} km, {pressure} hPa, {time})"
+        ),
+        "settings.refraction_stations_loading": "Searching for nearby weather stations with pressure...",
+        "settings.refraction_stations_loaded": "{count} nearby weather stations with pressure loaded.",
+        "settings.refraction_stations_loaded_fallback": (
+            "No recent pressure observation within {requested_radius} km; "
+            "{count} nearest station(s) found within {fallback_radius} km."
+        ),
+        "settings.refraction_stations_restored": "{count} nearby weather stations restored from memory ({age} min old).",
+        "settings.refraction_refresh_stations": "Refresh",
+        "settings.refraction_stations_unavailable": (
+            "No recent pressure observation found within {radius} km."
+        ),
+        "settings.refraction_station_required": "Select a weather station first.",
+        "settings.refraction_weather_loading": "Fetching pressure from {station}...",
+        "settings.refraction_weather_loaded": (
+            "{source} {station}, {distance} km away | {time} | pressure {pressure} hPa | temperature {temperature} | humidity {humidity}."
+        ),
+        "settings.refraction_weather_unavailable": (
+            "No recent pressure observation is available for the selected station."
+        ),
+        "settings.refraction_weather_error": "Weather lookup failed: {error}",
+        "settings.meteofrance_api_title": "Météo-France API key",
+        "settings.meteofrance_api_help": (
+            "Paste the API key/token from your Météo-France API subscription. "
+            "AstroClocks stores it encrypted for this Windows user and uses it to "
+            "load current Météo-France observation stations and measurements when "
+            "the key is subscribed to the observation API."
+        ),
+        "settings.meteofrance_api_configured": "A Météo-France API key is already configured.",
+        "settings.meteofrance_api_missing": "No Météo-France API key is configured.",
+        "settings.meteofrance_api_save_error": "Unable to save the API key: {error}",
+        "settings.meteofrance_api_saved": "API key saved.",
+        "settings.meteofrance_api_testing": "Testing the Météo-France API key...",
+        "settings.meteofrance_api_test_error": "Météo-France API test failed: {error}",
+        "settings.meteofrance_api_test_empty": "The key works, but no station list was returned.",
+        "settings.meteofrance_api_test_ok": "API key OK: {count} stations loaded.",
+        "settings.meteofrance_api_test_climatology_only": (
+            "API key valid for climatological data ({count} stations in Paris), "
+            "but not for current observations: {error}"
+        ),
+        "settings.meteofrance_api_deleted": "API key deleted.",
+        "weather.time_unknown": "time unknown",
+        "settings.refraction_none": "Disabled",
+        "settings.refraction_bennett": "Bennett 1982",
+        "settings.refraction_saemundsson": "Saemundsson 1986",
+        "settings.refraction_sofa": "ERFA/SOFA + Saemundsson 1986 (humidity, wavelength)",
+        "settings.refraction_hohenkerk_sinclair": "Hohenkerk–Sinclair (mean vertical profile)",
+        "settings.refraction_hohenkerk_sinclair_note": "Numerical atmospheric-profile model. Humidity and wavelength are used; low-altitude results still depend on local atmospheric stratification.",
         "settings.mount_choose": "Choose...",
         "settings.mount_connect": "Connect",
         "settings.mount_disconnect": "Disconnect",
@@ -209,7 +283,11 @@ TRANSLATIONS = {
         "mount.status.segment_frame": "Frame: {frame}",
         "mount.status.segment_tracking": "Tracking: {tracking}",
         "mount.status.segment_goto": "GoTo: {value}",
+        "mount.status.segment_refraction": "ASCOM refraction: {value}",
         "mount.status.segment_slewing": "Slew in progress",
+        "mount.refraction.enabled": "enabled",
+        "mount.refraction.disabled": "disabled",
+        "mount.refraction.unknown": "unknown",
         "mount.status.error": "ASCOM mount error: {error}",
         "mount.control.title": "ASCOM mount",
         "mount.control.goto": "Slew to target",
@@ -521,6 +599,9 @@ TRANSLATIONS = {
         "button.cancel": "Annuler",
         "button.apply": "Appliquer",
         "button.close": "Fermer",
+        "button.save": "Enregistrer",
+        "button.test": "Tester",
+        "button.delete": "Supprimer",
         "button.clear_cache": "Vider le cache",
         "network.checking": "● Vérification connexion",
         "network.connected": "● Connecté",
@@ -593,8 +674,10 @@ TRANSLATIONS = {
         "frame.lst": "Temps sidéral local",
         "frame.hour_angle": "Angle horaire{suffix}",
         "frame.hour_angle_offset_suffix": " (cercle EST +6h)",
+        "frame.hour_angle_refraction_suffix": " (apparent)",
         "frame.declination": "Déclinaison{suffix}",
         "frame.declination_offset_suffix": " (+90°)",
+        "frame.declination_refraction_suffix": " (apparente)",
         "object_type.Asteroid": "Astéroïde",
         "object_type.Comet": "Comète",
         "object_type.Dwarf Planet": "Planète naine",
@@ -627,6 +710,75 @@ TRANSLATIONS = {
         "settings.coordinate_source_app": "Paramètres AstroClocks",
         "settings.coordinate_source_mount": "Monture ASCOM",
         "settings.mount_show_reticle": "Afficher le réticule Télescope sur la carte du ciel",
+        "settings.mount_refraction_model": "Modèle de réfraction atmosphérique",
+        "settings.refraction_source": "Responsable de la correction",
+        "settings.refraction_source_auto": "Automatique (état ASCOM)",
+        "settings.refraction_source_app": "Forcer AstroClocks",
+        "settings.refraction_source_driver": "Forcer driver ASCOM / monture",
+        "settings.refraction_sofa_note": "Modèle hybride : Saemundsson 1986 sous 15°, ERFA/SOFA refco au-dessus (transition lissée 14°–16°). 550 nm convient à l’observation visuelle.",
+        "settings.refraction_app_note": "À utiliser seulement si le driver ne corrige pas la réfraction ; sinon le pointage peut être corrigé deux fois.",
+        "settings.refraction_driver_note": "AstroClocks envoie des coordonnées non corrigées ; les paramètres atmosphériques ne sont pas appliqués localement.",
+        "settings.refraction_parameters": "Paramètres de réfraction",
+        "settings.refraction_pressure": "Pression au niveau de la mer (hPa, 0 = standard)",
+        "settings.refraction_temperature": "Température (°C)",
+        "settings.refraction_humidity": "Humidité relative (%)",
+        "settings.refraction_wavelength": "Longueur d’onde (nm)",
+        "settings.refraction_altitude": "Altitude du site (m)",
+        "settings.refraction_station_radius": "Rayon de recherche",
+        "settings.refraction_station_radius_option": "{radius} km",
+        "settings.refraction_find_stations": "Trouver les stations météo proches avec pression",
+        "settings.refraction_fetch_weather": "Récupérer les données de la station",
+        "settings.meteofrance_api_configure": "Configurer l'API Météo-France",
+        "settings.refraction_station_option": (
+            "{source} {station} - {name} ({distance} km, {pressure} hPa, {time})"
+        ),
+        "settings.refraction_stations_loading": "Recherche des stations météo proches avec pression...",
+        "settings.refraction_stations_loaded": "{count} stations météo proches avec pression chargées.",
+        "settings.refraction_stations_loaded_fallback": (
+            "Aucune observation récente de pression dans le rayon de {requested_radius} km ; "
+            "{count} station(s) la/les plus proche(s) trouvée(s) dans un rayon de {fallback_radius} km."
+        ),
+        "settings.refraction_stations_restored": "{count} stations météo proches restaurées depuis la mémoire (il y a {age} min).",
+        "settings.refraction_refresh_stations": "Actualiser",
+        "settings.refraction_stations_unavailable": (
+            "Aucune observation récente de pression trouvée dans un rayon de {radius} km."
+        ),
+        "settings.refraction_station_required": "Sélectionnez d'abord une station météo.",
+        "settings.refraction_weather_loading": "Récupération de la pression depuis {station}...",
+        "settings.refraction_weather_loaded": (
+            "{source} {station}, à {distance} km | {time} | pression {pressure} hPa | température {temperature} | humidité {humidity}."
+        ),
+        "settings.refraction_weather_unavailable": (
+            "Aucune observation récente de pression disponible pour la station sélectionnée."
+        ),
+        "settings.refraction_weather_error": "Récupération météo impossible : {error}",
+        "settings.meteofrance_api_title": "Clé API Météo-France",
+        "settings.meteofrance_api_help": (
+            "Collez la clé API / le token de votre abonnement API Météo-France. "
+            "AstroClocks l'enregistre chiffré pour cet utilisateur Windows et l'utilise "
+            "pour charger les stations et mesures d'observation Météo-France actuelles "
+            "si la clé est abonnée à l'API d'observation."
+        ),
+        "settings.meteofrance_api_configured": "Une clé API Météo-France est déjà configurée.",
+        "settings.meteofrance_api_missing": "Aucune clé API Météo-France n'est configurée.",
+        "settings.meteofrance_api_save_error": "Impossible d'enregistrer la clé API : {error}",
+        "settings.meteofrance_api_saved": "Clé API enregistrée.",
+        "settings.meteofrance_api_testing": "Test de la clé API Météo-France...",
+        "settings.meteofrance_api_test_error": "Échec du test de l'API Météo-France : {error}",
+        "settings.meteofrance_api_test_empty": "La clé fonctionne, mais aucune liste de stations n'a été renvoyée.",
+        "settings.meteofrance_api_test_ok": "Clé API valide : {count} stations chargées.",
+        "settings.meteofrance_api_test_climatology_only": (
+            "Clé API valide pour les données climatologiques ({count} stations à Paris), "
+            "mais pas pour les observations actuelles : {error}"
+        ),
+        "settings.meteofrance_api_deleted": "Clé API supprimée.",
+        "weather.time_unknown": "heure inconnue",
+        "settings.refraction_none": "Désactivée",
+        "settings.refraction_bennett": "Bennett 1982",
+        "settings.refraction_saemundsson": "Saemundsson 1986",
+        "settings.refraction_sofa": "ERFA/SOFA + Saemundsson 1986 (humidité, longueur d’onde)",
+        "settings.refraction_hohenkerk_sinclair": "Hohenkerk–Sinclair (profil vertical moyen)",
+        "settings.refraction_hohenkerk_sinclair_note": "Modèle numérique à profil atmosphérique. L’humidité et la longueur d’onde sont prises en compte ; près de l’horizon, le résultat dépend encore de la stratification locale.",
         "settings.mount_choose": "Choisir...",
         "settings.mount_connect": "Connecter",
         "settings.mount_disconnect": "Déconnecter",
@@ -709,7 +861,11 @@ TRANSLATIONS = {
         "mount.status.segment_frame": "Repère : {frame}",
         "mount.status.segment_tracking": "Suivi : {tracking}",
         "mount.status.segment_goto": "GoTo : {value}",
+        "mount.status.segment_refraction": "Réfraction ASCOM : {value}",
         "mount.status.segment_slewing": "Pointage en cours",
+        "mount.refraction.enabled": "activée",
+        "mount.refraction.disabled": "désactivée",
+        "mount.refraction.unknown": "inconnue",
         "mount.status.error": "Erreur de monture ASCOM : {error}",
         "mount.control.title": "Monture ASCOM",
         "mount.control.goto": "Pointer la cible",

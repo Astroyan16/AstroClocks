@@ -1150,7 +1150,10 @@ def _update_sky_map(self, state=None):
         self._draw_solar_system_canvas(self.sky_canvas, solar_objects)
     self._draw_sky_object_labels(self.sky_canvas, stars_to_draw, solar_objects)
 
-    mount_coordinates = self._mount_jnow_coordinates(self.mount_last_snapshot)
+    mount_coordinates = self._mount_jnow_coordinates(
+        self.mount_last_snapshot,
+        lst_hours=lst_hours,
+    )
     if self.mount_connected and self.mount_show_reticle and mount_coordinates is not None:
         mount_ra_hours, mount_declination = mount_coordinates
         mount_altitude, mount_azimuth, _mount_hour_angle = self._equatorial_to_horizontal(
