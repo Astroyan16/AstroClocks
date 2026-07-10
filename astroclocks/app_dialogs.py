@@ -181,6 +181,14 @@ def _refraction_station_cache_is_valid(cache, key, now=None):
     return 0 <= (now - created_at).total_seconds() <= REFRACTION_STATION_CACHE_SECONDS
 
 
+def _refraction_station_search_used_fallback(stations, requested_radius_km):
+    """Whether all returned stations lie outside the user-selected radius."""
+    return bool(stations) and all(
+        float(station.get("distance_km", float("inf"))) > float(requested_radius_km)
+        for station in stations
+    )
+
+
 def show_error_dialog(app, title, message, parent=None):
     anchor = parent or app.root
     dialog = tk.Toplevel(app.root)
@@ -1660,6 +1668,7 @@ def open_settings_dialog(app):
             refraction_radius_var.get(),
             DEFAULT_REFRACTION_STATION_RADIUS_KM,
         )
+        fallback_radius_km = max(150, radius_km)
 
         refraction_activity["busy"] = True
         sync_refraction_parameter_state()
@@ -1672,7 +1681,7 @@ def open_settings_dialog(app):
                     latitude,
                     longitude,
                     limit=3,
-                    max_distance_km=radius_km,
+                    max_distance_km=fallback_radius_km,
                 )
                 error = None
             except Exception as exc:
@@ -1695,15 +1704,28 @@ def open_settings_dialog(app):
                     sync_refraction_parameter_state()
                     refraction_weather_status.config(fg=app.danger)
                     refraction_weather_status_var.set(
-                        app._tr("settings.refraction_stations_unavailable")
+                        app._tr(
+                            "settings.refraction_stations_unavailable",
+                            radius=fallback_radius_km,
+                        )
                     )
                     return
                 set_refraction_station_choices(stations)
                 cache_refraction_stations(latitude, longitude, radius_km, stations)
                 refraction_weather_status.config(fg=app.success)
-                refraction_weather_status_var.set(
-                    app._tr("settings.refraction_stations_loaded", count=len(stations))
-                )
+                if _refraction_station_search_used_fallback(stations, radius_km):
+                    refraction_weather_status_var.set(
+                        app._tr(
+                            "settings.refraction_stations_loaded_fallback",
+                            count=len(stations),
+                            requested_radius=radius_km,
+                            fallback_radius=fallback_radius_km,
+                        )
+                    )
+                else:
+                    refraction_weather_status_var.set(
+                        app._tr("settings.refraction_stations_loaded", count=len(stations))
+                    )
 
             try:
                 dialog.after(0, finish)

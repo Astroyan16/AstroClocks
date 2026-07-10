@@ -862,10 +862,6 @@ def nearest_pressure_station_options(
         ):
             stations_with_pressure.append({**station_option, **pressure})
 
-    if len(stations_with_pressure) >= limit:
-        stations_with_pressure.sort(key=lambda item: item["distance_km"])
-        return stations_with_pressure[:limit]
-
     try:
         meteofrance_candidates = nearest_meteofrance_stations(
             latitude,
@@ -877,6 +873,13 @@ def nearest_pressure_station_options(
         meteofrance_candidates = []
 
     for distance_km, station in meteofrance_candidates[:meteofrance_scan_limit]:
+        stations_with_pressure.sort(key=lambda item: item["distance_km"])
+        if len(stations_with_pressure) >= limit and distance_km > stations_with_pressure[
+            limit - 1
+        ]["distance_km"]:
+            # Subsequent candidates are farther away: they cannot enter the
+            # globally nearest `limit` stations, whatever their observation.
+            break
         station_option = {**station, "distance_km": distance_km}
         try:
             pressure = fetch_meteofrance_pressure_for_station(station_option)
@@ -887,8 +890,6 @@ def nearest_pressure_station_options(
             now_utc=now_utc,
         ):
             stations_with_pressure.append({**station_option, **pressure})
-        if len(stations_with_pressure) >= limit:
-            break
 
     stations_with_pressure.sort(key=lambda item: item["distance_km"])
     return stations_with_pressure[:limit]

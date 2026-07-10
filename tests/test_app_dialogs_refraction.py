@@ -5,6 +5,7 @@ from astroclocks.app_dialogs import (
     _refraction_parameter_config,
     _refraction_station_cache_key,
     _refraction_station_cache_is_valid,
+    _refraction_station_search_used_fallback,
 )
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
@@ -74,6 +75,12 @@ class RefractionParameterStateTests(unittest.TestCase):
                 cache, key, now=now + datetime.timedelta(minutes=10, seconds=1)
             )
         )
+
+    def test_station_search_reports_when_it_uses_extended_radius(self):
+        stations = [{"station_id": "04049001", "distance_km": 26.5}]
+
+        self.assertTrue(_refraction_station_search_used_fallback(stations, 20))
+        self.assertFalse(_refraction_station_search_used_fallback(stations, 50))
 
 
 if __name__ == "__main__":

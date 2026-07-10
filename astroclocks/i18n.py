@@ -156,10 +156,14 @@ TRANSLATIONS = {
         ),
         "settings.refraction_stations_loading": "Searching for nearby weather stations with pressure...",
         "settings.refraction_stations_loaded": "{count} nearby weather stations with pressure loaded.",
+        "settings.refraction_stations_loaded_fallback": (
+            "No recent pressure observation within {requested_radius} km; "
+            "{count} nearest station(s) found within {fallback_radius} km."
+        ),
         "settings.refraction_stations_restored": "{count} nearby weather stations restored from memory ({age} min old).",
         "settings.refraction_refresh_stations": "Refresh",
         "settings.refraction_stations_unavailable": (
-            "No recent pressure observation found within 150 km."
+            "No recent pressure observation found within {radius} km."
         ),
         "settings.refraction_station_required": "Select a weather station first.",
         "settings.refraction_weather_loading": "Fetching pressure from {station}...",
@@ -730,10 +734,14 @@ TRANSLATIONS = {
         ),
         "settings.refraction_stations_loading": "Recherche des stations météo proches avec pression...",
         "settings.refraction_stations_loaded": "{count} stations météo proches avec pression chargées.",
+        "settings.refraction_stations_loaded_fallback": (
+            "Aucune observation récente de pression dans le rayon de {requested_radius} km ; "
+            "{count} station(s) la/les plus proche(s) trouvée(s) dans un rayon de {fallback_radius} km."
+        ),
         "settings.refraction_stations_restored": "{count} stations météo proches restaurées depuis la mémoire (il y a {age} min).",
         "settings.refraction_refresh_stations": "Actualiser",
         "settings.refraction_stations_unavailable": (
-            "Aucune observation récente de pression trouvée dans un rayon de 150 km."
+            "Aucune observation récente de pression trouvée dans un rayon de {radius} km."
         ),
         "settings.refraction_station_required": "Sélectionnez d'abord une station météo.",
         "settings.refraction_weather_loading": "Récupération de la pression depuis {station}...",

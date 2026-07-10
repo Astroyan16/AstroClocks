@@ -9,6 +9,7 @@ from astroclocks.settings import (
     COORDINATE_SOURCE_APP,
     COORDINATE_SOURCE_MOUNT,
     DEFAULT_REFRACTION_STATION_RADIUS_KM,
+    REFRACTION_STATION_RADIUS_OPTIONS_KM,
     MOUNT_REFRACTION_SOURCE_APP,
     MOUNT_REFRACTION_SOURCE_AUTO,
     MOUNT_REFRACTION_SOURCE_DRIVER,
@@ -84,6 +85,10 @@ class SettingsTests(unittest.TestCase):
     def test_normalize_settings_keeps_valid_refraction_station_radius(self):
         settings = normalize_settings(AppSettings(refraction_station_radius_km=10))
         self.assertEqual(settings.refraction_station_radius_km, 10)
+
+    def test_refraction_station_radius_includes_rural_search_ranges(self):
+        self.assertEqual(DEFAULT_REFRACTION_STATION_RADIUS_KM, 50)
+        self.assertTrue({50, 100, 150}.issubset(REFRACTION_STATION_RADIUS_OPTIONS_KM))
 
     def test_normalize_settings_falls_back_for_invalid_refraction_station_radius(self):
         settings = normalize_settings(AppSettings(refraction_station_radius_km=12))

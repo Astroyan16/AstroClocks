@@ -407,7 +407,7 @@ class WeatherTests(unittest.TestCase):
                             ),
                         )
 
-        nearest_meteofrance.assert_not_called()
+        nearest_meteofrance.assert_called_once()
         fetch_pressure.assert_not_called()
         self.assertEqual([option["station_id"] for option in options], ["ONE", "TWO", "THR"])
 
@@ -417,7 +417,7 @@ class WeatherTests(unittest.TestCase):
         ]
         meteofrance_stations = [
             (
-                8.0,
+                2.0,
                 {
                     "source": "METEOFRANCE",
                     "station_id": "12345678",
@@ -475,7 +475,7 @@ class WeatherTests(unittest.TestCase):
 
         self.assertEqual(
             [(option["source"], option["station_id"]) for option in options],
-            [("METAR", "LFPV"), ("METEOFRANCE", "12345678")],
+            [("METEOFRANCE", "12345678"), ("METAR", "LFPV")],
         )
 
     def test_nearest_pressure_station_options_respects_search_radius(self):
