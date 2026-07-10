@@ -19,6 +19,7 @@
 - Les champs d’angle horaire et de déclinaison indiquent explicitement « apparent(e) » uniquement lorsqu’AstroClocks leur applique une correction locale de réfraction.
 - La recherche de stations météo propose désormais un rayon jusqu’à 150 km (50 km par défaut), afin de couvrir les sites isolés comme l’Observatoire de Haute-Provence.
 - La recherche affiche jusqu’à cinq stations météo les plus proches, au lieu de trois.
+- Les résultats de stations déjà trouvés sont restaurés à la réouverture des paramètres, même si le rayon avait été modifié pour la recherche.
 
 ## AstroClocks v3.3.7 stable - 2026-05-14
 

@@ -173,7 +173,10 @@ def _refraction_station_cache_key(latitude, longitude, radius_km):
 
 
 def _refraction_station_cache_is_valid(cache, key, now=None):
-    if not cache or cache.get("key") != key or not cache.get("stations"):
+    if not cache or not cache.get("stations"):
+        return False
+    cache_key = cache.get("key")
+    if not cache_key or tuple(cache_key[:2]) != tuple(key[:2]):
         return False
     created_at = cache.get("created_at")
     if created_at is None:
@@ -1635,6 +1638,7 @@ def open_settings_dialog(app):
         selected_station = selected_refraction_station()
         app.refraction_station_search_cache = {
             "key": _refraction_station_cache_key(latitude, longitude, radius_km),
+            "radius_km": radius_km,
             "stations": [dict(station) for station in stations],
             "selected_station_id": (
                 selected_station["station_id"] if selected_station is not None else None
@@ -1848,6 +1852,13 @@ def open_settings_dialog(app):
         and cached_station_search is not None
         and _refraction_station_cache_is_valid(cached_station_search, current_key)
     ):
+        cached_radius = cached_station_search.get(
+            "radius_km", cached_station_search["key"][2]
+        )
+        if cached_radius in REFRACTION_STATION_RADIUS_OPTIONS_KM:
+            refraction_radius_var.set(
+                app._tr("settings.refraction_station_radius_option", radius=cached_radius)
+            )
         set_refraction_station_choices(
             cached_station_search["stations"],
             selected_station_id=cached_station_search.get("selected_station_id"),

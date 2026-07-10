@@ -80,6 +80,23 @@ class RefractionParameterStateTests(unittest.TestCase):
             )
         )
 
+    def test_station_cache_restores_same_site_after_radius_change(self):
+        now = datetime.datetime(2026, 7, 10, 12, tzinfo=datetime.timezone.utc)
+        cache = {
+            "key": _refraction_station_cache_key(43.9317, 5.7122, 50),
+            "radius_km": 50,
+            "stations": [{"station_id": "04049001"}],
+            "created_at": now,
+        }
+
+        self.assertTrue(
+            _refraction_station_cache_is_valid(
+                cache,
+                _refraction_station_cache_key(43.9317, 5.7122, 20),
+                now=now + datetime.timedelta(minutes=1),
+            )
+        )
+
     def test_station_search_reports_when_it_uses_extended_radius(self):
         stations = [{"station_id": "04049001", "distance_km": 26.5}]
 
