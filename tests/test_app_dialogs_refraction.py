@@ -6,6 +6,7 @@ from astroclocks.app_dialogs import (
     _refraction_station_cache_key,
     _refraction_station_cache_is_valid,
     _refraction_station_search_used_fallback,
+    REFRACTION_STATION_RESULT_LIMIT,
 )
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
@@ -17,6 +18,9 @@ from astroclocks.settings import (
 
 
 class RefractionParameterStateTests(unittest.TestCase):
+    def test_station_search_shows_five_nearest_results(self):
+        self.assertEqual(REFRACTION_STATION_RESULT_LIMIT, 5)
+
     def test_disabled_model_disables_all_refraction_parameters(self):
         config = _refraction_parameter_config(ATMOSPHERIC_REFRACTION_NONE)
 

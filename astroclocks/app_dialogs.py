@@ -69,6 +69,7 @@ from astroclocks.weather import (
 
 
 REFRACTION_STATION_CACHE_SECONDS = 600
+REFRACTION_STATION_RESULT_LIMIT = 5
 
 
 def _apply_app_icon(window, default=False):
@@ -1680,7 +1681,7 @@ def open_settings_dialog(app):
                 stations = nearest_pressure_station_options(
                     latitude,
                     longitude,
-                    limit=3,
+                    limit=REFRACTION_STATION_RESULT_LIMIT,
                     max_distance_km=fallback_radius_km,
                 )
                 error = None
