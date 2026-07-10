@@ -1657,14 +1657,20 @@ class AstroClocksApp:
             getattr(self, "mount_refraction_model", ATMOSPHERIC_REFRACTION_NONE)
             == ATMOSPHERIC_REFRACTION_NONE
         ):
+            self.pointing_refraction_applied = False
             return ra_hours, declination
         _state, lst_hours = self._visibility_state_at_time(now_utc)
-        return self._apply_mount_refraction_to_equatorial(
+        corrected_coordinates = self._apply_mount_refraction_to_equatorial(
             ra_hours,
             declination,
             lst_hours=lst_hours,
             mount_snapshot=getattr(self, "mount_last_snapshot", None),
         )
+        self.pointing_refraction_applied = not (
+            math.isclose(corrected_coordinates[0], ra_hours, abs_tol=1e-12)
+            and math.isclose(corrected_coordinates[1], declination, abs_tol=1e-12)
+        )
+        return corrected_coordinates
 
     def _current_pointing_coordinate_fields(self, now_utc=None):
         ra_hours, dec_degrees = self._current_pointing_jnow_coordinates(
@@ -2336,6 +2342,8 @@ class AstroClocksApp:
 
     def _hour_angle_title_kwargs(self):
         suffix = self._tr("frame.hour_angle_offset_suffix") if self.hour_angle_offset_enabled else ""
+        if getattr(self, "pointing_refraction_applied", False):
+            suffix += self._tr("frame.hour_angle_refraction_suffix")
         return {"suffix": suffix}
 
     def _declination_title_kwargs(self):
@@ -2344,7 +2352,19 @@ class AstroClocksApp:
             if self.declination_offset_enabled
             else ""
         )
+        if getattr(self, "pointing_refraction_applied", False):
+            suffix += self._tr("frame.declination_refraction_suffix")
         return {"suffix": suffix}
+
+    def _refresh_pointing_coordinate_titles(self):
+        """Update only the titles whose qualifier depends on refraction."""
+        for title_label, title_key, title_kwargs in getattr(
+            self, "labelframe_title_labels", ()
+        ):
+            if title_key not in {"frame.hour_angle", "frame.declination"}:
+                continue
+            title_values = title_kwargs() if callable(title_kwargs) else title_kwargs
+            title_label.config(text=self._tr(title_key, **title_values).upper())
 
     def _create_frames(self):
         self._create_header()
@@ -3306,6 +3326,7 @@ class AstroClocksApp:
         _alpha_hh, _alpha_mm, _alpha_ss, delta_dd, delta_mm, delta_ss = (
             self._current_pointing_coordinate_fields()
         )
+        self._refresh_pointing_coordinate_titles()
         self.lbl_dec_angle.config(
             text=compute_declination_display(
                 delta_dd,

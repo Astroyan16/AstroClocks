@@ -16,6 +16,7 @@
 - La couverture de tests cible maintenant aussi les bascules de contexte de site, le cache JNow des coordonnees et les cibles dynamiques du systeme solaire.
 - Les recherches asynchrones `Etoiles`, `Ciel profond` et `Etoiles doubles` journalisent mieux leurs echecs critiques et sont couvertes sur l'application des resultats obsoletes ou valides.
 - Le modele hybride utilise Saemundsson sous 15° puis ERFA/SOFA au-dessus, avec une transition lissée. La boite Parametres ajuste maintenant les champs utilisables au modele et a la responsabilite de refraction choisis.
+- Les champs d’angle horaire et de déclinaison indiquent explicitement « apparent(e) » uniquement lorsqu’AstroClocks leur applique une correction locale de réfraction.
 
 ## AstroClocks v3.3.7 stable - 2026-05-14
 

@@ -53,6 +53,41 @@ class MountRefractionTests(unittest.TestCase):
         coordinates = AstroClocksApp._current_pointing_jnow_coordinates(app)
 
         self.assertEqual(coordinates, (12.49, 42.12))
+        self.assertTrue(app.pointing_refraction_applied)
+
+    def test_uncorrected_pointing_coordinates_are_not_marked_apparent(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.mount_refraction_model = ATMOSPHERIC_REFRACTION_NONE
+        app._current_target_coordinates = lambda now_utc=None: (12.5, 42.0)
+
+        coordinates = AstroClocksApp._current_pointing_jnow_coordinates(app)
+
+        self.assertEqual(coordinates, (12.5, 42.0))
+        self.assertFalse(app.pointing_refraction_applied)
+
+    def test_coordinate_titles_identify_only_refraction_corrected_values(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.language = "fr"
+        app._tr = lambda key, **values: {
+            "frame.hour_angle_offset_suffix": " (cercle EST +6h)",
+            "frame.declination_offset_suffix": " (+90°)",
+            "frame.hour_angle_refraction_suffix": " (apparent)",
+            "frame.declination_refraction_suffix": " (apparente)",
+        }.get(key, key.format(**values))
+        app.hour_angle_offset_enabled = False
+        app.declination_offset_enabled = False
+        app.pointing_refraction_applied = True
+
+        self.assertEqual(
+            AstroClocksApp._hour_angle_title_kwargs(app)["suffix"], " (apparent)"
+        )
+        self.assertEqual(
+            AstroClocksApp._declination_title_kwargs(app)["suffix"], " (apparente)"
+        )
+
+        app.pointing_refraction_applied = False
+        self.assertEqual(AstroClocksApp._hour_angle_title_kwargs(app)["suffix"], "")
+        self.assertEqual(AstroClocksApp._declination_title_kwargs(app)["suffix"], "")
 
     def test_mount_refraction_is_not_applied_when_ascom_already_applies_it(self):
         app = AstroClocksApp.__new__(AstroClocksApp)
