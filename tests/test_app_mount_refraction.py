@@ -6,6 +6,7 @@ from astroclocks.app import AstroClocksApp
 from astroclocks import ascom_mount
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
     ATMOSPHERIC_REFRACTION_SOFA,
@@ -225,6 +226,57 @@ class MountRefractionTests(unittest.TestCase):
 
         self.assertGreater(dry_blue, humid_blue)
         self.assertNotAlmostEqual(humid_blue, humid_infrared, places=9)
+
+    def test_sofa_hybrid_uses_saemundsson_below_15_degrees(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.refraction_pressure_hpa = 1010.0
+        app.refraction_temperature_c = 10.0
+
+        hybrid = AstroClocksApp._atmospheric_refraction_degrees(
+            app, 10.0, ATMOSPHERIC_REFRACTION_SOFA
+        )
+        saemundsson = AstroClocksApp._atmospheric_refraction_degrees(
+            app, 10.0, ATMOSPHERIC_REFRACTION_SAEMUNDSSON
+        )
+
+        self.assertAlmostEqual(hybrid, saemundsson, places=12)
+
+    def test_sofa_hybrid_smoothly_crosses_15_degrees(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.refraction_pressure_hpa = 1010.0
+        app.refraction_temperature_c = 10.0
+        app.refraction_humidity_percent = 50.0
+        app.refraction_wavelength_nm = 550.0
+        app.refraction_altitude_m = 0.0
+
+        below = AstroClocksApp._atmospheric_refraction_degrees(
+            app, 14.99, ATMOSPHERIC_REFRACTION_SOFA
+        )
+        above = AstroClocksApp._atmospheric_refraction_degrees(
+            app, 15.01, ATMOSPHERIC_REFRACTION_SOFA
+        )
+
+        self.assertLess(abs(above - below), 0.001)
+
+    def test_hohenkerk_sinclair_uses_humidity_and_wavelength(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.refraction_pressure_hpa = 1013.25
+        app.refraction_temperature_c = 15.0
+        app.refraction_altitude_m = 0.0
+        app.refraction_humidity_percent = 0.0
+        app.refraction_wavelength_nm = 400.0
+
+        dry_blue = AstroClocksApp._atmospheric_refraction_degrees(
+            app, 10.0, ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR
+        )
+        app.refraction_humidity_percent = 100.0
+        app.refraction_wavelength_nm = 900.0
+        humid_infrared = AstroClocksApp._atmospheric_refraction_degrees(
+            app, 10.0, ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR
+        )
+
+        self.assertGreater(dry_blue, 0.0)
+        self.assertNotAlmostEqual(dry_blue, humid_infrared, places=9)
 
     def test_zero_pressure_uses_standard_sea_level_pressure_and_site_altitude(self):
         app = AstroClocksApp.__new__(AstroClocksApp)

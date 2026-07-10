@@ -24,6 +24,7 @@ from astroclocks.secure_store import (
 )
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
     ATMOSPHERIC_REFRACTION_SOFA,
@@ -154,7 +155,10 @@ def _refraction_parameter_config(model, source=MOUNT_REFRACTION_SOURCE_AUTO):
     )
     return {
         "common_enabled": refraction_enabled,
-        "sofa_enabled": model == ATMOSPHERIC_REFRACTION_SOFA,
+        "sofa_enabled": model in {
+            ATMOSPHERIC_REFRACTION_SOFA,
+            ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR,
+        },
         "weather_enabled": refraction_enabled,
     }
 
@@ -965,6 +969,9 @@ def open_settings_dialog(app):
         ATMOSPHERIC_REFRACTION_BENNETT: app._tr("settings.refraction_bennett"),
         ATMOSPHERIC_REFRACTION_SAEMUNDSSON: app._tr("settings.refraction_saemundsson"),
         ATMOSPHERIC_REFRACTION_SOFA: app._tr("settings.refraction_sofa"),
+        ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR: app._tr(
+            "settings.refraction_hohenkerk_sinclair"
+        ),
     }
     refraction_model_lookup = {
         label: code for code, label in refraction_model_labels.items()
@@ -1579,6 +1586,10 @@ def open_settings_dialog(app):
         )
         if model == ATMOSPHERIC_REFRACTION_SOFA and refraction_enabled:
             refraction_model_note_var.set(app._tr("settings.refraction_sofa_note"))
+        elif model == ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR and refraction_enabled:
+            refraction_model_note_var.set(
+                app._tr("settings.refraction_hohenkerk_sinclair_note")
+            )
         elif source == MOUNT_REFRACTION_SOURCE_DRIVER:
             refraction_model_note_var.set(app._tr("settings.refraction_driver_note"))
         elif source == MOUNT_REFRACTION_SOURCE_APP:
@@ -2113,7 +2124,8 @@ def open_settings_dialog(app):
                     9000,
                 )
             if (
-                selected_refraction_model == ATMOSPHERIC_REFRACTION_SOFA
+                selected_refraction_model
+                in {ATMOSPHERIC_REFRACTION_SOFA, ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR}
                 and selected_refraction_source != MOUNT_REFRACTION_SOURCE_DRIVER
             ):
                 refraction_humidity = app._parse_float_setting(

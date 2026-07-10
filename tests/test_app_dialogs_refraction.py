@@ -8,6 +8,7 @@ from astroclocks.app_dialogs import (
 )
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
     ATMOSPHERIC_REFRACTION_SOFA,
@@ -35,6 +36,13 @@ class RefractionParameterStateTests(unittest.TestCase):
 
     def test_sofa_model_enables_all_parameters(self):
         config = _refraction_parameter_config(ATMOSPHERIC_REFRACTION_SOFA)
+
+        self.assertTrue(config["common_enabled"])
+        self.assertTrue(config["sofa_enabled"])
+        self.assertTrue(config["weather_enabled"])
+
+    def test_hohenkerk_sinclair_model_enables_all_parameters(self):
+        config = _refraction_parameter_config(ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR)
 
         self.assertTrue(config["common_enabled"])
         self.assertTrue(config["sofa_enabled"])

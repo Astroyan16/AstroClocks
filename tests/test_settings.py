@@ -2,6 +2,7 @@ import unittest
 
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SOFA,
     AppSettings,
@@ -37,6 +38,14 @@ class SettingsTests(unittest.TestCase):
             AppSettings(mount_refraction_model=ATMOSPHERIC_REFRACTION_SOFA)
         )
         self.assertEqual(settings.mount_refraction_model, ATMOSPHERIC_REFRACTION_SOFA)
+
+    def test_normalize_settings_keeps_hohenkerk_sinclair_refraction_model(self):
+        settings = normalize_settings(
+            AppSettings(mount_refraction_model=ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR)
+        )
+        self.assertEqual(
+            settings.mount_refraction_model, ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR
+        )
 
     def test_normalize_settings_falls_back_for_invalid_mount_refraction_model(self):
         settings = normalize_settings(AppSettings(mount_refraction_model="invalid"))

@@ -54,6 +54,7 @@ from astroclocks.runtime_logging import (
 )
 from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
+    ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
     ATMOSPHERIC_REFRACTION_SOFA,
@@ -1401,12 +1402,22 @@ class AstroClocksApp:
             arcminutes = 1.02 / math.tan(math.radians(corrected_argument))
         elif model == ATMOSPHERIC_REFRACTION_SOFA:
             return self._sofa_refraction_degrees(altitude)
+        elif model == ATMOSPHERIC_REFRACTION_HOHENKERK_SINCLAIR:
+            return self._hohenkerk_sinclair_refraction_degrees(altitude)
         else:
             return 0.0
         return max(0.0, (arcminutes / 60.0) * self._refraction_atmosphere_scale())
 
+    def _saemundsson_refraction_degrees(self, altitude):
+        """Saemundsson (1986), geometric altitude to apparent altitude."""
+        corrected_argument = altitude + (10.3 / (altitude + 5.11))
+        arcminutes = 1.02 / math.tan(math.radians(corrected_argument))
+        return max(0.0, (arcminutes / 60.0) * self._refraction_atmosphere_scale())
+
     def _sofa_refraction_degrees(self, altitude):
-        """IAU SOFA refraction, with a stable Bennett fallback at the horizon."""
+        """ERFA refco above 15°, Saemundsson (1986) at lower elevations."""
+        if altitude <= 14.0:
+            return self._saemundsson_refraction_degrees(altitude)
         pressure_hpa = self._effective_refraction_pressure_hpa()
         temperature_c = float(getattr(self, "refraction_temperature_c", 10.0))
         humidity = max(
@@ -1425,30 +1436,112 @@ class AstroClocksApp:
         )
         zenith_distance = math.radians(90.0 - altitude)
         tangent = math.tan(zenith_distance)
-        refraction = math.degrees(refa * tangent + refb * (tangent ** 3))
-        if altitude >= 1.0 and refraction > 0:
+        refraction = max(0.0, math.degrees(refa * tangent + refb * (tangent ** 3)))
+        if altitude >= 16.0:
             return refraction
+        # Saemundsson is used below 15° and ERFA/SOFA above it.  A short
+        # 14°--16° blend avoids a visible pointing-coordinate jump at the
+        # handover while retaining the intended low-elevation behaviour.
+        saemundsson = self._saemundsson_refraction_degrees(altitude)
+        erfa_weight = (altitude - 14.0) / 2.0
+        return (1.0 - erfa_weight) * saemundsson + erfa_weight * refraction
 
-        # The SOFA A*tan(z)+B*tan(z)^3 approximation is designed for
-        # elevations above about 15 degrees and becomes unstable at the
-        # horizon.  Preserve the selected atmosphere's SOFA scale there while
-        # using Bennett's well-behaved empirical horizon form.
-        reference_altitude = 15.0
-        reference_tangent = math.tan(math.radians(90.0 - reference_altitude))
-        sofa_reference = math.degrees(
-            refa * reference_tangent + refb * (reference_tangent ** 3)
+    def _hohenkerk_sinclair_refraction_degrees(self, altitude):
+        """Numerical mean-profile refraction based on Hohenkerk--Sinclair.
+
+        The embedded profile is a standard, horizontally stratified atmosphere
+        expressed as precomputed relative densities.  Surface pressure,
+        temperature, humidity and wavelength define the local refractivity;
+        the ray path is then integrated through the vertical profile.
+        """
+        pressure_hpa = self._effective_refraction_pressure_hpa()
+        temperature_c = float(getattr(self, "refraction_temperature_c", 10.0))
+        humidity = max(
+            0.0,
+            min(100.0, float(getattr(self, "refraction_humidity_percent", 50.0))),
         )
-        bennett_argument = altitude + (7.31 / (altitude + 4.4))
-        bennett_arcminutes = 1.0 / math.tan(math.radians(bennett_argument))
-        bennett_reference_argument = reference_altitude + (
-            7.31 / (reference_altitude + 4.4)
+        wavelength_um = max(
+            0.2,
+            min(3.0, float(getattr(self, "refraction_wavelength_nm", 550.0)) / 1000.0),
         )
-        bennett_reference = (
-            1.0 / math.tan(math.radians(bennett_reference_argument))
-        ) / 60.0
-        if bennett_reference <= 0:
+        refa, _refb = erfa.refco(
+            pressure_hpa,
+            temperature_c,
+            humidity / 100.0,
+            wavelength_um,
+        )
+        surface_refractivity = max(0.0, float(refa))
+        if surface_refractivity <= 0.0:
             return 0.0
-        return max(0.0, (bennett_arcminutes / 60.0) * sofa_reference / bennett_reference)
+
+        # Standard-atmosphere density ratios from the observer upward.
+        # Keeping this table in the application makes the model deterministic
+        # and avoids depending on a remote sounding service for each GoTo.
+        profile_km = (0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 11.0, 15.0,
+                      20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0)
+        density_ratio = (1.0, 0.952, 0.887, 0.785, 0.692, 0.601, 0.525,
+                         0.364, 0.194, 0.0726, 0.0184, 0.00399, 0.00103,
+                         0.000309, 0.0000828, 0.0000185)
+        earth_radius_km = 6371.0
+        observer_altitude_km = max(
+            -0.5, float(getattr(self, "refraction_altitude_m", 0.0)) / 1000.0
+        )
+        observer_radius_km = earth_radius_km + observer_altitude_km
+        top_radius_km = observer_radius_km + profile_km[-1]
+        target_zenith_distance = math.radians(90.0 - altitude)
+
+        def refractive_index(radius_km):
+            height_km = max(0.0, radius_km - observer_radius_km)
+            if height_km >= profile_km[-1]:
+                return 1.0
+            for index in range(1, len(profile_km)):
+                if height_km <= profile_km[index]:
+                    lower_height = profile_km[index - 1]
+                    upper_height = profile_km[index]
+                    fraction = (height_km - lower_height) / (upper_height - lower_height)
+                    # Log interpolation preserves the profile over many orders
+                    # of magnitude in the high atmosphere.
+                    lower_ratio = density_ratio[index - 1]
+                    upper_ratio = density_ratio[index]
+                    ratio = math.exp(
+                        math.log(lower_ratio)
+                        + fraction * math.log(upper_ratio / lower_ratio)
+                    )
+                    return 1.0 + surface_refractivity * ratio
+            return 1.0
+
+        def ray_zenith_distance(observed_zenith_distance):
+            invariant = (
+                refractive_index(observer_radius_km)
+                * observer_radius_km
+                * math.sin(observed_zenith_distance)
+            )
+            steps = 640
+            step = (top_radius_km - observer_radius_km) / steps
+            total = 0.0
+            for index in range(steps + 1):
+                radius_km = observer_radius_km + index * step
+                nr = refractive_index(radius_km) * radius_km
+                delta = max(1e-14, nr * nr - invariant * invariant)
+                value = invariant / (radius_km * math.sqrt(delta))
+                weight = 1 if index in (0, steps) else 4 if index % 2 else 2
+                total += weight * value
+            total *= step / 3.0
+            # Above the embedded profile the atmosphere is vacuum, which has
+            # the closed-form continuation of the same ray integral.
+            return total + math.asin(min(1.0, invariant / top_radius_km))
+
+        lower = 0.0
+        upper = math.radians(89.999)
+        if ray_zenith_distance(upper) < target_zenith_distance:
+            return self._saemundsson_refraction_degrees(altitude)
+        for _ in range(32):
+            middle = (lower + upper) / 2.0
+            if ray_zenith_distance(middle) < target_zenith_distance:
+                lower = middle
+            else:
+                upper = middle
+        return max(0.0, math.degrees(target_zenith_distance - ((lower + upper) / 2.0)))
 
     def _should_apply_local_mount_refraction(self, mount_snapshot=None):
         """Use local refraction only when ASCOM explicitly reports it disabled."""
