@@ -3,7 +3,7 @@
 from datetime import date
 
 APP_NAME = "AstroClocks"
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.4.1"
 APP_RELEASE_DATE = date(2026, 7, 10)
 UPDATE_REPOSITORY = "Astroyan16/AstroClocks"
 INSTALLER_NAME_PREFIX = "Install_AstroClocks"

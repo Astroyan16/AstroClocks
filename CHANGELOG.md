@@ -1,6 +1,6 @@
 # Changelog
 
-## AstroClocks v3.4.0 stable - 2026-07-10
+## AstroClocks v3.4.1 stable - 2026-07-10
 
 ### Ajoute
 
