@@ -81,7 +81,14 @@ def load_meteofrance_application_id(path=METEOFRANCE_APPLICATION_ID_FILE):
         return ""
     if not payload:
         return ""
-    return unprotect_text(payload)
+    try:
+        return unprotect_text(payload)
+    except SecureStoreUnavailable:
+        raise
+    except Exception:
+        # A damaged or stale DPAPI blob must not prevent the settings window
+        # from opening; saving a new key will replace it.
+        return ""
 
 
 def delete_meteofrance_application_id(path=METEOFRANCE_APPLICATION_ID_FILE):

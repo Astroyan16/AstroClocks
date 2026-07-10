@@ -28,6 +28,7 @@ class MountSnapshot:
     tracking_rate: int | None = None
     site_latitude: float | None = None
     site_longitude: float | None = None
+    does_refraction: bool | None = None
 
 
 @dataclass
@@ -239,6 +240,9 @@ def read_snapshot(telescope, driver_id, driver_name):
     site_longitude = _read_optional_float(lambda: getattr(telescope, "SiteLongitude"))
     if site_longitude is not None:
         site_longitude = _normalize_longitude(site_longitude)
+    does_refraction = _read_optional_bool(
+        lambda: getattr(telescope, "DoesRefraction")
+    )
     return MountSnapshot(
         driver_id=str(driver_id or "").strip(),
         driver_name=str(driver_name or driver_id).strip(),
@@ -250,4 +254,5 @@ def read_snapshot(telescope, driver_id, driver_name):
         tracking_rate=tracking_rate,
         site_latitude=site_latitude,
         site_longitude=site_longitude,
+        does_refraction=does_refraction,
     )

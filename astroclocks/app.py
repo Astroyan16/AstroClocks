@@ -14,6 +14,7 @@ from tkinter.font import Font
 from zoneinfo import available_timezones
 
 from astroplan import download_IERS_A
+import erfa
 from astroclocks import (
     app_double_stars,
     app_deep_sky,
@@ -55,10 +56,13 @@ from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
+    ATMOSPHERIC_REFRACTION_SOFA,
     AppSettings,
     COORDINATE_SOURCE_APP,
     COORDINATE_SOURCE_MOUNT,
     DEFAULT_DEEP_SKY_CATEGORY,
+    MOUNT_REFRACTION_SOURCE_APP,
+    MOUNT_REFRACTION_SOURCE_DRIVER,
     DEFAULT_TIMEZONE_NAME,
     format_latitude_display,
     format_longitude_display,
@@ -227,10 +231,14 @@ class AstroClocksApp:
         self.coordinate_source = self.settings.coordinate_source
         self.mount_show_reticle = self.settings.mount_show_reticle
         self.mount_refraction_model = self.settings.mount_refraction_model
+        self.mount_refraction_source = self.settings.mount_refraction_source
         self.refraction_pressure_hpa = self.settings.refraction_pressure_hpa
         self.refraction_temperature_c = self.settings.refraction_temperature_c
+        self.refraction_humidity_percent = self.settings.refraction_humidity_percent
+        self.refraction_wavelength_nm = self.settings.refraction_wavelength_nm
         self.refraction_altitude_m = self.settings.refraction_altitude_m
         self.refraction_station_radius_km = self.settings.refraction_station_radius_km
+        self.refraction_station_search_cache = None
         self.timezone_name = self._normalize_timezone_name(self.settings.timezone_name)
         self.daylight_saving_enabled = self.settings.daylight_saving_enabled
         self.language = self.settings.language
@@ -1363,6 +1371,7 @@ class AstroClocksApp:
             ra_hours,
             declination,
             lst_hours=lst_hours,
+            mount_snapshot=snapshot,
         )
 
     def _refraction_atmosphere_scale(self):
@@ -1390,13 +1399,83 @@ class AstroClocksApp:
         elif model == ATMOSPHERIC_REFRACTION_SAEMUNDSSON:
             corrected_argument = altitude + (10.3 / (altitude + 5.11))
             arcminutes = 1.02 / math.tan(math.radians(corrected_argument))
+        elif model == ATMOSPHERIC_REFRACTION_SOFA:
+            return self._sofa_refraction_degrees(altitude)
         else:
             return 0.0
         return max(0.0, (arcminutes / 60.0) * self._refraction_atmosphere_scale())
 
-    def _apply_mount_refraction_to_equatorial(self, ra_hours, declination, lst_hours=None):
+    def _sofa_refraction_degrees(self, altitude):
+        """IAU SOFA refraction, with a stable Bennett fallback at the horizon."""
+        pressure_hpa = self._effective_refraction_pressure_hpa()
+        temperature_c = float(getattr(self, "refraction_temperature_c", 10.0))
+        humidity = max(
+            0.0,
+            min(100.0, float(getattr(self, "refraction_humidity_percent", 50.0))),
+        )
+        wavelength_um = max(
+            0.2,
+            min(3.0, float(getattr(self, "refraction_wavelength_nm", 550.0)) / 1000.0),
+        )
+        refa, refb = erfa.refco(
+            pressure_hpa,
+            temperature_c,
+            humidity / 100.0,
+            wavelength_um,
+        )
+        zenith_distance = math.radians(90.0 - altitude)
+        tangent = math.tan(zenith_distance)
+        refraction = math.degrees(refa * tangent + refb * (tangent ** 3))
+        if altitude >= 1.0 and refraction > 0:
+            return refraction
+
+        # The SOFA A*tan(z)+B*tan(z)^3 approximation is designed for
+        # elevations above about 15 degrees and becomes unstable at the
+        # horizon.  Preserve the selected atmosphere's SOFA scale there while
+        # using Bennett's well-behaved empirical horizon form.
+        reference_altitude = 15.0
+        reference_tangent = math.tan(math.radians(90.0 - reference_altitude))
+        sofa_reference = math.degrees(
+            refa * reference_tangent + refb * (reference_tangent ** 3)
+        )
+        bennett_argument = altitude + (7.31 / (altitude + 4.4))
+        bennett_arcminutes = 1.0 / math.tan(math.radians(bennett_argument))
+        bennett_reference_argument = reference_altitude + (
+            7.31 / (reference_altitude + 4.4)
+        )
+        bennett_reference = (
+            1.0 / math.tan(math.radians(bennett_reference_argument))
+        ) / 60.0
+        if bennett_reference <= 0:
+            return 0.0
+        return max(0.0, (bennett_arcminutes / 60.0) * sofa_reference / bennett_reference)
+
+    def _should_apply_local_mount_refraction(self, mount_snapshot=None):
+        """Use local refraction only when ASCOM explicitly reports it disabled."""
+        source = getattr(self, "mount_refraction_source", "auto")
+        if source == MOUNT_REFRACTION_SOURCE_APP:
+            return True
+        if source == MOUNT_REFRACTION_SOURCE_DRIVER:
+            return False
+        if mount_snapshot is None:
+            mount_snapshot = getattr(self, "mount_last_snapshot", None)
+        if mount_snapshot is None:
+            # There is no connected mount to delegate to, so this remains useful
+            # for the application's pointing-coordinate display.
+            return True
+        return getattr(mount_snapshot, "does_refraction", None) is False
+
+    def _apply_mount_refraction_to_equatorial(
+        self,
+        ra_hours,
+        declination,
+        lst_hours=None,
+        mount_snapshot=None,
+    ):
         model = getattr(self, "mount_refraction_model", ATMOSPHERIC_REFRACTION_NONE)
-        if model == ATMOSPHERIC_REFRACTION_NONE:
+        if model == ATMOSPHERIC_REFRACTION_NONE or not self._should_apply_local_mount_refraction(
+            mount_snapshot
+        ):
             return ra_hours, declination
         if lst_hours is None:
             _state, lst_hours = self._visibility_state_at_time(
@@ -1491,6 +1570,7 @@ class AstroClocksApp:
             ra_hours,
             declination,
             lst_hours=lst_hours,
+            mount_snapshot=getattr(self, "mount_last_snapshot", None),
         )
 
     def _current_pointing_coordinate_fields(self, now_utc=None):
@@ -1852,6 +1932,16 @@ class AstroClocksApp:
                 self._tr(
                     "mount.status.segment_goto",
                     value=self._mount_goto_label(snapshot),
+                ),
+                self._tr(
+                    "mount.status.segment_refraction",
+                    value=self._tr(
+                        "mount.refraction.enabled"
+                        if getattr(snapshot, "does_refraction", None) is True
+                        else "mount.refraction.disabled"
+                        if getattr(snapshot, "does_refraction", None) is False
+                        else "mount.refraction.unknown"
+                    ),
                 ),
             ]
             if getattr(snapshot, "slewing", False):
@@ -3280,8 +3370,11 @@ class AstroClocksApp:
             coordinate_source=self.coordinate_source,
             mount_show_reticle=self.mount_show_reticle,
             mount_refraction_model=self.mount_refraction_model,
+            mount_refraction_source=self.mount_refraction_source,
             refraction_pressure_hpa=self.refraction_pressure_hpa,
             refraction_temperature_c=self.refraction_temperature_c,
+            refraction_humidity_percent=self.refraction_humidity_percent,
+            refraction_wavelength_nm=self.refraction_wavelength_nm,
             refraction_altitude_m=self.refraction_altitude_m,
             refraction_station_radius_km=self.refraction_station_radius_km,
             timezone_name=self.timezone_name,

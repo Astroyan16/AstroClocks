@@ -8,6 +8,10 @@ from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
+    ATMOSPHERIC_REFRACTION_SOFA,
+    MOUNT_REFRACTION_SOURCE_APP,
+    MOUNT_REFRACTION_SOURCE_AUTO,
+    MOUNT_REFRACTION_SOURCE_DRIVER,
 )
 
 
@@ -33,8 +37,14 @@ class MountRefractionTests(unittest.TestCase):
         app._current_target_coordinates = lambda now_utc=None: (12.5, 42.0)
         app._visibility_state_at_time = lambda now_utc: ({}, 13.0)
 
-        def apply_refraction(ra_hours, declination, lst_hours=None):
+        def apply_refraction(
+            ra_hours,
+            declination,
+            lst_hours=None,
+            mount_snapshot=None,
+        ):
             self.assertEqual((ra_hours, declination, lst_hours), (12.5, 42.0, 13.0))
+            self.assertIsNone(mount_snapshot)
             return 12.49, 42.12
 
         app._apply_mount_refraction_to_equatorial = apply_refraction
@@ -42,6 +52,53 @@ class MountRefractionTests(unittest.TestCase):
         coordinates = AstroClocksApp._current_pointing_jnow_coordinates(app)
 
         self.assertEqual(coordinates, (12.49, 42.12))
+
+    def test_mount_refraction_is_not_applied_when_ascom_already_applies_it(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.mount_refraction_model = ATMOSPHERIC_REFRACTION_BENNETT
+        app.mount_last_snapshot = SimpleNamespace(does_refraction=True)
+        app._equatorial_to_horizontal = lambda *args: self.fail(
+            "Unexpected local refraction calculation"
+        )
+
+        coordinates = AstroClocksApp._apply_mount_refraction_to_equatorial(
+            app,
+            12.5,
+            42.0,
+            lst_hours=13.0,
+        )
+
+        self.assertEqual(coordinates, (12.5, 42.0))
+
+    def test_mount_refraction_is_not_applied_when_ascom_state_is_unknown(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.mount_refraction_model = ATMOSPHERIC_REFRACTION_BENNETT
+        app.mount_last_snapshot = SimpleNamespace(does_refraction=None)
+        app._equatorial_to_horizontal = lambda *args: self.fail(
+            "Unexpected local refraction calculation"
+        )
+
+        coordinates = AstroClocksApp._apply_mount_refraction_to_equatorial(
+            app,
+            12.5,
+            42.0,
+            lst_hours=13.0,
+        )
+
+        self.assertEqual(coordinates, (12.5, 42.0))
+
+    def test_refraction_source_policy_can_override_ascom_state(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        snapshot = SimpleNamespace(does_refraction=True)
+
+        app.mount_refraction_source = MOUNT_REFRACTION_SOURCE_AUTO
+        self.assertFalse(AstroClocksApp._should_apply_local_mount_refraction(app, snapshot))
+
+        app.mount_refraction_source = MOUNT_REFRACTION_SOURCE_APP
+        self.assertTrue(AstroClocksApp._should_apply_local_mount_refraction(app, snapshot))
+
+        app.mount_refraction_source = MOUNT_REFRACTION_SOURCE_DRIVER
+        self.assertFalse(AstroClocksApp._should_apply_local_mount_refraction(app, snapshot))
 
     def test_clock_state_uses_refraction_corrected_pointing_coordinates(self):
         app = AstroClocksApp.__new__(AstroClocksApp)
@@ -139,6 +196,35 @@ class MountRefractionTests(unittest.TestCase):
             ATMOSPHERIC_REFRACTION_BENNETT,
         )
         self.assertAlmostEqual(scaled, standard / 2, places=8)
+
+    def test_sofa_model_uses_humidity_and_wavelength(self):
+        app = AstroClocksApp.__new__(AstroClocksApp)
+        app.refraction_pressure_hpa = 1013.25
+        app.refraction_temperature_c = 15.0
+        app.refraction_altitude_m = 0.0
+        app.refraction_humidity_percent = 0.0
+        app.refraction_wavelength_nm = 400.0
+
+        dry_blue = AstroClocksApp._atmospheric_refraction_degrees(
+            app,
+            30.0,
+            ATMOSPHERIC_REFRACTION_SOFA,
+        )
+        app.refraction_humidity_percent = 100.0
+        humid_blue = AstroClocksApp._atmospheric_refraction_degrees(
+            app,
+            30.0,
+            ATMOSPHERIC_REFRACTION_SOFA,
+        )
+        app.refraction_wavelength_nm = 900.0
+        humid_infrared = AstroClocksApp._atmospheric_refraction_degrees(
+            app,
+            30.0,
+            ATMOSPHERIC_REFRACTION_SOFA,
+        )
+
+        self.assertGreater(dry_blue, humid_blue)
+        self.assertNotAlmostEqual(humid_blue, humid_infrared, places=9)
 
     def test_zero_pressure_uses_standard_sea_level_pressure_and_site_altitude(self):
         app = AstroClocksApp.__new__(AstroClocksApp)

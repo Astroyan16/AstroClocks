@@ -1,10 +1,13 @@
 # Changelog
 
-## En cours vers AstroClocks v3.3.8
+## AstroClocks v3.4.0 stable - 2026-07-10
 
 ### Ajoute
 
 - Journal runtime rotatif dans `%LOCALAPPDATA%\AstroClocks\logs\astroclocks.log`, avec possibilite de rediriger le dossier via `ASTROCLOCKS_LOG_DIR`.
+- Prise en charge ASCOM de `DoesRefraction`, avec statut lisible et choix de la responsabilite de correction : automatique, AstroClocks ou driver/monture.
+- Modeles de refraction Bennett, Saemundsson et IAU SOFA ; le modele SOFA utilise pression, temperature, humidite et longueur d’onde.
+- Recherche de stations meteo avec humidite lorsqu’elle est disponible, cache de session horodate et actualisation explicite.
 
 ### Ameliore
 
@@ -12,6 +15,7 @@
 - Les echecs de connexion et de polling ASCOM absorbés par l'interface sont journalises au lieu de disparaitre silencieusement.
 - La couverture de tests cible maintenant aussi les bascules de contexte de site, le cache JNow des coordonnees et les cibles dynamiques du systeme solaire.
 - Les recherches asynchrones `Etoiles`, `Ciel profond` et `Etoiles doubles` journalisent mieux leurs echecs critiques et sont couvertes sur l'application des resultats obsoletes ou valides.
+- La boite Parametres ajuste maintenant les champs utilisables au modele et a la responsabilite de refraction choisis.
 
 ## AstroClocks v3.3.7 stable - 2026-05-14
 

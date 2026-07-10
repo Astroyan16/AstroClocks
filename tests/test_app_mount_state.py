@@ -124,6 +124,24 @@ class MountSettingsStateTests(unittest.TestCase):
         self.assertIn("Repère", state["status_text"])
         self.assertIn("Suivi", state["status_text"])
         self.assertIn("GoTo", state["status_text"])
+        self.assertIn("Réfraction ASCOM : inconnue", state["status_text"])
+
+    def test_mount_settings_state_reports_ascom_refraction_state(self):
+        app = self._app_stub()
+        app.mount_connected = True
+        app.mount_last_snapshot = SimpleNamespace(
+            driver_name="SynScan App Driver",
+            driver_id="ASCOM.SynScan.Driver",
+            equatorial_system=1,
+            does_refraction=True,
+        )
+
+        enabled_state = AstroClocksApp.mount_settings_state(app)
+        self.assertIn("Réfraction ASCOM : activée", enabled_state["status_text"])
+
+        app.mount_last_snapshot.does_refraction = False
+        disabled_state = AstroClocksApp.mount_settings_state(app)
+        self.assertIn("Réfraction ASCOM : désactivée", disabled_state["status_text"])
 
     def test_connect_ascom_mount_reports_connect_failure_when_initial_snapshot_fails(self):
         app = self._app_stub()

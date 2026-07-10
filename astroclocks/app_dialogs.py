@@ -26,6 +26,7 @@ from astroclocks.settings import (
     ATMOSPHERIC_REFRACTION_BENNETT,
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
+    ATMOSPHERIC_REFRACTION_SOFA,
     COORDINATE_SOURCE_APP,
     COORDINATE_SOURCE_MOUNT,
     DEFAULT_ALADIN_FOV_DEG,
@@ -38,10 +39,13 @@ from astroclocks.settings import (
     DEFAULT_LONGITUDE,
     DEFAULT_MOUNT_SHOW_RETICLE,
     DEFAULT_MOUNT_REFRACTION_MODEL,
+    DEFAULT_MOUNT_REFRACTION_SOURCE,
     DEFAULT_REFRACTION_ALTITUDE_M,
+    DEFAULT_REFRACTION_HUMIDITY_PERCENT,
     DEFAULT_REFRACTION_PRESSURE_HPA,
     DEFAULT_REFRACTION_STATION_RADIUS_KM,
     DEFAULT_REFRACTION_TEMPERATURE_C,
+    DEFAULT_REFRACTION_WAVELENGTH_NM,
     DEFAULT_SITE_NAME,
     DEFAULT_SKY_MAGNITUDE_LIMIT,
     DEFAULT_SKY_SHOW_ALTAZ_GRID,
@@ -49,6 +53,9 @@ from astroclocks.settings import (
     DEFAULT_SKY_SHOW_SOLAR_SYSTEM,
     DEFAULT_TIMEZONE_NAME,
     MAX_SKY_MAGNITUDE_LIMIT,
+    MOUNT_REFRACTION_SOURCE_APP,
+    MOUNT_REFRACTION_SOURCE_AUTO,
+    MOUNT_REFRACTION_SOURCE_DRIVER,
     REFRACTION_STATION_RADIUS_OPTIONS_KM,
 )
 from astroclocks.sites import LOCATION_PRESETS, preset_label
@@ -58,6 +65,9 @@ from astroclocks.weather import (
     nearest_pressure_station_options,
     test_meteofrance_api_key,
 )
+
+
+REFRACTION_STATION_CACHE_SECONDS = 600
 
 
 def _apply_app_icon(window, default=False):
@@ -135,6 +145,36 @@ def _coordinate_source_combo_config(
         "selected_label": selected_label,
         "state": state,
     }
+
+
+def _refraction_parameter_config(model, source=MOUNT_REFRACTION_SOURCE_AUTO):
+    refraction_enabled = (
+        model != ATMOSPHERIC_REFRACTION_NONE
+        and source != MOUNT_REFRACTION_SOURCE_DRIVER
+    )
+    return {
+        "common_enabled": refraction_enabled,
+        "sofa_enabled": model == ATMOSPHERIC_REFRACTION_SOFA,
+        "weather_enabled": refraction_enabled,
+    }
+
+
+def _refraction_station_cache_key(latitude, longitude, radius_km):
+    return (
+        round(float(latitude), 5),
+        round(float(longitude), 5),
+        int(radius_km),
+    )
+
+
+def _refraction_station_cache_is_valid(cache, key, now=None):
+    if not cache or cache.get("key") != key or not cache.get("stations"):
+        return False
+    created_at = cache.get("created_at")
+    if created_at is None:
+        return False
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return 0 <= (now - created_at).total_seconds() <= REFRACTION_STATION_CACHE_SECONDS
 
 
 def show_error_dialog(app, title, message, parent=None):
@@ -924,10 +964,25 @@ def open_settings_dialog(app):
         ATMOSPHERIC_REFRACTION_NONE: app._tr("settings.refraction_none"),
         ATMOSPHERIC_REFRACTION_BENNETT: app._tr("settings.refraction_bennett"),
         ATMOSPHERIC_REFRACTION_SAEMUNDSSON: app._tr("settings.refraction_saemundsson"),
+        ATMOSPHERIC_REFRACTION_SOFA: app._tr("settings.refraction_sofa"),
     }
     refraction_model_lookup = {
         label: code for code, label in refraction_model_labels.items()
     }
+    refraction_source_labels = {
+        MOUNT_REFRACTION_SOURCE_AUTO: app._tr("settings.refraction_source_auto"),
+        MOUNT_REFRACTION_SOURCE_APP: app._tr("settings.refraction_source_app"),
+        MOUNT_REFRACTION_SOURCE_DRIVER: app._tr("settings.refraction_source_driver"),
+    }
+    refraction_source_lookup = {
+        label: code for code, label in refraction_source_labels.items()
+    }
+    mount_refraction_source_var = tk.StringVar(
+        value=refraction_source_labels.get(
+            getattr(app, "mount_refraction_source", DEFAULT_MOUNT_REFRACTION_SOURCE),
+            refraction_source_labels[DEFAULT_MOUNT_REFRACTION_SOURCE],
+        )
+    )
     mount_refraction_var = tk.StringVar(
         value=refraction_model_labels.get(
             app.mount_refraction_model,
@@ -936,6 +991,12 @@ def open_settings_dialog(app):
     )
     refraction_pressure_var = tk.StringVar(value=f"{app.refraction_pressure_hpa:.1f}")
     refraction_temperature_var = tk.StringVar(value=f"{app.refraction_temperature_c:.1f}")
+    refraction_humidity_var = tk.StringVar(
+        value=f"{app.refraction_humidity_percent:.0f}"
+    )
+    refraction_wavelength_var = tk.StringVar(
+        value=f"{app.refraction_wavelength_nm:.0f}"
+    )
     refraction_altitude_var = tk.StringVar(value=f"{app.refraction_altitude_m:.0f}")
     refraction_radius_labels = {
         app._tr("settings.refraction_station_radius_option", radius=radius): radius
@@ -1226,20 +1287,43 @@ def open_settings_dialog(app):
         state="readonly",
     )
     mount_refraction_combo.grid(column=1, row=2, pady=7, sticky="ew")
-    add_label(mount_tab, 3, app._tr("settings.refraction_parameters"))
+    add_label(mount_tab, 3, app._tr("settings.refraction_source"))
+    mount_refraction_source_combo = ttk.Combobox(
+        mount_tab,
+        textvariable=mount_refraction_source_var,
+        values=list(refraction_source_lookup),
+        font=Font(family="Segoe UI", size=10),
+        width=42,
+        state="readonly",
+    )
+    mount_refraction_source_combo.grid(column=1, row=3, pady=7, sticky="ew")
+    refraction_model_note_var = tk.StringVar(value="")
+    refraction_model_note = tk.Label(
+        mount_tab,
+        textvariable=refraction_model_note_var,
+        bg=app.gbg,
+        fg=app.muted,
+        font=Font(family="Segoe UI", size=9),
+        anchor="w",
+        justify="left",
+        wraplength=420,
+    )
+    refraction_model_note.grid(column=1, row=4, pady=(0, 5), sticky="ew")
+    add_label(mount_tab, 5, app._tr("settings.refraction_parameters"))
     refraction_options = tk.Frame(mount_tab, bg=app.gbg)
-    refraction_options.grid(column=1, row=3, pady=7, sticky="ew")
+    refraction_options.grid(column=1, row=5, pady=7, sticky="ew")
     refraction_options.grid_columnconfigure(1, weight=1)
     refraction_options.grid_columnconfigure(2, weight=1)
-    tk.Label(
+    refraction_pressure_label = tk.Label(
         refraction_options,
         text=app._tr("settings.refraction_pressure"),
         bg=app.gbg,
         fg=app.text,
         font=Font(family="Segoe UI", size=10),
         anchor="w",
-    ).grid(column=0, row=0, padx=(0, 10), sticky="w")
-    tk.Entry(
+    )
+    refraction_pressure_label.grid(column=0, row=0, padx=(0, 10), sticky="w")
+    refraction_pressure_entry = tk.Entry(
         refraction_options,
         textvariable=refraction_pressure_var,
         bg=app.ebg,
@@ -1250,17 +1334,23 @@ def open_settings_dialog(app):
         highlightbackground=app.card_edge,
         highlightcolor=app.accent,
         highlightthickness=1,
+        disabledbackground=app.gbg,
+        disabledforeground=app.muted,
         width=8,
-    ).grid(column=1, row=0, sticky="w")
-    tk.Label(
+    )
+    refraction_pressure_entry.grid(column=1, row=0, sticky="w")
+    refraction_temperature_label = tk.Label(
         refraction_options,
         text=app._tr("settings.refraction_temperature"),
         bg=app.gbg,
         fg=app.text,
         font=Font(family="Segoe UI", size=10),
         anchor="w",
-    ).grid(column=0, row=1, padx=(0, 10), pady=(5, 0), sticky="w")
-    tk.Entry(
+    )
+    refraction_temperature_label.grid(
+        column=0, row=1, padx=(0, 10), pady=(5, 0), sticky="w"
+    )
+    refraction_temperature_entry = tk.Entry(
         refraction_options,
         textvariable=refraction_temperature_var,
         bg=app.ebg,
@@ -1271,17 +1361,77 @@ def open_settings_dialog(app):
         highlightbackground=app.card_edge,
         highlightcolor=app.accent,
         highlightthickness=1,
+        disabledbackground=app.gbg,
+        disabledforeground=app.muted,
         width=8,
-    ).grid(column=1, row=1, pady=(5, 0), sticky="w")
-    tk.Label(
+    )
+    refraction_temperature_entry.grid(column=1, row=1, pady=(5, 0), sticky="w")
+    refraction_humidity_label = tk.Label(
+        refraction_options,
+        text=app._tr("settings.refraction_humidity"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+    )
+    refraction_humidity_label.grid(
+        column=0, row=2, padx=(0, 10), pady=(5, 0), sticky="w"
+    )
+    refraction_humidity_entry = tk.Entry(
+        refraction_options,
+        textvariable=refraction_humidity_var,
+        bg=app.ebg,
+        fg=app.text,
+        insertbackground=app.fg,
+        font=Font(family="Segoe UI", size=10),
+        relief="flat",
+        highlightbackground=app.card_edge,
+        highlightcolor=app.accent,
+        highlightthickness=1,
+        disabledbackground=app.gbg,
+        disabledforeground=app.muted,
+        width=8,
+    )
+    refraction_humidity_entry.grid(column=1, row=2, pady=(5, 0), sticky="w")
+    refraction_wavelength_label = tk.Label(
+        refraction_options,
+        text=app._tr("settings.refraction_wavelength"),
+        bg=app.gbg,
+        fg=app.text,
+        font=Font(family="Segoe UI", size=10),
+        anchor="w",
+    )
+    refraction_wavelength_label.grid(
+        column=0, row=3, padx=(0, 10), pady=(5, 0), sticky="w"
+    )
+    refraction_wavelength_entry = tk.Entry(
+        refraction_options,
+        textvariable=refraction_wavelength_var,
+        bg=app.ebg,
+        fg=app.text,
+        insertbackground=app.fg,
+        font=Font(family="Segoe UI", size=10),
+        relief="flat",
+        highlightbackground=app.card_edge,
+        highlightcolor=app.accent,
+        highlightthickness=1,
+        disabledbackground=app.gbg,
+        disabledforeground=app.muted,
+        width=8,
+    )
+    refraction_wavelength_entry.grid(column=1, row=3, pady=(5, 0), sticky="w")
+    refraction_altitude_label = tk.Label(
         refraction_options,
         text=app._tr("settings.refraction_altitude"),
         bg=app.gbg,
         fg=app.text,
         font=Font(family="Segoe UI", size=10),
         anchor="w",
-    ).grid(column=0, row=2, padx=(0, 10), pady=(5, 0), sticky="w")
-    tk.Entry(
+    )
+    refraction_altitude_label.grid(
+        column=0, row=4, padx=(0, 10), pady=(5, 0), sticky="w"
+    )
+    refraction_altitude_entry = tk.Entry(
         refraction_options,
         textvariable=refraction_altitude_var,
         bg=app.ebg,
@@ -1292,18 +1442,22 @@ def open_settings_dialog(app):
         highlightbackground=app.card_edge,
         highlightcolor=app.accent,
         highlightthickness=1,
+        disabledbackground=app.gbg,
+        disabledforeground=app.muted,
         width=8,
-    ).grid(column=1, row=2, pady=(5, 0), sticky="w")
+    )
+    refraction_altitude_entry.grid(column=1, row=4, pady=(5, 0), sticky="w")
     refraction_radius_frame = tk.Frame(refraction_options, bg=app.gbg)
-    refraction_radius_frame.grid(column=0, row=3, columnspan=3, pady=(8, 0), sticky="ew")
-    tk.Label(
+    refraction_radius_frame.grid(column=0, row=5, columnspan=3, pady=(8, 0), sticky="ew")
+    refraction_radius_label = tk.Label(
         refraction_radius_frame,
         text=app._tr("settings.refraction_station_radius"),
         bg=app.gbg,
         fg=app.text,
         font=Font(family="Segoe UI", size=10),
         anchor="w",
-    ).grid(column=0, row=0, padx=(0, 10), sticky="w")
+    )
+    refraction_radius_label.grid(column=0, row=0, padx=(0, 10), sticky="w")
     refraction_radius_combo = ttk.Combobox(
         refraction_radius_frame,
         textvariable=refraction_radius_var,
@@ -1314,19 +1468,26 @@ def open_settings_dialog(app):
     )
     refraction_radius_combo.grid(column=1, row=0, sticky="w")
     refraction_station_actions = tk.Frame(refraction_options, bg=app.gbg)
-    refraction_station_actions.grid(column=0, row=4, columnspan=2, pady=(8, 0), sticky="ew")
-    refraction_station_actions.grid_columnconfigure(1, weight=1)
+    refraction_station_actions.grid(column=0, row=6, columnspan=2, pady=(8, 0), sticky="ew")
+    refraction_station_actions.grid_columnconfigure(2, weight=1)
     refraction_station_button = app._build_button(
         refraction_station_actions,
         app._tr("settings.refraction_find_stations"),
         lambda: None,
     )
     refraction_station_button.grid(column=0, row=0, sticky="w")
-    app._build_button(
+    refraction_refresh_button = app._build_button(
+        refraction_station_actions,
+        app._tr("settings.refraction_refresh_stations"),
+        lambda: None,
+    )
+    refraction_refresh_button.grid(column=1, row=0, padx=(8, 0), sticky="w")
+    refraction_api_button = app._build_button(
         refraction_station_actions,
         app._tr("settings.meteofrance_api_configure"),
         lambda: open_meteofrance_api_dialog(app, parent=dialog),
-    ).grid(column=1, row=0, padx=(8, 0), sticky="w")
+    )
+    refraction_api_button.grid(column=2, row=0, padx=(8, 0), sticky="w")
     refraction_station_combo = ttk.Combobox(
         refraction_options,
         textvariable=refraction_station_var,
@@ -1337,7 +1498,7 @@ def open_settings_dialog(app):
     )
     refraction_station_combo.grid(
         column=0,
-        row=5,
+        row=7,
         columnspan=3,
         pady=(8, 0),
         sticky="ew",
@@ -1348,7 +1509,7 @@ def open_settings_dialog(app):
         lambda: None,
     )
     refraction_weather_button.config(state=tk.DISABLED)
-    refraction_weather_button.grid(column=0, row=6, columnspan=2, pady=(8, 0), sticky="w")
+    refraction_weather_button.grid(column=0, row=8, columnspan=2, pady=(8, 0), sticky="w")
     refraction_weather_status = tk.Label(
         refraction_options,
         textvariable=refraction_weather_status_var,
@@ -1359,12 +1520,115 @@ def open_settings_dialog(app):
         justify="left",
         wraplength=420,
     )
-    refraction_weather_status.grid(column=0, row=7, columnspan=3, pady=(5, 0), sticky="ew")
+    refraction_weather_status.grid(column=0, row=9, columnspan=3, pady=(5, 0), sticky="ew")
+    refraction_activity = {"busy": False}
+
+    def sync_refraction_parameter_state(_event=None):
+        model = refraction_model_lookup.get(
+            mount_refraction_var.get(),
+            DEFAULT_MOUNT_REFRACTION_MODEL,
+        )
+        source = refraction_source_lookup.get(
+            mount_refraction_source_var.get(),
+            DEFAULT_MOUNT_REFRACTION_SOURCE,
+        )
+        parameter_config = _refraction_parameter_config(model, source)
+        refraction_enabled = parameter_config["common_enabled"]
+        sofa_enabled = parameter_config["sofa_enabled"]
+        common_state = tk.NORMAL if refraction_enabled else tk.DISABLED
+        advanced_state = tk.NORMAL if sofa_enabled else tk.DISABLED
+
+        for label, entry in (
+            (refraction_pressure_label, refraction_pressure_entry),
+            (refraction_temperature_label, refraction_temperature_entry),
+            (refraction_altitude_label, refraction_altitude_entry),
+        ):
+            label.config(fg=app.text if refraction_enabled else app.muted)
+            entry.config(state=common_state)
+        for label, entry in (
+            (refraction_humidity_label, refraction_humidity_entry),
+            (refraction_wavelength_label, refraction_wavelength_entry),
+        ):
+            label.config(fg=app.text if sofa_enabled else app.muted)
+            entry.config(state=advanced_state)
+
+        refraction_radius_label.config(
+            fg=app.text if refraction_enabled else app.muted
+        )
+        refraction_radius_combo.config(
+            state="readonly" if refraction_enabled else "disabled"
+        )
+        controls_enabled = (
+            parameter_config["weather_enabled"] and not refraction_activity["busy"]
+        )
+        refraction_station_button.config(
+            state=tk.NORMAL if controls_enabled else tk.DISABLED
+        )
+        has_stations = bool(refraction_station_choices)
+        refraction_refresh_button.config(
+            state=tk.NORMAL if controls_enabled and has_stations else tk.DISABLED
+        )
+        refraction_api_button.config(
+            state=tk.NORMAL if refraction_enabled else tk.DISABLED
+        )
+        refraction_station_combo.config(
+            state="readonly" if controls_enabled and has_stations else "disabled"
+        )
+        refraction_weather_button.config(
+            state=tk.NORMAL if controls_enabled and has_stations else tk.DISABLED
+        )
+        if model == ATMOSPHERIC_REFRACTION_SOFA and refraction_enabled:
+            refraction_model_note_var.set(app._tr("settings.refraction_sofa_note"))
+        elif source == MOUNT_REFRACTION_SOURCE_DRIVER:
+            refraction_model_note_var.set(app._tr("settings.refraction_driver_note"))
+        elif source == MOUNT_REFRACTION_SOURCE_APP:
+            refraction_model_note_var.set(app._tr("settings.refraction_app_note"))
+        else:
+            refraction_model_note_var.set("")
 
     def selected_refraction_station():
         return refraction_station_choices.get(refraction_station_var.get())
 
-    def find_refraction_stations():
+    def set_refraction_station_choices(stations, selected_station_id=None):
+        station_labels = []
+        selected_label = ""
+        refraction_station_choices.clear()
+        for station in stations:
+            label = app._tr(
+                "settings.refraction_station_option",
+                source=station["source"],
+                station=station["station_id"],
+                name=station["station_name"],
+                distance=f"{station['distance_km']:.1f}",
+                pressure=f"{station['pressure_hpa']:.1f}",
+                time=(station.get("report_time") or app._tr("weather.time_unknown")),
+            )
+            station_labels.append(label)
+            refraction_station_choices[label] = dict(station)
+            if station["station_id"] == selected_station_id:
+                selected_label = label
+        refraction_station_combo.config(values=station_labels)
+        refraction_station_var.set(selected_label or (station_labels[0] if station_labels else ""))
+        sync_refraction_parameter_state()
+
+    def cache_refraction_stations(latitude, longitude, radius_km, stations):
+        selected_station = selected_refraction_station()
+        app.refraction_station_search_cache = {
+            "key": _refraction_station_cache_key(latitude, longitude, radius_km),
+            "stations": [dict(station) for station in stations],
+            "selected_station_id": (
+                selected_station["station_id"] if selected_station is not None else None
+            ),
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
+        }
+
+    def remember_selected_refraction_station(_event=None):
+        cache = getattr(app, "refraction_station_search_cache", None)
+        station = selected_refraction_station()
+        if cache is not None and station is not None:
+            cache["selected_station_id"] = station["station_id"]
+
+    def find_refraction_stations(force_refresh=False):
         try:
             latitude = app._parse_float_setting(
                 latitude_var.get(),
@@ -1386,8 +1650,8 @@ def open_settings_dialog(app):
             DEFAULT_REFRACTION_STATION_RADIUS_KM,
         )
 
-        refraction_station_button.config(state=tk.DISABLED)
-        refraction_weather_button.config(state=tk.DISABLED)
+        refraction_activity["busy"] = True
+        sync_refraction_parameter_state()
         refraction_weather_status.config(fg=app.accent)
         refraction_weather_status_var.set(app._tr("settings.refraction_stations_loading"))
 
@@ -1405,8 +1669,9 @@ def open_settings_dialog(app):
                 error = exc
 
             def finish():
-                refraction_station_button.config(state=tk.NORMAL)
+                refraction_activity["busy"] = False
                 if error is not None:
+                    sync_refraction_parameter_state()
                     refraction_weather_status.config(fg=app.danger)
                     refraction_weather_status_var.set(
                         app._tr("settings.refraction_weather_error", error=error)
@@ -1416,31 +1681,17 @@ def open_settings_dialog(app):
                     refraction_station_choices.clear()
                     refraction_station_combo.config(values=[], state="disabled")
                     refraction_station_var.set("")
+                    sync_refraction_parameter_state()
                     refraction_weather_status.config(fg=app.danger)
                     refraction_weather_status_var.set(
                         app._tr("settings.refraction_stations_unavailable")
                     )
                     return
-                station_labels = []
-                refraction_station_choices.clear()
-                for station in stations:
-                    label = app._tr(
-                        "settings.refraction_station_option",
-                        source=station["source"],
-                        station=station["station_id"],
-                        name=station["station_name"],
-                        distance=f"{station['distance_km']:.1f}",
-                        pressure=f"{station['pressure_hpa']:.1f}",
-                        time=(station.get("report_time") or app._tr("weather.time_unknown")),
-                    )
-                    station_labels.append(label)
-                    refraction_station_choices[label] = station
-                refraction_station_combo.config(values=station_labels, state="readonly")
-                refraction_station_var.set(station_labels[0])
-                refraction_weather_button.config(state=tk.NORMAL)
+                set_refraction_station_choices(stations)
+                cache_refraction_stations(latitude, longitude, radius_km, stations)
                 refraction_weather_status.config(fg=app.success)
                 refraction_weather_status_var.set(
-                    app._tr("settings.refraction_stations_loaded", count=len(station_labels))
+                    app._tr("settings.refraction_stations_loaded", count=len(stations))
                 )
 
             try:
@@ -1457,8 +1708,8 @@ def open_settings_dialog(app):
             refraction_weather_status_var.set(app._tr("settings.refraction_station_required"))
             return
 
-        refraction_station_button.config(state=tk.DISABLED)
-        refraction_weather_button.config(state=tk.DISABLED)
+        refraction_activity["busy"] = True
+        sync_refraction_parameter_state()
         refraction_weather_status.config(fg=app.accent)
         refraction_weather_status_var.set(
             app._tr("settings.refraction_weather_loading", station=station["station_id"])
@@ -1473,8 +1724,8 @@ def open_settings_dialog(app):
                 error = exc
 
             def finish():
-                refraction_station_button.config(state=tk.NORMAL)
-                refraction_weather_button.config(state=tk.NORMAL)
+                refraction_activity["busy"] = False
+                sync_refraction_parameter_state()
                 if error is not None:
                     refraction_weather_status.config(fg=app.danger)
                     refraction_weather_status_var.set(
@@ -1490,13 +1741,29 @@ def open_settings_dialog(app):
                 refraction_pressure_var.set(f"{result['pressure_hpa']:.1f}")
                 if result.get("temperature_c") is not None:
                     refraction_temperature_var.set(f"{float(result['temperature_c']):.1f}")
+                if result.get("humidity_percent") is not None:
+                    refraction_humidity_var.set(
+                        f"{float(result['humidity_percent']):.0f}"
+                    )
                 refraction_weather_status.config(fg=app.success)
                 refraction_weather_status_var.set(
                     app._tr(
                         "settings.refraction_weather_loaded",
+                        source=result.get("source", "—"),
                         station=result["station_id"],
                         distance=f"{result['distance_km']:.0f}",
                         pressure=f"{result['pressure_hpa']:.1f}",
+                        temperature=(
+                            f"{float(result['temperature_c']):.1f} °C"
+                            if result.get("temperature_c") is not None
+                            else "—"
+                        ),
+                        humidity=(
+                            f"{float(result['humidity_percent']):.0f} %"
+                            if result.get("humidity_percent") is not None
+                            else "—"
+                        ),
+                        time=(result.get("report_time") or app._tr("weather.time_unknown")),
                     )
                 )
 
@@ -1508,7 +1775,66 @@ def open_settings_dialog(app):
         threading.Thread(target=worker, daemon=True).start()
 
     refraction_station_button.config(command=find_refraction_stations)
+    refraction_refresh_button.config(
+        command=lambda: find_refraction_stations(force_refresh=True)
+    )
     refraction_weather_button.config(command=fetch_refraction_weather)
+    refraction_station_combo.bind(
+        "<<ComboboxSelected>>",
+        remember_selected_refraction_station,
+        add="+",
+    )
+    mount_refraction_combo.bind(
+        "<<ComboboxSelected>>",
+        sync_refraction_parameter_state,
+        add="+",
+    )
+    mount_refraction_source_combo.bind(
+        "<<ComboboxSelected>>",
+        sync_refraction_parameter_state,
+        add="+",
+    )
+    sync_refraction_parameter_state()
+
+    try:
+        current_radius = refraction_radius_labels.get(
+            refraction_radius_var.get(),
+            DEFAULT_REFRACTION_STATION_RADIUS_KM,
+        )
+        current_key = _refraction_station_cache_key(
+            latitude_var.get(),
+            longitude_var.get(),
+            current_radius,
+        )
+    except (TypeError, ValueError):
+        current_key = None
+    cached_station_search = getattr(app, "refraction_station_search_cache", None)
+    if (
+        current_key is not None
+        and cached_station_search is not None
+        and _refraction_station_cache_is_valid(cached_station_search, current_key)
+    ):
+        set_refraction_station_choices(
+            cached_station_search["stations"],
+            selected_station_id=cached_station_search.get("selected_station_id"),
+        )
+        refraction_weather_status.config(fg=app.success)
+        refraction_weather_status_var.set(
+            app._tr(
+                "settings.refraction_stations_restored",
+                count=len(cached_station_search["stations"]),
+                age=max(
+                    0,
+                    int(
+                        (
+                            datetime.datetime.now(datetime.timezone.utc)
+                            - cached_station_search["created_at"]
+                        ).total_seconds()
+                        // 60
+                    ),
+                ),
+            )
+        )
     mount_reticle_toggle = build_checkbutton(
         mount_options,
         mount_show_reticle_var,
@@ -1716,8 +2042,13 @@ def open_settings_dialog(app):
         coordinate_source_var.set(coordinate_source_labels[DEFAULT_COORDINATE_SOURCE])
         mount_show_reticle_var.set(DEFAULT_MOUNT_SHOW_RETICLE)
         mount_refraction_var.set(refraction_model_labels[DEFAULT_MOUNT_REFRACTION_MODEL])
+        mount_refraction_source_var.set(
+            refraction_source_labels[DEFAULT_MOUNT_REFRACTION_SOURCE]
+        )
         refraction_pressure_var.set(f"{DEFAULT_REFRACTION_PRESSURE_HPA:.1f}")
         refraction_temperature_var.set(f"{DEFAULT_REFRACTION_TEMPERATURE_C:.1f}")
+        refraction_humidity_var.set(f"{DEFAULT_REFRACTION_HUMIDITY_PERCENT:.0f}")
+        refraction_wavelength_var.set(f"{DEFAULT_REFRACTION_WAVELENGTH_NM:.0f}")
         refraction_altitude_var.set(f"{DEFAULT_REFRACTION_ALTITUDE_M:.0f}")
         refraction_radius_var.set(
             app._tr(
@@ -1725,10 +2056,24 @@ def open_settings_dialog(app):
                 radius=DEFAULT_REFRACTION_STATION_RADIUS_KM,
             )
         )
+        sync_refraction_parameter_state()
         hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
         declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
 
     def apply_settings():
+        selected_refraction_model = refraction_model_lookup.get(
+            mount_refraction_var.get(),
+            DEFAULT_MOUNT_REFRACTION_MODEL,
+        )
+        selected_refraction_source = refraction_source_lookup.get(
+            mount_refraction_source_var.get(),
+            DEFAULT_MOUNT_REFRACTION_SOURCE,
+        )
+        refraction_pressure = app.refraction_pressure_hpa
+        refraction_temperature = app.refraction_temperature_c
+        refraction_altitude = app.refraction_altitude_m
+        refraction_humidity = app.refraction_humidity_percent
+        refraction_wavelength = app.refraction_wavelength_nm
         try:
             latitude = app._parse_float_setting(
                 latitude_var.get(), app._tr("settings.latitude"), -90, 90
@@ -1745,24 +2090,44 @@ def open_settings_dialog(app):
                 -2,
                 MAX_SKY_MAGNITUDE_LIMIT,
             )
-            refraction_pressure = app._parse_float_setting(
-                refraction_pressure_var.get(),
-                app._tr("settings.refraction_pressure"),
-                0,
-                1100,
-            )
-            refraction_temperature = app._parse_float_setting(
-                refraction_temperature_var.get(),
-                app._tr("settings.refraction_temperature"),
-                -80,
-                60,
-            )
-            refraction_altitude = app._parse_float_setting(
-                refraction_altitude_var.get(),
-                app._tr("settings.refraction_altitude"),
-                -500,
-                9000,
-            )
+            if (
+                selected_refraction_model != ATMOSPHERIC_REFRACTION_NONE
+                and selected_refraction_source != MOUNT_REFRACTION_SOURCE_DRIVER
+            ):
+                refraction_pressure = app._parse_float_setting(
+                    refraction_pressure_var.get(),
+                    app._tr("settings.refraction_pressure"),
+                    0,
+                    1100,
+                )
+                refraction_temperature = app._parse_float_setting(
+                    refraction_temperature_var.get(),
+                    app._tr("settings.refraction_temperature"),
+                    -80,
+                    60,
+                )
+                refraction_altitude = app._parse_float_setting(
+                    refraction_altitude_var.get(),
+                    app._tr("settings.refraction_altitude"),
+                    -500,
+                    9000,
+                )
+            if (
+                selected_refraction_model == ATMOSPHERIC_REFRACTION_SOFA
+                and selected_refraction_source != MOUNT_REFRACTION_SOURCE_DRIVER
+            ):
+                refraction_humidity = app._parse_float_setting(
+                    refraction_humidity_var.get(),
+                    app._tr("settings.refraction_humidity"),
+                    0,
+                    100,
+                )
+                refraction_wavelength = app._parse_float_setting(
+                    refraction_wavelength_var.get(),
+                    app._tr("settings.refraction_wavelength"),
+                    200,
+                    3000,
+                )
         except ValueError as exc:
             show_error_dialog(app, app._tr("settings.invalid_title"), str(exc), parent=dialog)
             return
@@ -1793,10 +2158,6 @@ def open_settings_dialog(app):
             coordinate_source_var.get(),
             DEFAULT_COORDINATE_SOURCE,
         )
-        selected_refraction_model = refraction_model_lookup.get(
-            mount_refraction_var.get(),
-            DEFAULT_MOUNT_REFRACTION_MODEL,
-        )
         selected_refraction_radius = refraction_radius_labels.get(
             refraction_radius_var.get(),
             DEFAULT_REFRACTION_STATION_RADIUS_KM,
@@ -1818,8 +2179,11 @@ def open_settings_dialog(app):
         app.sky_show_solar_system = sky_show_solar_system_var.get()
         app.mount_show_reticle = mount_show_reticle_var.get()
         app.mount_refraction_model = selected_refraction_model
+        app.mount_refraction_source = selected_refraction_source
         app.refraction_pressure_hpa = refraction_pressure
         app.refraction_temperature_c = refraction_temperature
+        app.refraction_humidity_percent = refraction_humidity
+        app.refraction_wavelength_nm = refraction_wavelength
         app.refraction_altitude_m = refraction_altitude
         app.refraction_station_radius_km = selected_refraction_radius
         app.hour_angle_offset_enabled = hour_angle_offset_var.get()

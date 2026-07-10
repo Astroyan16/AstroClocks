@@ -38,6 +38,17 @@ class SecureStoreTests(unittest.TestCase):
             secure_store.delete_meteofrance_application_id(path=path)
             self.assertFalse(path.exists())
 
+    def test_corrupt_secret_is_treated_as_not_configured(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "secret.dpapi"
+            path.write_text("not-base64", encoding="ascii")
+
+            self.assertEqual(
+                secure_store.load_meteofrance_application_id(path=path),
+                "",
+            )
+            self.assertFalse(secure_store.has_meteofrance_application_id(path=path))
+
 
 if __name__ == "__main__":
     unittest.main()

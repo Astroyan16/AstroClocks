@@ -131,9 +131,18 @@ TRANSLATIONS = {
         "settings.coordinate_source_mount": "ASCOM mount",
         "settings.mount_show_reticle": "Show telescope reticle on the sky map",
         "settings.mount_refraction_model": "Atmospheric refraction model",
+        "settings.refraction_source": "Correction responsibility",
+        "settings.refraction_source_auto": "Automatic (ASCOM state)",
+        "settings.refraction_source_app": "Force AstroClocks",
+        "settings.refraction_source_driver": "Force ASCOM driver / mount",
+        "settings.refraction_sofa_note": "SOFA is most accurate above about 15° altitude; 550 nm suits visible-light observation.",
+        "settings.refraction_app_note": "Use only when the driver is known not to apply refraction; otherwise this can double-correct pointing.",
+        "settings.refraction_driver_note": "AstroClocks sends uncorrected coordinates; atmospheric parameters are not used locally.",
         "settings.refraction_parameters": "Refraction parameters",
         "settings.refraction_pressure": "Sea-level pressure (hPa, 0 = standard)",
         "settings.refraction_temperature": "Temperature (°C)",
+        "settings.refraction_humidity": "Relative humidity (%)",
+        "settings.refraction_wavelength": "Wavelength (nm)",
         "settings.refraction_altitude": "Site altitude (m)",
         "settings.refraction_station_radius": "Search radius",
         "settings.refraction_station_radius_option": "{radius} km",
@@ -145,13 +154,15 @@ TRANSLATIONS = {
         ),
         "settings.refraction_stations_loading": "Searching for nearby weather stations with pressure...",
         "settings.refraction_stations_loaded": "{count} nearby weather stations with pressure loaded.",
+        "settings.refraction_stations_restored": "{count} nearby weather stations restored from memory ({age} min old).",
+        "settings.refraction_refresh_stations": "Refresh",
         "settings.refraction_stations_unavailable": (
             "No recent pressure observation found within 150 km."
         ),
         "settings.refraction_station_required": "Select a weather station first.",
         "settings.refraction_weather_loading": "Fetching pressure from {station}...",
         "settings.refraction_weather_loaded": (
-            "Loaded pressure {pressure} hPa from {station}, {distance} km away."
+            "{source} {station}, {distance} km away | {time} | pressure {pressure} hPa | temperature {temperature} | humidity {humidity}."
         ),
         "settings.refraction_weather_unavailable": (
             "No recent pressure observation is available for the selected station."
@@ -181,6 +192,7 @@ TRANSLATIONS = {
         "settings.refraction_none": "Disabled",
         "settings.refraction_bennett": "Bennett 1982",
         "settings.refraction_saemundsson": "Saemundsson",
+        "settings.refraction_sofa": "IAU SOFA (humidity, wavelength)",
         "settings.mount_choose": "Choose...",
         "settings.mount_connect": "Connect",
         "settings.mount_disconnect": "Disconnect",
@@ -263,7 +275,11 @@ TRANSLATIONS = {
         "mount.status.segment_frame": "Frame: {frame}",
         "mount.status.segment_tracking": "Tracking: {tracking}",
         "mount.status.segment_goto": "GoTo: {value}",
+        "mount.status.segment_refraction": "ASCOM refraction: {value}",
         "mount.status.segment_slewing": "Slew in progress",
+        "mount.refraction.enabled": "enabled",
+        "mount.refraction.disabled": "disabled",
+        "mount.refraction.unknown": "unknown",
         "mount.status.error": "ASCOM mount error: {error}",
         "mount.control.title": "ASCOM mount",
         "mount.control.goto": "Slew to target",
@@ -685,9 +701,18 @@ TRANSLATIONS = {
         "settings.coordinate_source_mount": "Monture ASCOM",
         "settings.mount_show_reticle": "Afficher le réticule Télescope sur la carte du ciel",
         "settings.mount_refraction_model": "Modèle de réfraction atmosphérique",
+        "settings.refraction_source": "Responsable de la correction",
+        "settings.refraction_source_auto": "Automatique (état ASCOM)",
+        "settings.refraction_source_app": "Forcer AstroClocks",
+        "settings.refraction_source_driver": "Forcer driver ASCOM / monture",
+        "settings.refraction_sofa_note": "SOFA est le plus précis au-dessus d’environ 15° d’altitude ; 550 nm convient à l’observation visuelle.",
+        "settings.refraction_app_note": "À utiliser seulement si le driver ne corrige pas la réfraction ; sinon le pointage peut être corrigé deux fois.",
+        "settings.refraction_driver_note": "AstroClocks envoie des coordonnées non corrigées ; les paramètres atmosphériques ne sont pas appliqués localement.",
         "settings.refraction_parameters": "Paramètres de réfraction",
         "settings.refraction_pressure": "Pression au niveau de la mer (hPa, 0 = standard)",
         "settings.refraction_temperature": "Température (°C)",
+        "settings.refraction_humidity": "Humidité relative (%)",
+        "settings.refraction_wavelength": "Longueur d’onde (nm)",
         "settings.refraction_altitude": "Altitude du site (m)",
         "settings.refraction_station_radius": "Rayon de recherche",
         "settings.refraction_station_radius_option": "{radius} km",
@@ -699,13 +724,15 @@ TRANSLATIONS = {
         ),
         "settings.refraction_stations_loading": "Recherche des stations météo proches avec pression...",
         "settings.refraction_stations_loaded": "{count} stations météo proches avec pression chargées.",
+        "settings.refraction_stations_restored": "{count} stations météo proches restaurées depuis la mémoire (il y a {age} min).",
+        "settings.refraction_refresh_stations": "Actualiser",
         "settings.refraction_stations_unavailable": (
             "Aucune observation récente de pression trouvée dans un rayon de 150 km."
         ),
         "settings.refraction_station_required": "Sélectionnez d'abord une station météo.",
         "settings.refraction_weather_loading": "Récupération de la pression depuis {station}...",
         "settings.refraction_weather_loaded": (
-            "Pression {pressure} hPa récupérée depuis {station}, à {distance} km."
+            "{source} {station}, à {distance} km | {time} | pression {pressure} hPa | température {temperature} | humidité {humidity}."
         ),
         "settings.refraction_weather_unavailable": (
             "Aucune observation récente de pression disponible pour la station sélectionnée."
@@ -735,6 +762,7 @@ TRANSLATIONS = {
         "settings.refraction_none": "Désactivée",
         "settings.refraction_bennett": "Bennett 1982",
         "settings.refraction_saemundsson": "Saemundsson",
+        "settings.refraction_sofa": "IAU SOFA (humidité, longueur d’onde)",
         "settings.mount_choose": "Choisir...",
         "settings.mount_connect": "Connecter",
         "settings.mount_disconnect": "Déconnecter",
@@ -817,7 +845,11 @@ TRANSLATIONS = {
         "mount.status.segment_frame": "Repère : {frame}",
         "mount.status.segment_tracking": "Suivi : {tracking}",
         "mount.status.segment_goto": "GoTo : {value}",
+        "mount.status.segment_refraction": "Réfraction ASCOM : {value}",
         "mount.status.segment_slewing": "Pointage en cours",
+        "mount.refraction.enabled": "activée",
+        "mount.refraction.disabled": "désactivée",
+        "mount.refraction.unknown": "inconnue",
         "mount.status.error": "Erreur de monture ASCOM : {error}",
         "mount.control.title": "Monture ASCOM",
         "mount.control.goto": "Pointer la cible",

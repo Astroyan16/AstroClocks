@@ -23,14 +23,27 @@ DEFAULT_MOUNT_SHOW_RETICLE = True
 ATMOSPHERIC_REFRACTION_NONE = "none"
 ATMOSPHERIC_REFRACTION_BENNETT = "bennett"
 ATMOSPHERIC_REFRACTION_SAEMUNDSSON = "saemundsson"
+ATMOSPHERIC_REFRACTION_SOFA = "sofa"
 ATMOSPHERIC_REFRACTION_MODELS = {
     ATMOSPHERIC_REFRACTION_NONE,
     ATMOSPHERIC_REFRACTION_BENNETT,
     ATMOSPHERIC_REFRACTION_SAEMUNDSSON,
+    ATMOSPHERIC_REFRACTION_SOFA,
 }
 DEFAULT_MOUNT_REFRACTION_MODEL = ATMOSPHERIC_REFRACTION_NONE
+MOUNT_REFRACTION_SOURCE_AUTO = "auto"
+MOUNT_REFRACTION_SOURCE_APP = "app"
+MOUNT_REFRACTION_SOURCE_DRIVER = "driver"
+MOUNT_REFRACTION_SOURCES = {
+    MOUNT_REFRACTION_SOURCE_AUTO,
+    MOUNT_REFRACTION_SOURCE_APP,
+    MOUNT_REFRACTION_SOURCE_DRIVER,
+}
+DEFAULT_MOUNT_REFRACTION_SOURCE = MOUNT_REFRACTION_SOURCE_AUTO
 DEFAULT_REFRACTION_PRESSURE_HPA = 0.0
 DEFAULT_REFRACTION_TEMPERATURE_C = 10.0
+DEFAULT_REFRACTION_HUMIDITY_PERCENT = 50.0
+DEFAULT_REFRACTION_WAVELENGTH_NM = 550.0
 DEFAULT_REFRACTION_ALTITUDE_M = 0.0
 REFRACTION_STATION_RADIUS_OPTIONS_KM = (5, 10, 15, 20)
 DEFAULT_REFRACTION_STATION_RADIUS_KM = 20
@@ -127,8 +140,11 @@ class AppSettings:
     coordinate_source: str = DEFAULT_COORDINATE_SOURCE
     mount_show_reticle: bool = DEFAULT_MOUNT_SHOW_RETICLE
     mount_refraction_model: str = DEFAULT_MOUNT_REFRACTION_MODEL
+    mount_refraction_source: str = DEFAULT_MOUNT_REFRACTION_SOURCE
     refraction_pressure_hpa: float = DEFAULT_REFRACTION_PRESSURE_HPA
     refraction_temperature_c: float = DEFAULT_REFRACTION_TEMPERATURE_C
+    refraction_humidity_percent: float = DEFAULT_REFRACTION_HUMIDITY_PERCENT
+    refraction_wavelength_nm: float = DEFAULT_REFRACTION_WAVELENGTH_NM
     refraction_altitude_m: float = DEFAULT_REFRACTION_ALTITUDE_M
     refraction_station_radius_km: int = DEFAULT_REFRACTION_STATION_RADIUS_KM
     timezone_name: str = DEFAULT_TIMEZONE_NAME
@@ -224,6 +240,12 @@ def normalize_settings(settings):
     ).strip().lower()
     if mount_refraction_model not in ATMOSPHERIC_REFRACTION_MODELS:
         mount_refraction_model = DEFAULT_MOUNT_REFRACTION_MODEL
+    mount_refraction_source = str(
+        getattr(settings, "mount_refraction_source", DEFAULT_MOUNT_REFRACTION_SOURCE)
+        or DEFAULT_MOUNT_REFRACTION_SOURCE
+    ).strip().lower()
+    if mount_refraction_source not in MOUNT_REFRACTION_SOURCES:
+        mount_refraction_source = DEFAULT_MOUNT_REFRACTION_SOURCE
     try:
         refraction_station_radius_km = int(
             getattr(
@@ -295,6 +317,7 @@ def normalize_settings(settings):
             DEFAULT_MOUNT_SHOW_RETICLE,
         ),
         mount_refraction_model=mount_refraction_model,
+        mount_refraction_source=mount_refraction_source,
         refraction_pressure_hpa=_clamp(
             float(getattr(settings, "refraction_pressure_hpa", DEFAULT_REFRACTION_PRESSURE_HPA)),
             0,
@@ -310,6 +333,28 @@ def normalize_settings(settings):
             ),
             -80,
             60,
+        ),
+        refraction_humidity_percent=_clamp(
+            float(
+                getattr(
+                    settings,
+                    "refraction_humidity_percent",
+                    DEFAULT_REFRACTION_HUMIDITY_PERCENT,
+                )
+            ),
+            0,
+            100,
+        ),
+        refraction_wavelength_nm=_clamp(
+            float(
+                getattr(
+                    settings,
+                    "refraction_wavelength_nm",
+                    DEFAULT_REFRACTION_WAVELENGTH_NM,
+                )
+            ),
+            200,
+            3000,
         ),
         refraction_altitude_m=_clamp(
             float(getattr(settings, "refraction_altitude_m", DEFAULT_REFRACTION_ALTITUDE_M)),
@@ -546,6 +591,10 @@ def load_app_settings():
                 "mount_refraction_model",
                 DEFAULT_MOUNT_REFRACTION_MODEL,
             ),
+            mount_refraction_source=data.get(
+                "mount_refraction_source",
+                DEFAULT_MOUNT_REFRACTION_SOURCE,
+            ),
             refraction_pressure_hpa=data.get(
                 "refraction_pressure_hpa",
                 DEFAULT_REFRACTION_PRESSURE_HPA,
@@ -553,6 +602,14 @@ def load_app_settings():
             refraction_temperature_c=data.get(
                 "refraction_temperature_c",
                 DEFAULT_REFRACTION_TEMPERATURE_C,
+            ),
+            refraction_humidity_percent=data.get(
+                "refraction_humidity_percent",
+                DEFAULT_REFRACTION_HUMIDITY_PERCENT,
+            ),
+            refraction_wavelength_nm=data.get(
+                "refraction_wavelength_nm",
+                DEFAULT_REFRACTION_WAVELENGTH_NM,
             ),
             refraction_altitude_m=data.get(
                 "refraction_altitude_m",

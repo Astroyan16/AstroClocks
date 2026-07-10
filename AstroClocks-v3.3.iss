@@ -1,13 +1,13 @@
-; Inno Setup script for AstroClocks v3.3.7.
+; Inno Setup script for AstroClocks v3.4.0.
 
 #define MyAppName "AstroClocks"
-#define MyAppVersion "3.3.7"
+#define MyAppVersion "3.4.0"
 #define MyAppPublisher "Yannis Benazza"
 #define MyAppExeName "AstroClockV3.exe"
 #define MyAppSourceDir "output\AstroClockV3"
 
 [Setup]
-; Keep the AppId stable so v3.3.7 upgrades the same AstroClocks application.
+; Keep the AppId stable so v3.4.0 upgrades the same AstroClocks application.
 AppId={{FB044594-264E-48D7-9B18-96531C01515F}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
@@ -16,7 +16,7 @@ DefaultDirName={autopf}\AstroClocks
 DisableProgramGroupPage=yes
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=installer
-OutputBaseFilename=Install_AstroClocks3.3.7
+OutputBaseFilename=Install_AstroClocks3.4.0
 SetupIconFile=AppIcon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma

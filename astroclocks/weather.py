@@ -382,6 +382,7 @@ def fetch_metar_pressure_for_station(station, timeout=8):
         "distance_km": station["distance_km"],
         "pressure_hpa": float(pressure_hpa),
         "temperature_c": observation.get("temp"),
+        "humidity_percent": _observation_humidity_percent(observation),
         "report_time": observation.get("reportTime"),
     }
 
@@ -406,6 +407,7 @@ def metar_pressures_for_stations(stations, timeout=8):
             "distance_km": station["distance_km"],
             "pressure_hpa": float(pressure_hpa),
             "temperature_c": observation.get("temp"),
+            "humidity_percent": _observation_humidity_percent(observation),
             "report_time": observation.get("reportTime"),
         }
     return results
@@ -446,6 +448,22 @@ def _normalize_temperature_c(value):
     if temperature > 150:
         temperature -= 273.15
     return temperature
+
+
+def _normalize_humidity_percent(value):
+    if value in (None, ""):
+        return None
+    humidity = float(value)
+    if 0 <= humidity <= 1:
+        humidity *= 100.0
+    return max(0.0, min(100.0, humidity))
+
+
+def _observation_humidity_percent(observation):
+    for key in ("relh", "rh", "humidity", "humidite", "u"):
+        if observation.get(key) not in (None, ""):
+            return _normalize_humidity_percent(observation[key])
+    return None
 
 
 def _extract_observation_rows(payload):
@@ -607,6 +625,7 @@ def _format_meteofrance_station_result(station, observation):
         "distance_km": station["distance_km"],
         "pressure_hpa": observation["pressure_hpa"],
         "temperature_c": observation.get("temperature_c"),
+        "humidity_percent": observation.get("humidity_percent"),
         "report_time": observation.get("report_time"),
     }
 
@@ -658,9 +677,11 @@ def fetch_meteofrance_pressure_for_station(station, timeout=12, application_id=N
         return None
     pressure_hpa = _normalize_pressure_hpa(latest.get("pmer") or latest.get("pres"))
     temperature_c = _normalize_temperature_c(latest.get("t"))
+    humidity_percent = _observation_humidity_percent(latest)
     observation = {
         "pressure_hpa": pressure_hpa,
         "temperature_c": temperature_c,
+        "humidity_percent": humidity_percent,
         "report_time": _row_time_value(latest),
     }
     _cache_meteofrance_observation(
@@ -705,6 +726,7 @@ def _synop_pressure_for_station_from_text(station, text):
         "distance_km": station["distance_km"],
         "pressure_hpa": pressure_hpa,
         "temperature_c": temperature_c,
+        "humidity_percent": _observation_humidity_percent(latest),
         "report_time": latest.get("validity_time"),
     }
 
@@ -743,6 +765,7 @@ def synop_pressures_for_stations(stations, timeout=60, year=None):
             "distance_km": station["distance_km"],
             "pressure_hpa": pressure_hpa,
             "temperature_c": temperature_c,
+            "humidity_percent": _observation_humidity_percent(row),
             "report_time": row.get("validity_time"),
         }
     return results

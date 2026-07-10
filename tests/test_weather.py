@@ -1,3 +1,4 @@
+import datetime
 import unittest
 import datetime
 from unittest.mock import patch
@@ -87,6 +88,13 @@ class WeatherTests(unittest.TestCase):
                     48.805,
                     2.23006,
                     limit=3,
+                    now_utc=datetime.datetime(
+                        2026,
+                        7,
+                        9,
+                        17,
+                        tzinfo=datetime.timezone.utc,
+                    ),
                 )
 
         self.assertEqual([option["station_id"] for option in options], ["ONE", "TWO", "THR"])
@@ -100,13 +108,19 @@ class WeatherTests(unittest.TestCase):
         }
         with patch(
             "astroclocks.weather.fetch_metar_observation",
-            return_value={"name": "Good station", "altim": 1014, "temp": 12},
+            return_value={
+                "name": "Good station",
+                "altim": 1014,
+                "temp": 12,
+                "relh": 73,
+            },
         ):
             result = weather.fetch_metar_pressure_for_station(station)
 
         self.assertEqual(result["station_id"], "GOOD")
         self.assertEqual(result["pressure_hpa"], 1014.0)
         self.assertEqual(result["distance_km"], 2.0)
+        self.assertEqual(result["humidity_percent"], 73.0)
 
     def test_nearest_pressure_station_options_keeps_recent_metar_only(self):
         metar_stations = [
@@ -218,6 +232,7 @@ class WeatherTests(unittest.TestCase):
                         "validity_time": "2026-07-09T16:30:00Z",
                         "pmer": 101430,
                         "t": 306.15,
+                        "u": 64,
                     }
                 },
             ]
@@ -231,6 +246,7 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(result["station_id"], "75114001")
         self.assertAlmostEqual(result["pressure_hpa"], 1014.3)
         self.assertAlmostEqual(result["temperature_c"], 33.0)
+        self.assertAlmostEqual(result["humidity_percent"], 64.0)
         self.assertEqual(result["report_time"], "2026-07-09T16:30:00Z")
 
     def test_fetch_meteofrance_pressure_for_station_uses_short_observation_cache(self):
