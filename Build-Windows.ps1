@@ -66,7 +66,7 @@ Remove-GeneratedPath (Join-Path $ProjectRoot "output\$ExecutableStem")
     --collect-all "astroplan" `
     --collect-all "zeep" `
     --collect-all "tzdata" `
-    ".\AstroClocks-v3.3.py"
+    ".\AstroClocks.py"
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
 }
@@ -83,7 +83,7 @@ if ($env:ProgramFiles) {
 
 $InnoCompiler = $InnoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($InnoCompiler) {
-    & $InnoCompiler ".\AstroClocks-v3.3.iss"
+    & $InnoCompiler ".\AstroClocks.iss"
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup build failed with exit code $LASTEXITCODE"
     }

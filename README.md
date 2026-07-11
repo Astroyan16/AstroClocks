@@ -46,7 +46,7 @@ Pour lancer l'application depuis les sources, utilisez de preference le Python
 du projet :
 
 ```powershell
-.\.venv\Scripts\python.exe .\AstroClocks-v3.3.py
+.\.venv\Scripts\python.exe .\AstroClocks.py
 ```
 
 `tkinter` est fourni avec Python sous Windows. Le support ASCOM necessite

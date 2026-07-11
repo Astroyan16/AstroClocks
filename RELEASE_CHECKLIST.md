@@ -8,7 +8,7 @@ Windows sans oublier les points sensibles de version, packaging et changelog.
 1. Aligner la version dans :
    - `astroclocks/version.py`
    - `pyproject.toml`
-   - `AstroClocks-v3.3.iss`
+   - `AstroClocks.iss`
    - `README.md`
    - `CHANGELOG.md`
 2. Verifier que le changelog commence bien par la nouvelle section stable.

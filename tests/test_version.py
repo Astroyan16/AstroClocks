@@ -23,7 +23,7 @@ class VersionMetadataTests(unittest.TestCase):
         self.assertIn(f'version = "{APP_VERSION}"', pyproject)
 
     def test_inno_setup_metadata_matches_runtime_metadata(self):
-        installer_script = (PROJECT_ROOT / "AstroClocks-v3.3.iss").read_text(
+        installer_script = (PROJECT_ROOT / "AstroClocks.iss").read_text(
             encoding="utf-8"
         )
         self.assertIn(f'#define MyAppVersion "{APP_VERSION}"', installer_script)

@@ -48,22 +48,22 @@ $checks = @(
     },
     @{
         Label = "Inno Setup version"
-        Path = "AstroClocks-v3.3.iss"
+        Path = "AstroClocks.iss"
         Pattern = ('#define MyAppVersion "{0}"' -f $Version)
     },
     @{
         Label = "Inno Setup executable"
-        Path = "AstroClocks-v3.3.iss"
+        Path = "AstroClocks.iss"
         Pattern = ('#define MyAppExeName "{0}"' -f $ExecutableName)
     },
     @{
         Label = "Inno Setup source dir"
-        Path = "AstroClocks-v3.3.iss"
+        Path = "AstroClocks.iss"
         Pattern = ('#define MyAppSourceDir "output\{0}"' -f $ExecutableStem)
     },
     @{
         Label = "Inno Setup installer output"
-        Path = "AstroClocks-v3.3.iss"
+        Path = "AstroClocks.iss"
         Pattern = ("OutputBaseFilename={0}" -f $InstallerBaseName)
     },
     @{
