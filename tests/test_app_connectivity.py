@@ -1,4 +1,6 @@
+import queue
 import unittest
+from unittest import mock
 
 from astroclocks.app import AstroClocksApp
 from astroclocks.i18n import translate
@@ -16,6 +18,14 @@ class _FakeLabel:
             self.foreground = kwargs["foreground"]
 
 
+class _FakeRoot:
+    def __init__(self):
+        self.after_calls = []
+
+    def after(self, delay_ms, callback):
+        self.after_calls.append((delay_ms, callback))
+
+
 class ConnectivityStateTests(unittest.TestCase):
     def _app_stub(self):
         app = object.__new__(AstroClocksApp)
@@ -26,6 +36,7 @@ class ConnectivityStateTests(unittest.TestCase):
         app.network_online = None
         app.connectivity_check_pending = True
         app.connectivity_consecutive_failures = 0
+        app.connectivity_result_queue = queue.Queue()
         app.connectivity_label = _FakeLabel()
         app._tr = lambda key, **values: translate("fr", key, **values)
         app._update_aladin_button_state = lambda: None
@@ -53,6 +64,31 @@ class ConnectivityStateTests(unittest.TestCase):
         self.assertEqual(app.connectivity_consecutive_failures, 1)
         self.assertEqual(app.connectivity_label.text, "● Connecté")
         self.assertEqual(app.connectivity_label.foreground, app.success)
+
+    def test_worker_queues_result_without_calling_tk(self):
+        app = self._app_stub()
+
+        with mock.patch("astroclocks.app.socket.create_connection") as connection:
+            connection.return_value.__enter__.return_value = object()
+            AstroClocksApp._run_connectivity_check(app)
+
+        self.assertTrue(app.connectivity_result_queue.get_nowait())
+
+    def test_poll_waits_on_ui_thread_until_worker_result_is_available(self):
+        app = self._app_stub()
+        app.root = _FakeRoot()
+        applied_results = []
+        app._apply_connectivity_result = applied_results.append
+
+        AstroClocksApp._poll_connectivity_result(app)
+
+        self.assertEqual(len(app.root.after_calls), 1)
+        self.assertEqual(applied_results, [])
+
+        app.connectivity_result_queue.put(True)
+        app.root.after_calls[0][1]()
+
+        self.assertEqual(applied_results, [True])
 
     def test_second_consecutive_failure_marks_offline(self):
         app = self._app_stub()

@@ -95,6 +95,7 @@ CLOCK_REFRESH_MS = round(1000 / CLOCK_REFRESH_HZ)
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
 SKY_MAP_CANVAS_REFRESH_SECONDS = 8
 CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD = 2
+CONNECTIVITY_RESULT_POLL_MS = 100
 MOUNT_POLL_INTERVAL_MS = 250
 MOUNT_TARGET_ACQUIRED_THRESHOLD_DEG = 0.3
 SKY_STAR_BRIGHTNESS_MULTIPLIER = 1.27
@@ -255,6 +256,7 @@ class AstroClocksApp:
         self.network_online = None
         self.connectivity_check_pending = False
         self.connectivity_consecutive_failures = 0
+        self.connectivity_result_queue = queue.Queue()
         try:
             self.mount_ascom_available = ascom_mount.is_available()
             self.mount_availability_error = ""
@@ -2281,6 +2283,7 @@ class AstroClocksApp:
             return
 
         self.connectivity_check_pending = True
+        self.root.after(CONNECTIVITY_RESULT_POLL_MS, self._poll_connectivity_result)
         threading.Thread(target=self._run_connectivity_check, daemon=True).start()
 
     def _run_connectivity_check(self):
@@ -2288,13 +2291,20 @@ class AstroClocksApp:
         try:
             with socket.create_connection(("aladin.cds.unistra.fr", 443), timeout=0.8):
                 is_online = True
-        except OSError:
+        except Exception:
             is_online = False
 
+        self.connectivity_result_queue.put(is_online)
+
+    def _poll_connectivity_result(self):
         try:
-            self.root.after(0, lambda: self._apply_connectivity_result(is_online))
-        except (tk.TclError, RuntimeError):
-            pass
+            is_online = self.connectivity_result_queue.get_nowait()
+        except queue.Empty:
+            if self.connectivity_check_pending:
+                self.root.after(CONNECTIVITY_RESULT_POLL_MS, self._poll_connectivity_result)
+            return
+
+        self._apply_connectivity_result(is_online)
 
     def _apply_connectivity_result(self, is_online):
         self.connectivity_check_pending = False
