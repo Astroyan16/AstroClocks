@@ -80,6 +80,14 @@ $checks = @(
 
 $failures = New-Object System.Collections.Generic.List[string]
 
+$installerScriptBytes = [System.IO.File]::ReadAllBytes((Join-Path $ProjectRoot "AstroClocks.iss"))
+if ($installerScriptBytes.Length -lt 3 -or
+    $installerScriptBytes[0] -ne 0xEF -or
+    $installerScriptBytes[1] -ne 0xBB -or
+    $installerScriptBytes[2] -ne 0xBF) {
+    $failures.Add("AstroClocks.iss must use UTF-8 with BOM so Inno Setup decodes French accents correctly.")
+}
+
 foreach ($check in $checks) {
     $content = Get-Content $check.Path -Raw
     if ($content -notmatch [regex]::Escape($check.Pattern)) {

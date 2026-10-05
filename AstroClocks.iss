@@ -1,4 +1,4 @@
-; Inno Setup script for AstroClocks v3.4.2.
+﻿; Inno Setup script for AstroClocks v3.4.2.
 
 #define MyAppName "AstroClocks"
 #define MyAppVersion "3.4.2"

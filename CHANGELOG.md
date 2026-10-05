@@ -4,6 +4,7 @@
 
 ### Corrige
 
+- L'installeur Windows decode correctement les accents francais des options de demarrage grace a l'encodage UTF-8 avec BOM du script Inno Setup.
 - Le resultat du controle de connexion au premier demarrage est maintenant transmis a l'interface par une file de messages, afin d'eviter les appels Tk depuis le thread reseau avant le lancement de la boucle graphique.
 
 ### Ameliore
