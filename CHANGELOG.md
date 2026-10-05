@@ -1,5 +1,15 @@
 # Changelog
 
+## AstroClocks v3.4.2 stable - 2026-10-05
+
+### Corrige
+
+- Le resultat du controle de connexion au premier demarrage est maintenant transmis a l'interface par une file de messages, afin d'eviter les appels Tk depuis le thread reseau avant le lancement de la boucle graphique.
+
+### Ameliore
+
+- Les fichiers sources et scripts de packaging portent des noms independants de la version, afin de fiabiliser les builds suivants. L'executable reste `AstroClockV3.exe` et l'installeur reste versionne.
+
 ## AstroClocks v3.4.1 stable - 2026-07-10
 
 ### Ajoute
