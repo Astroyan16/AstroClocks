@@ -36,6 +36,7 @@ from astroclocks.settings import (
     DEFAULT_DAYLIGHT_SAVING_ENABLED,
     DEFAULT_DECLINATION_OFFSET_ENABLED,
     DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
+    DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK,
     DEFAULT_LATITUDE,
     DEFAULT_LONGITUDE,
     DEFAULT_MOUNT_SHOW_RETICLE,
@@ -963,6 +964,7 @@ def open_settings_dialog(app):
     site_var = tk.StringVar(value=app.site_name)
     country_var = tk.StringVar(value=app.country)
     language_var = tk.StringVar(value=LANGUAGE_NAMES.get(app.language, LANGUAGE_NAMES["en"]))
+    show_greenwich_var = tk.BooleanVar(value=not app.hide_greenwich_sidereal_clock)
     latitude_var = tk.StringVar(value=f"{app.latitude:.5f}")
     longitude_var = tk.StringVar(value=f"{app.longitude:.5f}")
     timezone_options = app._timezone_options()
@@ -1068,13 +1070,79 @@ def open_settings_dialog(app):
 
     general_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
     sky_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
+    weather_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
     mount_tab = tk.Frame(notebook, bg=app.gbg, padx=14, pady=14)
-    for tab in (general_tab, sky_tab, mount_tab):
+    for tab in (general_tab, sky_tab, weather_tab, mount_tab):
         tab.grid_columnconfigure(1, weight=1)
 
     notebook.add(general_tab, text=app._tr("settings.tab.general"))
     notebook.add(sky_tab, text=app._tr("settings.tab.sky"))
+    notebook.add(weather_tab, text=app._tr("settings.tab.weather"))
     notebook.add(mount_tab, text=app._tr("settings.tab.mount"))
+
+    def build_section(parent, row, title, collapsible=False):
+        shell = tk.Frame(parent, bg=app.gbg)
+        shell.grid(column=0, row=row, columnspan=2, sticky="ew", pady=(0, 10))
+        shell.grid_columnconfigure(0, weight=1)
+        content = tk.Frame(shell, bg=app.gbg, padx=10, pady=4)
+        content.grid(column=0, row=1, sticky="ew")
+        content.grid_columnconfigure(1, weight=1)
+        if collapsible:
+            expanded = False
+            closed_chevron = tk.PhotoImage(master=dialog, width=20, height=20)
+            open_chevron = tk.PhotoImage(master=dialog, width=20, height=20)
+            # Draw larger indicators independently of the unchanged title font.
+            for offset in range(6):
+                closed_chevron.put(
+                    app.fg, to=(6 + offset, 4 + offset, 7 + offset, 15 - offset)
+                )
+                open_chevron.put(
+                    app.fg, to=(4 + offset, 6 + offset, 15 - offset, 7 + offset)
+                )
+
+            def toggle():
+                nonlocal expanded
+                expanded = not expanded
+                disclosure.config(image=open_chevron if expanded else closed_chevron)
+                if expanded:
+                    content.grid()
+                else:
+                    content.grid_remove()
+
+            disclosure = tk.Button(
+                shell,
+                text=title,
+                image=closed_chevron,
+                compound="left",
+                command=toggle,
+                bg=app.gbg,
+                fg=app.fg,
+                activebackground=app.gbg,
+                activeforeground=app.accent,
+                font=Font(family="Segoe UI", size=10, weight="bold"),
+                anchor="w",
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=app.gbg,
+                highlightcolor=app.accent,
+                cursor="hand2",
+                takefocus=True,
+            )
+            disclosure._chevron_images = (closed_chevron, open_chevron)
+            disclosure.grid(column=0, row=0, sticky="ew")
+
+            def toggle_from_keyboard(_event):
+                toggle()
+                return "break"  # Do not trigger the dialog's Apply binding.
+
+            disclosure.bind("<Return>", toggle_from_keyboard)
+            content.grid_remove()
+        else:
+            tk.Label(shell, text=title, bg=app.gbg, fg=app.fg,
+                     font=Font(family="Segoe UI", size=10, weight="bold"),
+                     anchor="w").grid(column=0, row=0, sticky="ew")
+        return content
 
     def add_label(parent, row, text):
         tk.Label(
@@ -1120,9 +1188,20 @@ def open_settings_dialog(app):
             relief="flat",
         )
 
-    add_label(general_tab, 0, app._tr("settings.preset"))
+    site_section = build_section(general_tab, 0, app._tr("settings.group.site"))
+    time_section = build_section(general_tab, 1, app._tr("settings.group.time"))
+    interface_section = build_section(sky_tab, 0, app._tr("settings.group.interface"))
+    clock_section = build_section(sky_tab, 1, app._tr("settings.group.clocks"))
+    map_section = build_section(sky_tab, 2, app._tr("settings.sky_map"))
+    circles_section = build_section(sky_tab, 3, app._tr("settings.instrument"), collapsible=True)
+    refraction_section = build_section(weather_tab, 0, app._tr("settings.group.refraction"))
+    atmosphere_section = build_section(weather_tab, 1, app._tr("settings.refraction_parameters"))
+    weather_section = build_section(weather_tab, 2, app._tr("settings.group.weather"))
+    mount_advanced = build_section(mount_tab, 2, app._tr("settings.group.advanced"), collapsible=True)
+
+    add_label(site_section, 0, app._tr("settings.preset"))
     preset_combo = ttk.Combobox(
-        general_tab,
+        site_section,
         textvariable=preset_var,
         values=preset_values,
         font=Font(family="Segoe UI", size=10),
@@ -1139,33 +1218,36 @@ def open_settings_dialog(app):
         country_var.set(preset["country"])
         latitude_var.set(f"{preset['latitude']:.5f}")
         longitude_var.set(f"{preset['longitude']:.5f}")
+        refraction_altitude_var.set(f"{preset['altitude_m']:.0f}")
 
     preset_combo.bind("<<ComboboxSelected>>", apply_preset)
 
-    add_label(general_tab, 1, app._tr("settings.site_name"))
-    build_entry(general_tab, 1, site_var)
+    add_label(site_section, 1, app._tr("settings.site_name"))
+    build_entry(site_section, 1, site_var)
 
-    add_label(general_tab, 2, app._tr("settings.country"))
-    build_entry(general_tab, 2, country_var)
+    add_label(site_section, 2, app._tr("settings.country"))
+    build_entry(site_section, 2, country_var)
 
-    add_label(general_tab, 3, app._tr("settings.language"))
+    add_label(interface_section, 0, app._tr("settings.language"))
     language_combo = ttk.Combobox(
-        general_tab,
+        interface_section,
         textvariable=language_var,
         values=[label for _code, label in LANGUAGE_OPTIONS],
         font=Font(family="Segoe UI", size=10),
         width=42,
     )
-    language_combo.grid(column=1, row=3, pady=7, sticky="ew")
+    language_combo.grid(column=1, row=0, pady=7, sticky="ew")
     language_combo["state"] = "readonly"
 
-    add_label(general_tab, 4, app._tr("settings.latitude"))
-    build_entry(general_tab, 4, latitude_var)
-    add_label(general_tab, 5, app._tr("settings.longitude"))
-    build_entry(general_tab, 5, longitude_var)
-    add_label(general_tab, 6, app._tr("settings.timezone"))
-    timezone_options_frame = tk.Frame(general_tab, bg=app.gbg)
-    timezone_options_frame.grid(column=1, row=6, pady=7, sticky="ew")
+    add_label(site_section, 3, app._tr("settings.latitude"))
+    build_entry(site_section, 3, latitude_var)
+    add_label(site_section, 4, app._tr("settings.longitude"))
+    build_entry(site_section, 4, longitude_var)
+    add_label(site_section, 5, app._tr("settings.refraction_altitude"))
+    build_entry(site_section, 5, refraction_altitude_var)
+    add_label(time_section, 0, app._tr("settings.timezone"))
+    timezone_options_frame = tk.Frame(time_section, bg=app.gbg)
+    timezone_options_frame.grid(column=1, row=0, pady=7, sticky="ew")
     timezone_options_frame.grid_columnconfigure(0, weight=1)
     timezone_combo = ttk.Combobox(
         timezone_options_frame,
@@ -1197,12 +1279,11 @@ def open_settings_dialog(app):
     daylight_saving_check.grid(column=0, row=2, pady=(5, 0), sticky="w")
     sync_timezone_state()
 
-    add_label(sky_tab, 0, app._tr("settings.aladin_fov"))
-    build_entry(sky_tab, 0, fov_var)
+    add_label(map_section, 1, app._tr("settings.aladin_fov"))
+    build_entry(map_section, 1, fov_var)
 
-    add_label(sky_tab, 1, app._tr("settings.sky_map"))
-    sky_options = tk.Frame(sky_tab, bg=app.gbg)
-    sky_options.grid(column=1, row=1, pady=7, sticky="ew")
+    sky_options = tk.Frame(map_section, bg=app.gbg)
+    sky_options.grid(column=0, row=0, columnspan=2, pady=7, sticky="ew")
     sky_options.grid_columnconfigure(0, weight=1)
     magnitude_frame = tk.Frame(sky_options, bg=app.gbg)
     magnitude_frame.grid(column=0, row=0, sticky="ew")
@@ -1244,9 +1325,8 @@ def open_settings_dialog(app):
         app._tr("settings.sky_show_solar_system"),
     ).grid(column=0, row=3, sticky="w", pady=(4, 0))
 
-    add_label(sky_tab, 2, app._tr("settings.instrument"))
-    instrument_options = tk.Frame(sky_tab, bg=app.gbg)
-    instrument_options.grid(column=1, row=2, pady=7, sticky="ew")
+    instrument_options = tk.Frame(circles_section, bg=app.gbg)
+    instrument_options.grid(column=0, row=0, columnspan=2, pady=7, sticky="ew")
     build_checkbutton(
         instrument_options,
         hour_angle_offset_var,
@@ -1259,6 +1339,11 @@ def open_settings_dialog(app):
     ).pack(anchor="w", pady=(4, 0))
 
     add_label(mount_tab, 0, app._tr("settings.mount_driver"))
+    build_checkbutton(
+        clock_section,
+        show_greenwich_var,
+        app._tr("settings.show_greenwich_sidereal_clock"),
+    ).grid(column=0, row=0, columnspan=2, pady=7, sticky="w")
     mount_options = tk.Frame(mount_tab, bg=app.gbg)
     mount_options.grid(column=1, row=0, pady=7, sticky="ew")
     mount_options.grid_columnconfigure(1, weight=1)
@@ -1286,39 +1371,39 @@ def open_settings_dialog(app):
         wraplength=420,
     )
     mount_driver_label.grid(column=1, row=0, sticky="ew")
-    add_label(mount_tab, 1, app._tr("settings.coordinate_source"))
+    add_label(mount_advanced, 0, app._tr("settings.coordinate_source"))
     coordinate_source_combo = ttk.Combobox(
-        mount_tab,
+        mount_advanced,
         textvariable=coordinate_source_var,
         values=[],
         font=Font(family="Segoe UI", size=10),
         width=42,
         state="readonly",
     )
-    coordinate_source_combo.grid(column=1, row=1, pady=7, sticky="ew")
-    add_label(mount_tab, 2, app._tr("settings.mount_refraction_model"))
+    coordinate_source_combo.grid(column=1, row=0, pady=7, sticky="ew")
+    add_label(refraction_section, 0, app._tr("settings.mount_refraction_model"))
     mount_refraction_combo = ttk.Combobox(
-        mount_tab,
+        refraction_section,
         textvariable=mount_refraction_var,
         values=list(refraction_model_lookup),
         font=Font(family="Segoe UI", size=10),
         width=42,
         state="readonly",
     )
-    mount_refraction_combo.grid(column=1, row=2, pady=7, sticky="ew")
-    add_label(mount_tab, 3, app._tr("settings.refraction_source"))
+    mount_refraction_combo.grid(column=1, row=0, pady=7, sticky="ew")
+    add_label(mount_advanced, 1, app._tr("settings.refraction_source"))
     mount_refraction_source_combo = ttk.Combobox(
-        mount_tab,
+        mount_advanced,
         textvariable=mount_refraction_source_var,
         values=list(refraction_source_lookup),
         font=Font(family="Segoe UI", size=10),
         width=42,
         state="readonly",
     )
-    mount_refraction_source_combo.grid(column=1, row=3, pady=7, sticky="ew")
+    mount_refraction_source_combo.grid(column=1, row=1, pady=7, sticky="ew")
     refraction_model_note_var = tk.StringVar(value="")
     refraction_model_note = tk.Label(
-        mount_tab,
+        refraction_section,
         textvariable=refraction_model_note_var,
         bg=app.gbg,
         fg=app.muted,
@@ -1327,10 +1412,8 @@ def open_settings_dialog(app):
         justify="left",
         wraplength=420,
     )
-    refraction_model_note.grid(column=1, row=4, pady=(0, 5), sticky="ew")
-    add_label(mount_tab, 5, app._tr("settings.refraction_parameters"))
-    refraction_options = tk.Frame(mount_tab, bg=app.gbg)
-    refraction_options.grid(column=1, row=5, pady=7, sticky="ew")
+    refraction_model_note.grid(column=0, row=1, columnspan=2, pady=(0, 5), sticky="ew")
+    refraction_options = atmosphere_section
     refraction_options.grid_columnconfigure(1, weight=1)
     refraction_options.grid_columnconfigure(2, weight=1)
     refraction_pressure_label = tk.Label(
@@ -1385,8 +1468,11 @@ def open_settings_dialog(app):
         width=8,
     )
     refraction_temperature_entry.grid(column=1, row=1, pady=(5, 0), sticky="w")
+    atmosphere_advanced = build_section(
+        refraction_options, 2, app._tr("settings.group.advanced"), collapsible=True
+    )
     refraction_humidity_label = tk.Label(
-        refraction_options,
+        atmosphere_advanced,
         text=app._tr("settings.refraction_humidity"),
         bg=app.gbg,
         fg=app.text,
@@ -1394,10 +1480,10 @@ def open_settings_dialog(app):
         anchor="w",
     )
     refraction_humidity_label.grid(
-        column=0, row=2, padx=(0, 10), pady=(5, 0), sticky="w"
+        column=0, row=0, padx=(0, 10), pady=(5, 0), sticky="w"
     )
     refraction_humidity_entry = tk.Entry(
-        refraction_options,
+        atmosphere_advanced,
         textvariable=refraction_humidity_var,
         bg=app.ebg,
         fg=app.text,
@@ -1411,9 +1497,9 @@ def open_settings_dialog(app):
         disabledforeground=app.muted,
         width=8,
     )
-    refraction_humidity_entry.grid(column=1, row=2, pady=(5, 0), sticky="w")
+    refraction_humidity_entry.grid(column=1, row=0, pady=(5, 0), sticky="w")
     refraction_wavelength_label = tk.Label(
-        refraction_options,
+        atmosphere_advanced,
         text=app._tr("settings.refraction_wavelength"),
         bg=app.gbg,
         fg=app.text,
@@ -1421,10 +1507,10 @@ def open_settings_dialog(app):
         anchor="w",
     )
     refraction_wavelength_label.grid(
-        column=0, row=3, padx=(0, 10), pady=(5, 0), sticky="w"
+        column=0, row=1, padx=(0, 10), pady=(5, 0), sticky="w"
     )
     refraction_wavelength_entry = tk.Entry(
-        refraction_options,
+        atmosphere_advanced,
         textvariable=refraction_wavelength_var,
         bg=app.ebg,
         fg=app.text,
@@ -1438,36 +1524,9 @@ def open_settings_dialog(app):
         disabledforeground=app.muted,
         width=8,
     )
-    refraction_wavelength_entry.grid(column=1, row=3, pady=(5, 0), sticky="w")
-    refraction_altitude_label = tk.Label(
-        refraction_options,
-        text=app._tr("settings.refraction_altitude"),
-        bg=app.gbg,
-        fg=app.text,
-        font=Font(family="Segoe UI", size=10),
-        anchor="w",
-    )
-    refraction_altitude_label.grid(
-        column=0, row=4, padx=(0, 10), pady=(5, 0), sticky="w"
-    )
-    refraction_altitude_entry = tk.Entry(
-        refraction_options,
-        textvariable=refraction_altitude_var,
-        bg=app.ebg,
-        fg=app.text,
-        insertbackground=app.fg,
-        font=Font(family="Segoe UI", size=10),
-        relief="flat",
-        highlightbackground=app.card_edge,
-        highlightcolor=app.accent,
-        highlightthickness=1,
-        disabledbackground=app.gbg,
-        disabledforeground=app.muted,
-        width=8,
-    )
-    refraction_altitude_entry.grid(column=1, row=4, pady=(5, 0), sticky="w")
-    refraction_radius_frame = tk.Frame(refraction_options, bg=app.gbg)
-    refraction_radius_frame.grid(column=0, row=5, columnspan=3, pady=(8, 0), sticky="ew")
+    refraction_wavelength_entry.grid(column=1, row=1, pady=(5, 0), sticky="w")
+    refraction_radius_frame = tk.Frame(weather_section, bg=app.gbg)
+    refraction_radius_frame.grid(column=0, row=0, columnspan=2, pady=(8, 0), sticky="ew")
     refraction_radius_label = tk.Label(
         refraction_radius_frame,
         text=app._tr("settings.refraction_station_radius"),
@@ -1486,8 +1545,8 @@ def open_settings_dialog(app):
         state="readonly",
     )
     refraction_radius_combo.grid(column=1, row=0, sticky="w")
-    refraction_station_actions = tk.Frame(refraction_options, bg=app.gbg)
-    refraction_station_actions.grid(column=0, row=6, columnspan=2, pady=(8, 0), sticky="ew")
+    refraction_station_actions = tk.Frame(weather_section, bg=app.gbg)
+    refraction_station_actions.grid(column=0, row=1, columnspan=2, pady=(8, 0), sticky="ew")
     refraction_station_actions.grid_columnconfigure(2, weight=1)
     refraction_station_button = app._build_button(
         refraction_station_actions,
@@ -1508,7 +1567,7 @@ def open_settings_dialog(app):
     )
     refraction_api_button.grid(column=2, row=0, padx=(8, 0), sticky="w")
     refraction_station_combo = ttk.Combobox(
-        refraction_options,
+        weather_section,
         textvariable=refraction_station_var,
         values=[],
         font=Font(family="Segoe UI", size=10),
@@ -1517,20 +1576,20 @@ def open_settings_dialog(app):
     )
     refraction_station_combo.grid(
         column=0,
-        row=7,
-        columnspan=3,
+        row=2,
+        columnspan=2,
         pady=(8, 0),
         sticky="ew",
     )
     refraction_weather_button = app._build_button(
-        refraction_options,
+        weather_section,
         app._tr("settings.refraction_fetch_weather"),
         lambda: None,
     )
     refraction_weather_button.config(state=tk.DISABLED)
-    refraction_weather_button.grid(column=0, row=8, columnspan=2, pady=(8, 0), sticky="w")
+    refraction_weather_button.grid(column=0, row=3, columnspan=2, pady=(8, 0), sticky="w")
     refraction_weather_status = tk.Label(
-        refraction_options,
+        weather_section,
         textvariable=refraction_weather_status_var,
         bg=app.gbg,
         fg=app.muted,
@@ -1539,7 +1598,7 @@ def open_settings_dialog(app):
         justify="left",
         wraplength=420,
     )
-    refraction_weather_status.grid(column=0, row=9, columnspan=3, pady=(5, 0), sticky="ew")
+    refraction_weather_status.grid(column=0, row=4, columnspan=2, pady=(5, 0), sticky="ew")
     refraction_activity = {"busy": False}
 
     def sync_refraction_parameter_state(_event=None):
@@ -1560,7 +1619,6 @@ def open_settings_dialog(app):
         for label, entry in (
             (refraction_pressure_label, refraction_pressure_entry),
             (refraction_temperature_label, refraction_temperature_entry),
-            (refraction_altitude_label, refraction_altitude_entry),
         ):
             label.config(fg=app.text if refraction_enabled else app.muted)
             entry.config(state=common_state)
@@ -2051,6 +2109,8 @@ def open_settings_dialog(app):
         fg=app.muted,
         font=Font(family="Segoe UI", size=9),
         anchor="w",
+        justify="left",
+        wraplength=900,
     )
     hint.grid(column=0, row=1, pady=(10, 12), sticky="ew")
 
@@ -2060,6 +2120,10 @@ def open_settings_dialog(app):
         except tk.TclError:
             return
         if current_tab is general_tab:
+            hint.config(text=app._tr("settings.hint"))
+            hint.grid()
+        elif current_tab is sky_tab:
+            hint.config(text=app._tr("settings.display_hint"))
             hint.grid()
         else:
             hint.grid_remove()
@@ -2103,6 +2167,7 @@ def open_settings_dialog(app):
         )
         sync_refraction_parameter_state()
         hour_angle_offset_var.set(DEFAULT_HOUR_ANGLE_OFFSET_ENABLED)
+        show_greenwich_var.set(not DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK)
         declination_offset_var.set(DEFAULT_DECLINATION_OFFSET_ENABLED)
 
     def apply_settings():
@@ -2125,6 +2190,10 @@ def open_settings_dialog(app):
             )
             longitude = app._parse_float_setting(
                 longitude_var.get(), app._tr("settings.longitude"), -180, 180
+            )
+            refraction_altitude = app._parse_float_setting(
+                refraction_altitude_var.get(), app._tr("settings.refraction_altitude"),
+                -500, 9000,
             )
             fov = app._parse_float_setting(
                 fov_var.get(), app._tr("settings.aladin_fov"), 0.01, 180
@@ -2150,12 +2219,6 @@ def open_settings_dialog(app):
                     app._tr("settings.refraction_temperature"),
                     -80,
                     60,
-                )
-                refraction_altitude = app._parse_float_setting(
-                    refraction_altitude_var.get(),
-                    app._tr("settings.refraction_altitude"),
-                    -500,
-                    9000,
                 )
             if (
                 selected_refraction_model
@@ -2233,6 +2296,8 @@ def open_settings_dialog(app):
         app.refraction_altitude_m = refraction_altitude
         app.refraction_station_radius_km = selected_refraction_radius
         app.hour_angle_offset_enabled = hour_angle_offset_var.get()
+        app.hide_greenwich_sidereal_clock = not show_greenwich_var.get()
+        app._apply_main_display_layout()
         app.declination_offset_enabled = declination_offset_var.get()
         app._invalidate_site_dependent_state()
         app._save_current_settings()

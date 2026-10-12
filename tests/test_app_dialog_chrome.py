@@ -37,7 +37,17 @@ class _FakeDialog:
 class RevealDialogChromeTests(unittest.TestCase):
     def test_reveal_dialog_reapplies_root_chrome_and_restores_on_destroy(self):
         app = object.__new__(AstroClocksApp)
-        app.root = object()
+        class _FakeRoot:
+            def __init__(self):
+                self.idle_callbacks = []
+
+            def after_idle(self, callback):
+                self.idle_callbacks.append(callback)
+
+            def winfo_exists(self):
+                return True
+
+        app.root = _FakeRoot()
         chrome_calls = []
         app._apply_native_window_chrome = lambda window: chrome_calls.append(window)
 
@@ -64,6 +74,9 @@ class RevealDialogChromeTests(unittest.TestCase):
         self.assertEqual(chrome_calls, [dialog, app.root])
 
         destroy_callback(_Event(dialog))
+        self.assertEqual(chrome_calls, [dialog, app.root])
+        self.assertEqual(len(app.root.idle_callbacks), 1)
+        app.root.idle_callbacks.pop()()
         self.assertEqual(chrome_calls, [dialog, app.root, app.root])
 
 

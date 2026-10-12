@@ -16,9 +16,9 @@ DEFAULT_LATITUDE = 48.805
 DEFAULT_LONGITUDE = 2.23006
 DEFAULT_ALADIN_FOV_DEG = 0.5
 DEFAULT_SKY_MAGNITUDE_LIMIT = 4.0
-DEFAULT_SKY_SHOW_ALTAZ_GRID = True
+DEFAULT_SKY_SHOW_ALTAZ_GRID = False
 DEFAULT_SKY_SHOW_EQUATORIAL_GRID = True
-DEFAULT_SKY_SHOW_SOLAR_SYSTEM = False
+DEFAULT_SKY_SHOW_SOLAR_SYSTEM = True
 DEFAULT_MOUNT_SHOW_RETICLE = True
 ATMOSPHERIC_REFRACTION_NONE = "none"
 ATMOSPHERIC_REFRACTION_BENNETT = "bennett"
@@ -60,6 +60,7 @@ MAX_SKY_MAGNITUDE_LIMIT = 6.2
 DEFAULT_TIMEZONE_NAME = ""
 DEFAULT_DAYLIGHT_SAVING_ENABLED = False
 DEFAULT_LANGUAGE = "en"
+DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK = True
 DEFAULT_HOUR_ANGLE_OFFSET_ENABLED = True
 DEFAULT_DECLINATION_OFFSET_ENABLED = True
 DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE = 10.0
@@ -152,6 +153,7 @@ class AppSettings:
     timezone_name: str = DEFAULT_TIMEZONE_NAME
     daylight_saving_enabled: bool = DEFAULT_DAYLIGHT_SAVING_ENABLED
     language: str = DEFAULT_LANGUAGE
+    hide_greenwich_sidereal_clock: bool = DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK
     hour_angle_offset_enabled: bool = DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
     declination_offset_enabled: bool = DEFAULT_DECLINATION_OFFSET_ENABLED
     double_max_primary_magnitude: float = DEFAULT_DOUBLE_MAX_PRIMARY_MAGNITUDE
@@ -370,6 +372,10 @@ def normalize_settings(settings):
             DEFAULT_DAYLIGHT_SAVING_ENABLED,
         ),
         language=language,
+        hide_greenwich_sidereal_clock=_coerce_bool(
+            getattr(settings, "hide_greenwich_sidereal_clock", DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK),
+            DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK,
+        ),
         hour_angle_offset_enabled=_coerce_bool(
             getattr(settings, "hour_angle_offset_enabled", DEFAULT_HOUR_ANGLE_OFFSET_ENABLED),
             DEFAULT_HOUR_ANGLE_OFFSET_ENABLED,
@@ -626,6 +632,9 @@ def load_app_settings():
                 "daylight_saving_enabled", DEFAULT_DAYLIGHT_SAVING_ENABLED
             ),
             language=data.get("language", DEFAULT_LANGUAGE),
+            hide_greenwich_sidereal_clock=data.get(
+                "hide_greenwich_sidereal_clock", DEFAULT_HIDE_GREENWICH_SIDEREAL_CLOCK
+            ),
             hour_angle_offset_enabled=data.get(
                 "hour_angle_offset_enabled", DEFAULT_HOUR_ANGLE_OFFSET_ENABLED
             ),

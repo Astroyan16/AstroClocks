@@ -1,5 +1,33 @@
 # Changelog
 
+## AstroClocks v3.4.3 stable - 2026-10-12
+
+### Ajouté
+
+- Manuel d'utilisation en français, avec PDF navigable et fonctions ASCOM en dernière partie.
+- Option d'affichage du temps sidéral de Greenwich, masqué par défaut pour agrandir la recherche rapide.
+- Altitudes indicatives pour les 152 lieux connus, renseignées automatiquement à la sélection et toujours modifiables.
+
+### Amélioré
+
+- Calcul et préparation graphique de la carte du ciel dans un thread dédié, sans appels Tk, avec files bornées et rejet des résultats obsolètes.
+- Rendu opaque de la carte préparé en arrière-plan pour réduire le coût de transfert vers l'interface.
+- Nouvelle disposition : UTC sous le site, coordonnées Alpha/Delta, heures locale/sidérale locale, puis angle horaire et déclinaison plus grands et encadrés en jaune.
+- Plus de place pour le site d'observation et taille réduite des horloges secondaires.
+- Paramètres regroupés dans quatre onglets : Site et heure, Affichage, Réfraction et météo, Monture ASCOM.
+- Paramètres avancés et graduations T1m repliables avec chevrons ; libellés clarifiés et altitude dans le site.
+- Par défaut : grille équatoriale et objets du système solaire affichés, grille AltAz masquée. Les préférences déjà enregistrées sont conservées.
+
+### Corrigé
+
+- Restauration du thème de fenêtre différée après destruction d'un dialogue, pour éviter une réentrée Tk pouvant fermer l'application lors de l'application des paramètres ou d'un changement de langue.
+
+### Vérification
+
+- 198 tests unitaires et graphiques réussis : paramètres, valeurs par défaut, altitudes, disposition et préparation asynchrone de la carte.
+- Build Windows et contrôles de cohérence via Build-Windows.ps1 et Verify-Release.ps1.
+- Démarrage de l'exécutable packagé contrôlé ; manuel PDF de 14 pages rendu et vérifié.
+
 ## AstroClocks v3.4.2 stable - 2026-10-05
 
 ### Corrige

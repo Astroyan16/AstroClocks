@@ -1,6 +1,6 @@
 # AstroClocks
 
-AstroClocks v3.4.2 est une application d'aide a l'observation astronomique
+AstroClocks v3.4.3 est une application d'aide a l'observation astronomique
 pour Windows. Elle affiche en temps reel l'heure civile, l'UTC, les temps
 sideraux, les coordonnees JNow/J2000, l'angle horaire, une carte du ciel
 locale, ainsi que plusieurs outils de recherche et de preparation
@@ -24,11 +24,18 @@ d'observations.
   pour garder une base de site coherente dans toute l'application.
 - Verification des mises a jour GitHub depuis la fenetre `A propos`, avec
   verification automatique silencieuse au demarrage.
-- Fenetre de parametres organisee par onglets (`General`, `Sky`, `Mount`).
+- Paramètres organisés en quatre onglets : `Site et heure`, `Affichage`,
+  `Réfraction et météo` et `Monture ASCOM`, avec sections avancées repliables.
+- Altitude automatiquement renseignée pour les 152 lieux connus et modifiable.
+- Carte du ciel calculée dans un thread dédié pour limiter les pauses des horloges.
 - Recherches en ligne mieux verrouillees hors-ligne, avec messages explicites
   quand AstroClocks reutilise des donnees enrichies deja en cache.
 
 ## Installation
+
+Le [manuel d’utilisation en français](MANUEL_UTILISATION.md) décrit la prise en main,
+les recherches, le pointage ASCOM, la réfraction et les données météo pour la version 3.4.3.
+Une version PDF est également disponible dans les assets de la release.
 
 Depuis ce dossier, creez un environnement Python puis installez les
 dependances :

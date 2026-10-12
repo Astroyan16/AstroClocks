@@ -2,19 +2,25 @@
 
 import math
 import os
+import queue
+import threading
 import time
+from types import SimpleNamespace, MethodType
 import tkinter as tk
 from tkinter.font import Font
 
 from astroclocks import app_visibility
 from astroclocks.astronomy import compute_solar_system_positions
-from astroclocks.star_sprites import StarRenderStats
+from astroclocks.star_sprites import StarRenderStats, StarSpriteCache
+from astroclocks.i18n import translate
+from astroclocks.runtime_logging import get_logger
 
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk, ImageDraw
 except ImportError:
     Image = None
     ImageTk = None
+    ImageDraw = None
 
 
 SKY_MAP_ANTIALIASED_REFRESH_SECONDS = 8
@@ -228,7 +234,7 @@ def _draw_sky_grid(self, canvas, center_x, center_y, radius):
                     center_y - 8,
                     text=f"{altitude}\N{DEGREE SIGN}",
                     fill=self.muted,
-                    font=Font(family="Segoe UI", size=8),
+                    font=("Segoe UI", 8),
                     anchor="e",
                 )
 
@@ -252,7 +258,7 @@ def _draw_sky_grid(self, canvas, center_x, center_y, radius):
             label_y,
             text=label,
             fill=self.muted,
-            font=Font(family="Segoe UI", size=10, weight="bold"),
+            font=("Segoe UI", 10, "bold"),
             anchor="center",
         )
 
@@ -481,6 +487,14 @@ def _draw_sky_objects_raster(self, canvas, stars, solar_objects, considered_coun
     if width <= 0 or height <= 0:
         return False
 
+    image = _compose_sky_objects_image(self, width, height, stars, solar_objects, considered_count)
+    self.sky_star_image = ImageTk.PhotoImage(image)
+    canvas.create_image(0, 0, image=self.sky_star_image, anchor="nw")
+    return True
+
+
+def _compose_sky_objects_image(self, width, height, stars, solar_objects, considered_count):
+    """Pillow-only composition: safe to call without a Tk interpreter."""
     started_at = time.perf_counter()
     image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     drawn = 0
@@ -498,8 +512,6 @@ def _draw_sky_objects_raster(self, canvas, stars, solar_objects, considered_coun
         if self.sky_sprite_cache.composite_sprite(image, sprite, sky_object["x"], sky_object["y"]):
             drawn += 1
 
-    self.sky_star_image = ImageTk.PhotoImage(image)
-    canvas.create_image(0, 0, image=self.sky_star_image, anchor="nw")
     self.sky_render_stats = StarRenderStats(
         considered=considered_count,
         projected=len(stars),
@@ -516,7 +528,7 @@ def _draw_sky_objects_raster(self, canvas, stars, solar_objects, considered_coun
             f"sprites={self.sky_render_stats.sprite_cache_size} "
             f"ms={self.sky_render_stats.render_ms:.2f}"
         )
-    return True
+    return image
 
 
 def _collect_star_catalog(self, center_x, center_y, radius, lst_hours):
@@ -758,11 +770,17 @@ def _draw_mount_marker(self, canvas, center_x, center_y, radius, altitude, azimu
     return visible
 
 
-def _current_solar_system_target(self, lst_hours):
+def _current_solar_system_target(self, lst_hours, positions=None):
     if not self.target_solar_system_name:
         return None
 
-    for body in self._solar_system_positions():
+    if positions is None:
+        # Periodic ephemeris calculations belong to the sky worker, not clocks.
+        latitude, longitude = self._active_site_coordinates()
+        cache_key = getattr(self, "solar_system_cache_key", None)
+        site_key = (round(latitude, 5), round(longitude, 5))
+        positions = self.solar_system_cache if cache_key and cache_key[1:] == site_key else ()
+    for body in positions:
         if body["name"] != self.target_solar_system_name:
             continue
 
@@ -1075,7 +1093,226 @@ def _on_sky_click(self, event):
     )
 
 
+class _RecordedSkyCanvas:
+    """Collect grid drawing commands without touching a Tk canvas."""
+
+    def __init__(self):
+        self.commands = []
+
+    def __getattr__(self, name):
+        if name not in {"create_oval", "create_line", "create_text"}:
+            raise AttributeError(name)
+        return lambda *args, **kwargs: self.commands.append((name, args, kwargs))
+
+
+def _rasterize_sky_grid(width, height, commands, background):
+    """Prepare the opaque backdrop in the worker, avoiding Tk's slow alpha upload."""
+    image = Image.new("RGBA", (width, height), background)
+    draw = ImageDraw.Draw(image)
+
+    def line(points, fill, thickness, dash):
+        if not dash:
+            draw.line(points, fill=fill, width=thickness)
+            return
+        dash_index, remaining = 0, float(dash[0])
+        for start, end in zip(points, points[1:]):
+            x, y = start
+            dx, dy = end[0] - x, end[1] - y
+            length = math.hypot(dx, dy)
+            if not length:
+                continue
+            offset = 0.0
+            while offset < length:
+                step = min(remaining, length - offset)
+                if dash_index % 2 == 0:
+                    draw.line([(x + dx * offset / length, y + dy * offset / length),
+                               (x + dx * (offset + step) / length, y + dy * (offset + step) / length)],
+                              fill=fill, width=thickness)
+                offset += step
+                remaining -= step
+                if remaining < 1e-8:
+                    dash_index = (dash_index + 1) % len(dash)
+                    remaining = float(dash[dash_index])
+
+    for operation, args, options in commands:
+        coords = args[0] if len(args) == 1 else args
+        thickness = int(options.get("width", 1))
+        if operation == "create_oval":
+            dash = options.get("dash")
+            if not dash:
+                draw.ellipse(coords, fill=options.get("fill"), outline=options.get("outline"), width=thickness)
+            else:
+                left, top, right, bottom = coords
+                rx, ry = (right - left) / 2, (bottom - top) / 2
+                samples = max(40, round(2 * math.pi * max(rx, ry) / 2))
+                points = [(left + rx + rx * math.cos(i * 2 * math.pi / samples),
+                           top + ry + ry * math.sin(i * 2 * math.pi / samples)) for i in range(samples + 1)]
+                line(points, options["outline"], thickness, dash)
+        elif operation == "create_line":
+            points = list(zip(coords[::2], coords[1::2]))
+            line(points, options["fill"], thickness, options.get("dash"))
+    return image
+
+
+def _put_latest(mailbox, value):
+    try:
+        mailbox.put_nowait(value)
+    except queue.Full:
+        try:
+            mailbox.get_nowait()
+        except queue.Empty:
+            pass
+        mailbox.put_nowait(value)
+
+
+def _prepare_sky_scene(request, sprite_cache, solar_cache):
+    """Calculate an isolated scene; requests contain no widgets or Tk variables."""
+    width, height = request["size"]
+    latitude, longitude = request["site"]
+    language = request["language"]
+    context = SimpleNamespace(**request["options"])
+    context.named_stars_jnow = request["stars"]
+    context.sky_sprite_cache = sprite_cache
+    context._tr = lambda key, **kwargs: translate(language, key, **kwargs)
+    context._active_site_coordinates = lambda: (latitude, longitude)
+    context._normalize_hour_angle = lambda hours: ((hours + 12) % 24) - 12
+    context._equatorial_to_horizontal = MethodType(request["horizontal_transform"], context)
+    for function in (_project_horizontal_point, _hex_to_rgb, _sky_star_color,
+                     _sky_star_style, _collect_star_catalog, _collect_solar_system_objects):
+        setattr(context, function.__name__, MethodType(function, context))
+    solar_key = (request["solar_bucket"], round(latitude, 5), round(longitude, 5))
+    positions = ()
+    if request["need_solar"]:
+        if solar_cache.get("key") != solar_key:
+            try:
+                positions = compute_solar_system_positions(latitude, longitude)
+            except Exception:
+                get_logger("skymap").exception("Solar-system sky positions unavailable")
+                positions = ()
+            solar_cache.update(key=solar_key, positions=positions)
+        else:
+            positions = solar_cache["positions"]
+    context._solar_system_positions = lambda: positions
+    center_x, center_y = width / 2, height / 2
+    radius = max(40, min(width * .45, height * .44))
+    lst_hours = request["lst"]
+    recorder = _RecordedSkyCanvas()
+    _draw_sky_grid(context, recorder, center_x, center_y, radius)
+    if context.sky_show_equatorial_grid:
+        _draw_equatorial_grid(context, recorder, center_x, center_y, radius, lst_hours)
+    stars, considered = context._collect_star_catalog(center_x, center_y, radius, lst_hours)
+    solar = context._collect_solar_system_objects(center_x, center_y, radius, lst_hours)
+    image = None
+    if sprite_cache is not None:
+        background = _rasterize_sky_grid(width, height, recorder.commands, context.ebg)
+        sprites = _compose_sky_objects_image(context, width, height, stars, solar, considered)
+        background.alpha_composite(sprites)
+        image = background.convert("RGB")
+    return {
+        "key": request["key"], "grid": recorder.commands,
+        "geometry": dict(center_x=center_x, center_y=center_y, radius=radius, lst_hours=lst_hours),
+        "stars": stars, "solar": solar, "image": image,
+        "solar_positions": positions, "solar_key": solar_key,
+        "stats": getattr(context, "sky_render_stats", StarRenderStats(
+            considered=considered, projected=len(stars), drawn=len(stars))),
+    }
+
+
+def _sky_scene_worker(requests, results, brightness_multiplier):
+    # These caches are owned exclusively by this daemon thread.
+    sprite_cache = StarSpriteCache(Image, brightness_multiplier=brightness_multiplier) if Image else None
+    solar_cache = {}
+    while True:
+        request = requests.get()
+        if request is None:
+            return
+        try:
+            result = _prepare_sky_scene(request, sprite_cache, solar_cache)
+            _put_latest(results, (request["key"], result, None))
+        except Exception as exc:
+            get_logger("skymap").exception("Sky scene calculation failed")
+            _put_latest(results, (request["key"], None, str(exc)))
+
+
+def _stop_sky_scene_worker(self, event=None):
+    if event is not None and event.widget is not self.root:
+        return
+    self.sky_scene_worker_closed = True
+    _put_latest(self.sky_scene_requests, None)
+
+
 def _update_sky_map(self, state=None):
+    if self.sky_canvas is None or self.sky_status is None:
+        return
+    width, height = self.sky_canvas.winfo_width(), self.sky_canvas.winfo_height()
+    if width < 80 or height < 80:
+        return
+    if state is None:
+        state = self._compute_target_clock_state()
+    if not hasattr(self, "sky_scene_requests"):
+        self.sky_scene_requests = queue.Queue(maxsize=1)
+        self.sky_scene_results = queue.Queue(maxsize=1)
+        self.sky_scene_requested_key = None
+        self.sky_scene_worker_closed = False
+        self.sky_last_scene = None
+        self.root.bind("<Destroy>", self._stop_sky_scene_worker, add="+")
+        brightness = getattr(self.sky_sprite_cache, "brightness_multiplier", 1.27)
+        threading.Thread(target=_sky_scene_worker,
+                         args=(self.sky_scene_requests, self.sky_scene_results, brightness),
+                         name="AstroClocks-sky", daemon=True).start()
+    if self.sky_scene_worker_closed:
+        return
+    site = self._active_site_coordinates()
+    target_key = None
+    if self.target_active:
+        target_key = (self.target_solar_system_name, self._target_display_label())
+        if not self.target_solar_system_name:
+            target_key += tuple(variable.get() for variable in (
+                self.alpha_hh, self.alpha_mm, self.alpha_ss,
+                self.delta_dd, self.delta_mm, self.delta_ss))
+    key = (width, height, int(time.monotonic() // SKY_MAP_ANTIALIASED_REFRESH_SECONDS),
+           site, id(self.named_stars_jnow), round(self.sky_magnitude_limit, 2),
+           self.sky_show_altaz_grid, self.sky_show_equatorial_grid,
+           self.sky_show_solar_system, self.language, target_key, self.mount_show_reticle)
+    while True:
+        try:
+            completed_key, scene, error = self.sky_scene_results.get_nowait()
+        except queue.Empty:
+            break
+        # A slow but still relevant result must not be starved by an 8 s tick.
+        # Discard it only when the view/site/catalogue/target has changed.
+        if completed_key[:2] + completed_key[3:] != key[:2] + key[3:]:
+            continue
+        if error:
+            self._set_sky_status(self._tr("sky.unavailable", error=error))
+            self.sky_map_cache_key = completed_key
+        else:
+            self.sky_last_scene = scene
+            self._apply_sky_map_scene(scene)
+            self.sky_map_cache_key = completed_key
+    if self.sky_map_cache_key == key:
+        return
+    if self.sky_last_scene is not None and self.sky_last_scene["key"] == key:
+        # A mount status/reticle invalidation does not require fresh calculations.
+        self._apply_sky_map_scene(self.sky_last_scene)
+        self.sky_map_cache_key = key
+        return
+    if self.sky_scene_requested_key == key:
+        return
+    options = {name: getattr(self, name) for name in (
+        "sky_magnitude_limit", "sky_show_altaz_grid", "sky_show_equatorial_grid",
+        "sky_show_solar_system", "card_edge", "muted", "accent", "ebg")}
+    request = dict(key=key, size=(width, height), site=site, language=self.language,
+                   stars=tuple(self.named_stars_jnow), options=options,
+                   horizontal_transform=type(self)._equatorial_to_horizontal,
+                   lst=self._parse_clock_hours(state["lst"]),
+                   need_solar=bool(self.sky_show_solar_system or self.target_solar_system_name),
+                   solar_bucket=int(time.time() // SOLAR_SYSTEM_CACHE_SECONDS))
+    self.sky_scene_requested_key = key
+    _put_latest(self.sky_scene_requests, request)
+
+
+def _apply_sky_map_scene(self, scene):
     if self.sky_canvas is None or self.sky_status is None:
         return
 
@@ -1084,68 +1321,27 @@ def _update_sky_map(self, state=None):
     if width < 80 or height < 80:
         return
 
-    if state is None:
-        state = self._compute_target_clock_state()
-
-    center_x = width / 2
-    center_y = height / 2
-    radius = max(40, min(width * 0.45, height * 0.44))
-    lst_hours = self._parse_clock_hours(state["lst"])
-    target_key = None
-    if self.target_active:
-        target_key = (
-            self.target_solar_system_name,
-            self.alpha_hh.get(),
-            self.alpha_mm.get(),
-            self.alpha_ss.get(),
-            self.delta_dd.get(),
-            self.delta_mm.get(),
-            self.delta_ss.get(),
-            self._target_display_label(),
-        )
-    refresh_seconds = (
-        SKY_MAP_ANTIALIASED_REFRESH_SECONDS
-        if Image is not None and ImageTk is not None
-        else SKY_MAP_CANVAS_REFRESH_SECONDS
-    )
-    sidereal_second_bucket = int(self._parse_clock_hours(state["lst"]) * 3600 / refresh_seconds)
-    cache_key = (
-        width,
-        height,
-        int(time.time() // refresh_seconds),
-        sidereal_second_bucket,
-        round(self.sky_magnitude_limit, 2),
-        self.sky_show_altaz_grid,
-        self.sky_show_equatorial_grid,
-        self.sky_show_solar_system,
-        self.language,
-        target_key,
-    )
-    if cache_key == self.sky_map_cache_key:
-        return
-
-    self.sky_map_cache_key = cache_key
+    center_x = scene["geometry"]["center_x"]
+    center_y = scene["geometry"]["center_y"]
+    radius = scene["geometry"]["radius"]
+    lst_hours = scene["geometry"]["lst_hours"]
     self.sky_canvas.delete("all")
 
-    self.sky_geometry = {
-        "center_x": center_x,
-        "center_y": center_y,
-        "radius": radius,
-        "lst_hours": lst_hours,
-    }
-    self._draw_sky_grid(self.sky_canvas, center_x, center_y, radius)
-    if self.sky_show_equatorial_grid:
-        self._draw_equatorial_grid(self.sky_canvas, center_x, center_y, radius, lst_hours)
-    stars_to_draw, considered_count = self._collect_star_catalog(
-        center_x, center_y, radius, lst_hours
-    )
-    solar_objects = self._collect_solar_system_objects(center_x, center_y, radius, lst_hours)
-    if not self._draw_sky_objects_raster(
-        self.sky_canvas,
-        stars_to_draw,
-        solar_objects,
-        considered_count,
-    ):
+    self.sky_geometry = scene["geometry"]
+    self.sky_star_points = stars_to_draw = scene["stars"]
+    self.sky_solar_system_points = solar_objects = scene["solar"]
+    self.solar_system_cache = scene["solar_positions"]
+    self.solar_system_cache_key = scene["solar_key"]
+    self.sky_render_stats = scene["stats"]
+    if scene["image"] is not None:
+        self.sky_star_image = ImageTk.PhotoImage(scene["image"])
+        self.sky_canvas.create_image(0, 0, image=self.sky_star_image, anchor="nw")
+        for operation, args, kwargs in scene["grid"]:
+            if operation == "create_text":
+                getattr(self.sky_canvas, operation)(*args, **kwargs)
+    else:
+        for operation, args, kwargs in scene["grid"]:
+            getattr(self.sky_canvas, operation)(*args, **kwargs)
         self._draw_star_catalog_canvas(self.sky_canvas, stars_to_draw)
         self._draw_solar_system_canvas(self.sky_canvas, solar_objects)
     self._draw_sky_object_labels(self.sky_canvas, stars_to_draw, solar_objects)
@@ -1184,7 +1380,7 @@ def _update_sky_map(self, state=None):
         self._update_sky_hover()
         return
 
-    solar_target = self._current_solar_system_target(lst_hours)
+    solar_target = self._current_solar_system_target(lst_hours, positions=scene["solar_positions"])
     if solar_target is not None:
         target_ra_hours = solar_target["ra_hours"]
         target_declination = solar_target["declination"]
@@ -1284,4 +1480,6 @@ def install_skymap_methods(app_class):
     app_class._on_sky_leave = _on_sky_leave
     app_class._on_sky_click = _on_sky_click
     app_class._update_sky_map = _update_sky_map
+    app_class._apply_sky_map_scene = _apply_sky_map_scene
+    app_class._stop_sky_scene_worker = _stop_sky_scene_worker
 

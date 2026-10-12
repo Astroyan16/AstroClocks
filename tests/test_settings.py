@@ -18,6 +18,30 @@ from astroclocks.settings import (
 
 
 class SettingsTests(unittest.TestCase):
+    def test_sky_defaults_show_equatorial_grid_and_solar_system_only(self):
+        settings = normalize_settings(AppSettings())
+        self.assertFalse(settings.sky_show_altaz_grid)
+        self.assertTrue(settings.sky_show_equatorial_grid)
+        self.assertTrue(settings.sky_show_solar_system)
+
+    def test_explicit_sky_preferences_are_preserved(self):
+        settings = normalize_settings(AppSettings(
+            sky_show_altaz_grid=True,
+            sky_show_equatorial_grid=False,
+            sky_show_solar_system=False,
+        ))
+        self.assertTrue(settings.sky_show_altaz_grid)
+        self.assertFalse(settings.sky_show_equatorial_grid)
+        self.assertFalse(settings.sky_show_solar_system)
+
+    def test_greenwich_clock_hidden_by_default_and_option_normalized(self):
+        self.assertTrue(AppSettings().hide_greenwich_sidereal_clock)
+        for value, expected in ((False, False), (True, True), ("false", False)):
+            with self.subTest(value=value):
+                self.assertEqual(normalize_settings(
+                    AppSettings(hide_greenwich_sidereal_clock=value)
+                ).hide_greenwich_sidereal_clock, expected)
+
     def test_normalize_settings_keeps_valid_coordinate_source(self):
         settings = normalize_settings(
             AppSettings(coordinate_source=COORDINATE_SOURCE_MOUNT)

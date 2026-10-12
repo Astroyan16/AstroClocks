@@ -246,7 +246,8 @@ class AstroClocksApp:
         self.language = self.settings.language
         self.hour_angle_offset_enabled = self.settings.hour_angle_offset_enabled
         self.declination_offset_enabled = self.settings.declination_offset_enabled
-        self.clock_font_size = 30
+        self.clock_font_size = 24
+        self.hide_greenwich_sidereal_clock = self.settings.hide_greenwich_sidereal_clock
         self.coord_font_size = 24
         self.angle_font_size = 44
         self.header_title_font_size = 21
@@ -837,8 +838,17 @@ class AstroClocksApp:
     def _restore_root_chrome_after_dialog_destroy(self, dialog, event=None):
         if event is not None and getattr(event, "widget", None) is not dialog:
             return
+        # Updating Tk idle tasks inside <Destroy> can re-enter native window
+        # teardown and crash Tcl on Windows. Restore chrome once teardown ends.
         try:
-            self._apply_native_window_chrome(self.root)
+            self.root.after_idle(self._restore_root_chrome_when_idle)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _restore_root_chrome_when_idle(self):
+        try:
+            if self.root.winfo_exists():
+                self._apply_native_window_chrome(self.root)
         except Exception:
             pass
 
@@ -2383,12 +2393,12 @@ class AstroClocksApp:
         self.lf_search = self._build_labelframe("frame.search", 1, 1)
         self.lf_sky = self._build_labelframe("frame.sky", 2, 1, rowspan=5, bd=6)
         self.lf_local = self._build_labelframe(
-            "frame.local_time", 0, 2, title_kwargs=self._local_time_title_kwargs
+            "frame.local_time", 0, 4, title_kwargs=self._local_time_title_kwargs
         )
-        self.lf_utc = self._build_labelframe("frame.utc", 1, 2)
+        self.lf_utc = self._build_labelframe("frame.utc", 0, 2)
         self.lf_alpha = self._build_labelframe("frame.alpha", 0, 3)
         self.lf_delta = self._build_labelframe("frame.delta", 1, 3)
-        self.lf_gmst = self._build_labelframe("frame.gmst", 0, 4)
+        self.lf_gmst = self._build_labelframe("frame.gmst", 1, 2)
         self.lf_lst = self._build_labelframe("frame.lst", 1, 4)
         self.lf_ha = self._build_labelframe(
             "frame.hour_angle",
@@ -2406,6 +2416,11 @@ class AstroClocksApp:
             bd=6,
             title_kwargs=self._declination_title_kwargs,
         )
+        for pointing_frame in (self.lf_ha, self.lf_dec):
+            pointing_frame.master.configure(
+                highlightbackground=self.fg,
+                highlightcolor=self.fg,
+            )
         for frame in (
             self.lf_long,
             self.lf_local,
@@ -2421,6 +2436,16 @@ class AstroClocksApp:
         ):
             frame.grid_columnconfigure(0, weight=1)
             frame.grid_rowconfigure(0, weight=1)
+        self._apply_main_display_layout()
+
+    def _apply_main_display_layout(self):
+        """Give quick search the Greenwich clock's space when it is hidden."""
+        if self.hide_greenwich_sidereal_clock:
+            self.lf_gmst.master.grid_remove()
+            self.lf_search.master.grid_configure(rowspan=2)
+        else:
+            self.lf_search.master.grid_configure(rowspan=1)
+            self.lf_gmst.master.grid()
 
     def _create_tabs(self):
         self.notebook = ttk.Notebook(self.root)
@@ -2443,6 +2468,13 @@ class AstroClocksApp:
             self.main_tab.grid_columnconfigure(column, weight=1, uniform="main")
         for row in range(1, 6):
             self.main_tab.grid_rowconfigure(row, weight=1)
+        # Reserve room for all six site lines rather than letting the clocks
+        # consume the same height as the information-rich site panel.
+        self.main_tab.grid_rowconfigure(1, weight=3, minsize=210)
+        self.main_tab.grid_rowconfigure(2, minsize=100)
+        self.main_tab.grid_rowconfigure(3, minsize=100)
+        self.main_tab.grid_rowconfigure(4, minsize=100)
+        self.main_tab.grid_rowconfigure(5, weight=2, minsize=140)
 
         self.visibility_tab.grid_columnconfigure(0, weight=1)
         self.visibility_tab.grid_rowconfigure(0, weight=1)
@@ -2775,14 +2807,26 @@ class AstroClocksApp:
         if not self.clock_labels:
             return
 
-        available_width = min(label.master.winfo_width() for label in self.clock_labels)
-        available_height = min(label.master.winfo_height() for label in self.clock_labels)
+        visible_labels = [label for label in self.clock_labels if label.winfo_ismapped()]
+        if not visible_labels:
+            return
+        available_width = min(label.master.winfo_width() for label in visible_labels)
+        available_height = min(label.master.winfo_height() for label in visible_labels)
         if available_width <= 1 or available_height <= 1:
             return
 
         size_by_height = round((available_height - 18) * 0.58)
         size_by_width = round((available_width - 20) / 5.2)
-        size = max(18, min(40, size_by_height, size_by_width))
+        size = max(18, min(28, size_by_height, size_by_width))
+        # Reserve a larger type size for the longer pointing-coordinate values.
+        if self.angle_labels:
+            angle_width = min(label.master.winfo_width() for label in self.angle_labels)
+            angle_height = min(label.master.winfo_height() for label in self.angle_labels)
+            if angle_width > 1 and angle_height > 1:
+                angle_capacity = max(28, min(
+                    44, round((angle_height - 14) * 0.58), round((angle_width - 18) / 8.8)
+                ))
+                size = min(size, angle_capacity - 4)
         if size == self.clock_font_size:
             return
 
@@ -2802,7 +2846,7 @@ class AstroClocksApp:
 
         size_by_height = round((available_height - 14) * 0.58)
         size_by_width = round((available_width - 18) / 8.8)
-        preferred_min = min(28, self.clock_font_size + 4)
+        preferred_min = max(self.clock_font_size + 4, self.coord_font_size + 4)
         size = max(preferred_min, min(44, size_by_height, size_by_width))
         if size == self.angle_font_size:
             return
@@ -3504,6 +3548,7 @@ class AstroClocksApp:
             timezone_name=self.timezone_name,
             daylight_saving_enabled=self.daylight_saving_enabled,
             language=self.language,
+            hide_greenwich_sidereal_clock=self.hide_greenwich_sidereal_clock,
             hour_angle_offset_enabled=self.hour_angle_offset_enabled,
             declination_offset_enabled=self.declination_offset_enabled,
             **double_filter_settings,
