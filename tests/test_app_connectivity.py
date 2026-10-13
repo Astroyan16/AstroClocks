@@ -51,7 +51,7 @@ class ConnectivityStateTests(unittest.TestCase):
 
         self.assertIsNone(app.network_online)
         self.assertEqual(app.connectivity_consecutive_failures, 1)
-        self.assertEqual(app.connectivity_label.text, "● Vérification connexion")
+        self.assertEqual(app.connectivity_label.text, "Vérification connexion")
         self.assertEqual(app.connectivity_label.foreground, app.muted)
 
     def test_first_failure_keeps_connected_state(self):
@@ -62,7 +62,7 @@ class ConnectivityStateTests(unittest.TestCase):
 
         self.assertTrue(app.network_online)
         self.assertEqual(app.connectivity_consecutive_failures, 1)
-        self.assertEqual(app.connectivity_label.text, "● Connecté")
+        self.assertEqual(app.connectivity_label.text, "Connecté")
         self.assertEqual(app.connectivity_label.foreground, app.success)
 
     def test_worker_queues_result_without_calling_tk(self):
@@ -99,7 +99,7 @@ class ConnectivityStateTests(unittest.TestCase):
 
         self.assertFalse(app.network_online)
         self.assertEqual(app.connectivity_consecutive_failures, 2)
-        self.assertEqual(app.connectivity_label.text, "● Hors-ligne")
+        self.assertEqual(app.connectivity_label.text, "Hors-ligne")
         self.assertEqual(app.connectivity_label.foreground, app.danger)
 
     def test_success_resets_failure_counter(self):
@@ -111,7 +111,7 @@ class ConnectivityStateTests(unittest.TestCase):
 
         self.assertTrue(app.network_online)
         self.assertEqual(app.connectivity_consecutive_failures, 0)
-        self.assertEqual(app.connectivity_label.text, "● Connecté")
+        self.assertEqual(app.connectivity_label.text, "Connecté")
         self.assertEqual(app.connectivity_label.foreground, app.success)
 
 

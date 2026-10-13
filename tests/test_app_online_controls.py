@@ -1,5 +1,7 @@
 import tkinter as tk
+import queue
 import unittest
+from unittest.mock import Mock
 
 from astroclocks.app import AstroClocksApp
 
@@ -15,6 +17,99 @@ class _ButtonProbe:
 
 
 class OnlineControlsStateTests(unittest.TestCase):
+    def test_orbit_progress_runs_once_and_stops_when_results_arrive(self):
+        app = self._make_app()
+        app.double_orbit_progress = Mock()
+        app.double_orbit_recompute_pending = True
+        app.double_remote_search_pending = True
+        app.double_search_generation = 1
+        app._render_double_star_results = Mock()
+        app._poll_double_orbit_progress = Mock()
+        app.double_orbit_progress_job = None
+
+        app._update_double_search_buttons_state()
+        app._update_double_search_buttons_state()
+        app.double_orbit_progress.grid.assert_called_once_with()
+        app.double_orbit_progress.configure.assert_called_once_with(value=0)
+        app._poll_double_orbit_progress.assert_called_once_with()
+        app.double_orbit_progress.start.assert_not_called()
+
+        # A stale result must not interrupt the current calculation.
+        app._apply_double_star_search_results(0, {})
+        app.double_orbit_progress.grid_remove.assert_not_called()
+        app._apply_double_star_search_results(1, {
+            "stars": [], "total": 0, "source_key": "double.source.local",
+            "note": "calculation failed",
+        })
+        app.double_orbit_progress.grid_remove.assert_called_once_with()
+        self.assertFalse(app.double_orbit_recompute_pending)
+        self.assertFalse(app.double_orbit_progress_running)
+
+    def test_online_search_does_not_show_orbit_progress(self):
+        app = self._make_app()
+        app.double_orbit_progress = Mock()
+        app.double_remote_search_pending = True
+        app.double_orbit_recompute_pending = False
+        app._update_double_search_buttons_state()
+        app.double_orbit_progress.start.assert_not_called()
+        app.double_orbit_progress.grid.assert_not_called()
+
+    def test_orbit_progress_uses_completed_objects_and_ignores_stale_updates(self):
+        app = self._make_app()
+        app._poll_double_orbit_calculation = Mock()
+        app.double_orbit_progress_queue = queue.Queue()
+        app.double_orbit_progress = Mock()
+        app.double_status_label = Mock()
+        app.root = Mock()
+        app._tr = lambda key, **values: (key, values)
+        app.double_search_generation = 2
+        app.double_orbit_recompute_pending = True
+        app.double_remote_search_pending = True
+        report = app._double_orbit_progress_callback(2, "orbits")
+        report(1, 4)
+        report(2, 4)
+        app.root.after.assert_not_called()
+        app.double_orbit_progress_queue.put((1, "visibility", 4, 4))
+        app._poll_double_orbit_progress()
+        app.double_orbit_progress.configure.assert_called_with(value=25)
+        app.double_status_label.config.assert_called_with(text=(
+            "double.progress.orbits", {"completed": 2, "total": 4},
+        ))
+        app._double_orbit_progress_callback(2, "visibility")(3, 4)
+        app._poll_double_orbit_progress()
+        app.double_orbit_progress.configure.assert_called_with(value=87.5)
+        app._double_orbit_progress_callback(2, "visibility")(4, 4)
+        app._poll_double_orbit_progress()
+        app.double_orbit_progress.configure.assert_called_with(value=100)
+
+    def test_visibility_progress_counts_objects_rejected_by_filters(self):
+        app = self._make_app()
+        app._double_stars_to_jnow = lambda stars: stars
+        app._double_star_visibility_metrics = lambda star, context: {}
+        app._double_group_allowed = lambda star, filters: False
+        updates = []
+        results = app._filter_double_star_list(
+            [{"name": "first"}, {"name": "second"}], {}, {},
+            progress_callback=lambda done, total: updates.append((done, total)),
+        )
+        self.assertEqual(results, [])
+        self.assertEqual(updates, [(0, 2), (1, 2), (2, 2)])
+
+    def test_process_messages_are_applied_on_the_ui_thread_for_current_generation_only(self):
+        app = self._make_app()
+        app.double_search_generation = 2
+        app.double_orbit_messages = queue.Queue()
+        app.double_orbit_progress_queue = queue.Queue()
+        app.double_orbit_job = Mock()
+        app._apply_double_star_search_results = Mock()
+        app.double_orbit_messages.put(("result", 1, {"stars": ["old"]}))
+        app.double_orbit_messages.put(("progress", 2, (2, "visibility", 1, 2)))
+        app.double_orbit_messages.put(("result", 2, {"stars": ["new"]}))
+        app._poll_double_orbit_calculation()
+        self.assertEqual(app.double_orbit_progress_queue.get_nowait(), (2, "visibility", 1, 2))
+        app._apply_double_star_search_results.assert_called_once_with(2, {"stars": ["new"]})
+        self.assertIsNone(app.double_orbit_job)
+
     def _make_app(self):
         app = AstroClocksApp.__new__(AstroClocksApp)
         app.combo_box = None

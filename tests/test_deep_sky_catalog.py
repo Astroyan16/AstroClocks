@@ -7,6 +7,7 @@ from astroclocks.deep_sky_catalog import (
     deep_sky_category_for_type,
     deep_sky_search_objects,
     fetch_simbad_deep_sky_objects,
+    fetch_simbad_deep_sky_details,
     merge_deep_sky_objects,
 )
 from astroclocks.app import AstroClocksApp
@@ -18,6 +19,69 @@ from astroclocks.settings import (
 
 
 class DeepSkyCatalogTests(unittest.TestCase):
+    def test_targeted_details_match_aliases_and_replace_available_photometry(self):
+        local = dict(name="NGC 71", aliases=("NGC71",), ra_hours=0.3, declination=30,
+                     category="galaxy", object_type="G", morphology="E", source="OpenNGC",
+                     photometry={"V": 14.1, "B": 15}, photometry_flags={"V": "E"})
+        payload = {"data": [["NGC    71", "Other main ID", 4.598, 30.063, "G", None, 14.2, None]]}
+        with patch("astroclocks.deep_sky_catalog._fetch_simbad_json", return_value=payload) as fetch:
+            details = fetch_simbad_deep_sky_details([local])
+        query = fetch.call_args.args[0]
+        self.assertIn("FROM ident", query)
+        self.assertIn("ident.id IN ('NGC 71')", query)
+        self.assertNotIn("SELECT TOP", query)
+        merged = merge_deep_sky_objects([local], details)[0]
+        self.assertEqual(merged["source_id"], "Other main ID")
+        self.assertEqual(merged["magnitude"], 14.2)
+        self.assertEqual(merged["magnitude_source"], "SIMBAD/CDS")
+        self.assertEqual(merged["magnitude_flag"], "")
+        self.assertEqual(merged["morphology"], "E")
+        self.assertEqual(merged["declination"], 30.063)
+        self.assertEqual(merged["photometry"]["B"], 15)
+        self.assertEqual(merged["photometry_sources"]["B"], "OpenNGC")
+        self.assertEqual(AstroClocksApp.__new__(AstroClocksApp)._format_deep_sky_source(merged),
+                         "SIMBAD/CDS + OpenNGC")
+
+    def test_targeted_details_empty_candidates_do_not_query_and_missing_positions_are_ignored(self):
+        with patch("astroclocks.deep_sky_catalog._fetch_simbad_json") as fetch:
+            self.assertEqual(fetch_simbad_deep_sky_details([]), [])
+            fetch.assert_not_called()
+        payload = {"data": [["NGC 71", "NGC 71", None, None, "G", None]]}
+        with patch("astroclocks.deep_sky_catalog._fetch_simbad_json", return_value=payload):
+            self.assertEqual(fetch_simbad_deep_sky_details([dict(name="NGC 71", category="galaxy")]), [])
+
+    def test_magnitude_search_skips_missing_positions_and_preserves_valid_results(self):
+        queries = []
+        def fake_fetch(query, _timeout):
+            queries.append(query)
+            if "WHERE flux.filter = 'V'" in query:
+                return {"data": [
+                    ["No position", None, None, "G", None, 14.05, None],
+                    ["No RA", None, 20, "G", None, 15, None],
+                    ["No Dec", 120, None, "G", None, 15, None],
+                    ["Valid galaxy", 120, -30, "G", None, 15.2, "E"],
+                ]}
+            # A missing position in enrichment must also leave the initial
+            # usable coordinates and photometry intact.
+            return {"data": [["Valid galaxy", None, None, "G", None, 15.2, "E"]]}
+        with patch("astroclocks.deep_sky_catalog._fetch_simbad_json", side_effect=fake_fetch):
+            objects = fetch_simbad_deep_sky_objects("galaxy", 14, 18, preferred_band="V")
+        self.assertEqual(len(objects), 1)
+        self.assertEqual(objects[0]["name"], "Valid galaxy")
+        self.assertEqual(objects[0]["ra_hours"], 8)
+        self.assertEqual(objects[0]["declination"], -30)
+        self.assertEqual(objects[0]["magnitude"], 15.2)
+        self.assertEqual(objects[0]["magnitude_flag"], "E")
+        self.assertNotIn("No position", queries[1])
+
+    def test_band_row_merge_ignores_missing_positions(self):
+        objects = {}
+        _append_simbad_band_rows(objects, [
+            ["Missing", None, None, "G", "", 15, ""],
+            ["Present", 0, 0, "G", "", 15, ""],
+        ], "V")
+        self.assertEqual(set(objects), {"Present"})
+
     def test_openngc_objects_include_category_and_photometry(self):
         objects = {}
         for sky_object in deep_sky_search_objects():

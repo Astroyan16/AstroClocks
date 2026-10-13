@@ -1,18 +1,19 @@
 """Deep-sky tab UI and search helpers for AstroClocks."""
 
 import datetime
-import threading
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
 
 from astroclocks import app_dialogs
+from astroclocks.search_worker import start_search
 from astroclocks.astronomy import j2000_to_jnow_coordinates
 from astroclocks.deep_sky_catalog import (
     DEEP_SKY_CATEGORY_ORDER,
     clear_cached_simbad_deep_sky_objects,
     deep_sky_search_objects,
     fetch_simbad_deep_sky_objects,
+    fetch_simbad_deep_sky_details,
     merge_cached_simbad_deep_sky_objects,
     merge_deep_sky_objects,
     normalize_deep_sky_magnitude_band,
@@ -841,7 +842,7 @@ def _format_deep_sky_dec(self, sky_object):
 def _format_deep_sky_source(self, sky_object):
     source = str(sky_object.get("source", ""))
     if source.startswith("OpenNGC"):
-        return "OpenNGC"
+        return "SIMBAD/CDS + OpenNGC" if "SIMBAD" in source else "OpenNGC"
     return source
 
 def _populate_deep_sky_tree(self):
@@ -912,11 +913,7 @@ def search_deep_sky_objects(self, allow_online=False):
     self.deep_sky_status_label.config(text=self._tr(status_key))
     self._update_deep_sky_search_buttons_state()
     search_context = self._double_search_context()
-    threading.Thread(
-        target=self._run_deep_sky_search,
-        args=(generation, filters, search_context, allow_online, offline_note),
-        daemon=True,
-    ).start()
+    start_search(self, "deep_sky", generation, filters, search_context, allow_online, offline_note)
 
 def _run_deep_sky_search(
     self,
@@ -943,6 +940,16 @@ def _run_deep_sky_search(
                     filters["use_magnitude"],
                     preferred_band=filters["magnitude_band"],
                 )
+                local_candidates = [obj for obj in self._filter_deep_sky_list(catalog, filters, visibility_context)
+                                    if str(obj.get("source", "")).startswith("OpenNGC")]
+                try:
+                    details = fetch_simbad_deep_sky_details(local_candidates, filters["magnitude_band"])
+                    remote_objects = merge_deep_sky_objects(remote_objects, details,
+                                                          preferred_band=filters["magnitude_band"])
+                    notes.append(self._tr("deep_sky.online_enriched", count=len(details)))
+                except Exception as exc:
+                    log_exception(LOGGER, "SIMBAD local object enrichment failed", exc)
+                    notes.append(self._tr("deep_sky.enrichment_error", error=str(exc)))
                 simbad_cached_objects = merge_cached_simbad_deep_sky_objects(
                     remote_objects,
                     filters["category"],
@@ -1058,6 +1065,7 @@ def set_selected_deep_sky_target(self):
         sky_object["declination"],
         self._tr("deep_sky.target_set", name=sky_object["name"]),
         display_name=sky_object["name"],
+        target_information=sky_object,
     )
     self.notebook.select(self.main_tab)
 

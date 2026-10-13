@@ -5,6 +5,10 @@ import unicodedata
 
 from astroclocks.local_deep_sky_catalog import DEEP_SKY_OBJECTS, OPENNGC_ATTRIBUTION
 from astroclocks.star_catalog import SKY_STARS_J2000
+from astroclocks.deep_sky_catalog import (
+    deep_sky_category_for_type, normalize_deep_sky_key, resolve_deep_sky_object_photometry,
+)
+from astroclocks.deep_sky_photometry import DEEP_SKY_PHOTOMETRY_BY_KEY
 
 
 _LOCAL_INDEX = None
@@ -105,6 +109,9 @@ def _build_local_index():
             "dec_degrees": float(dec_degrees),
             "source": "catalogue local étoiles",
             "note": f"magnitude V {float(magnitude):.2f}",
+            "magnitude": float(magnitude),
+            "magnitude_band": "V",
+            "target_kind": "star",
         }
         _add_alias(index, name, entry)
         if str(name).upper().startswith("HR "):
@@ -113,13 +120,24 @@ def _build_local_index():
             _add_alias(index, alias, entry)
 
     for name, ra_hours, dec_degrees, aliases, object_type in DEEP_SKY_OBJECTS:
+        photometry = {}
+        for alias in (name, *aliases):
+            values = DEEP_SKY_PHOTOMETRY_BY_KEY.get(normalize_deep_sky_key(alias), {})
+            if isinstance(values, dict):
+                photometry.update(values)
+            elif values and values[0] is not None and values[1]:
+                photometry[values[1]] = values[0]
         entry = {
             "name": name,
             "ra_hours": float(ra_hours),
             "dec_degrees": float(dec_degrees),
             "source": "OpenNGC local",
             "note": object_type,
+            "object_type": object_type,
+            "category": deep_sky_category_for_type(object_type),
+            "photometry": photometry,
         }
+        entry = resolve_deep_sky_object_photometry(entry, preferred_band="V")
         for alias in aliases:
             _add_alias(index, alias, entry)
     return index
@@ -136,10 +154,14 @@ def resolve_local_object_coordinates(object_name):
         return None
 
     note = entry["note"]
-    return _coordinate_result(
+    result = _coordinate_result(
         entry["name"],
         entry["ra_hours"],
         entry["dec_degrees"],
         entry["source"],
         note,
     )
+    for field in ("magnitude", "magnitude_band", "object_type", "category", "target_kind"):
+        if field in entry:
+            result[field] = entry[field]
+    return result

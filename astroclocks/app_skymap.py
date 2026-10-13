@@ -1068,6 +1068,15 @@ def _on_sky_click(self, event):
 
     sky_object = self._nearest_sky_object(event.x, event.y)
     if sky_object:
+        if sky_object.get("kind") == "solar":
+            information = dict(
+                source="local_solar",
+                object_type="Natural Satellite" if sky_object["name"] == "Moon" else "Planet",
+                target_kind="star" if sky_object["name"] == "Sun" else None,
+            )
+        else:
+            information = dict(sky_object, target_kind="star", magnitude_band="V",
+                               source=self._tr("result.source.local_stars"))
         target_label_key = (
             "sky.target_set_body"
             if sky_object.get("kind") == "solar"
@@ -1078,6 +1087,7 @@ def _on_sky_click(self, event):
             sky_object["declination"],
             self._tr(target_label_key, name=sky_object.get("label", sky_object["name"])),
             display_name=sky_object.get("label", sky_object["name"]),
+            target_information=information,
             solar_system_name=(
                 sky_object["name"] if sky_object.get("kind") == "solar" else None
             ),

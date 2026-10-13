@@ -99,5 +99,17 @@ class OrbitCatalogTests(unittest.TestCase):
         self.assertEqual(enriched[0]["orb6_separation_precision"], 2)
 
 
+class OrbitProgressTests(unittest.TestCase):
+    def test_reports_each_processed_object_without_changing_results(self):
+        stars = [{"name": "first"}, {"name": "second"}]
+        updates = []
+        enriched, matched = enrich_double_stars_with_orb6(
+            stars, None, progress_callback=lambda done, total: updates.append((done, total)),
+        )
+        self.assertEqual(enriched, stars)
+        self.assertEqual(matched, 0)
+        self.assertEqual(updates, [(0, 2), (1, 2), (2, 2)])
+
+
 if __name__ == "__main__":
     unittest.main()

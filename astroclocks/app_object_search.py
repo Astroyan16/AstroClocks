@@ -1,6 +1,8 @@
 """Object-search UI and coordinate-resolution helpers for AstroClocks."""
 
 import threading
+import webbrowser
+from urllib.parse import urlencode
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
@@ -120,14 +122,76 @@ def _create_search_widgets(self):
     )
     self.lf_search.grid_columnconfigure(0, weight=1)
     self.lf_search.grid_columnconfigure(1, weight=0)
+    # Frame creation gives row 0 a default weight; only results should expand.
+    self.lf_search.grid_rowconfigure(0, weight=0)
+    self.lf_search.grid_rowconfigure(1, weight=0)
     self.lf_search.grid_rowconfigure(2, weight=1)
 
 
 def _set_result_text(self, text, foreground=None):
+    for tag in self.result_text.tag_names():
+        if tag.startswith("catalog-link-"):
+            self.result_text.tag_delete(tag)
+    self.result_text.config(cursor="xterm")
     self.result_text.config(state=tk.NORMAL, foreground=foreground or self.text)
     self.result_text.delete(1.0, tk.END)
     self.result_text.insert(1.0, text)
     self.result_text.config(state=tk.DISABLED)
+
+
+def _target_catalog_links(data):
+    """Use catalog identifiers, independent of local cache or display names."""
+    source = str(data.get("source_catalog") or data.get("source") or "")
+    links = []
+    if source.casefold() in {"imcce", "imcce / miriade"}:
+        target = data.get("miriade_name")
+        if not target:
+            prefix = {"Planet": "p", "Natural Satellite": "s", "Asteroid": "a",
+                      "Comet": "c", "Dwarf Planet": "dp"}.get(data.get("object_type"))
+            name = data.get("display_name") or data.get("name")
+            if prefix and name:
+                target = f"{prefix}:{name}"
+        url = "https://ssp.imcce.fr/webservices/miriade/"
+        if target:
+            url += "api/ephemcc.php?" + urlencode({"-name": target, "-ep": "now", "-mime": "html"}, safe=":")
+        links.append(("IMCCE / Miriade", url))
+    if source.casefold() in {"sesame", "cds sesame"}:
+        identifier = data.get("display_name") or data.get("name")
+        url = "https://cds.unistra.fr/cgi-bin/Sesame"
+        if identifier:
+            url += "?" + urlencode({"-name": identifier})
+        links.append(("CDS Sesame", url))
+    if "WDS" in source:
+        params = {"-source": "B/wds/wds"}
+        if data.get("wds"):
+            params["WDS"] = str(data["wds"])
+        links.append(("WDS", "https://vizier.cds.unistra.fr/viz-bin/VizieR-4?" + urlencode(params)))
+    if "SIMBAD" in source.upper():
+        identifier = data.get("source_id") or data.get("name") or data.get("display_name")
+        url = "https://simbad.cds.unistra.fr/simbad/"
+        if identifier:
+            url += "sim-id?" + urlencode({"Ident": identifier})
+        label = "SIMBAD/CDS" if "SIMBAD/CDS" in source else "SIMBAD"
+        links.append((label, url))
+    return links
+
+
+def _link_target_sources(self, data):
+    widget = getattr(self, "result_text", None)
+    if widget is None:
+        return
+    # Only the final source line receives links, never coordinates or names.
+    line_start = widget.index("end-1c linestart")
+    for number, (label, url) in enumerate(_target_catalog_links(data)):
+        start = widget.search(label, line_start, stopindex="end-1c", exact=True)
+        if not start:
+            continue
+        tag = f"catalog-link-{number}"
+        widget.tag_add(tag, start, f"{start}+{len(label)}c")
+        widget.tag_configure(tag, foreground=self.accent, underline=True)
+        widget.tag_bind(tag, "<Enter>", lambda event: widget.config(cursor="hand2"))
+        widget.tag_bind(tag, "<Leave>", lambda event: widget.config(cursor="xterm"))
+        widget.tag_bind(tag, "<Button-1>", lambda event, target=url: webbrowser.open_new_tab(target))
 
 
 def _update_search_button_state(self):
@@ -174,7 +238,55 @@ def _coordinate_result_message(self, result):
         message = f"{message}\n{self._tr('result.local_fallback_not_found')}"
     elif fallback_reason == "error":
         message = f"{message}\n{self._tr('result.local_fallback_error')}"
-    return message
+    return f"{message.rstrip()}\n{_target_information_text(self, result)}"
+
+
+def _target_information_text(self, data):
+    """Describe available catalog data without guessing missing photometry."""
+    unknown = self._tr("result.info_unknown")
+    magnitude = data.get("magnitude")
+    if data.get("mag_primary") is not None:
+        magnitude_text = f"{float(data['mag_primary']):.2f}"
+        if data.get("mag_secondary") is not None:
+            magnitude_text += f" / {float(data['mag_secondary']):.2f}"
+        magnitude_text += self._tr("result.info_components")
+    elif magnitude is not None:
+        magnitude_text = f"{float(magnitude):.2f}"
+        if data.get("magnitude_band"):
+            magnitude_text += f" ({data['magnitude_band']})"
+    else:
+        magnitude_text = unknown
+    if magnitude is not None and data.get("magnitude_source"):
+        magnitude_text += f" — {data['magnitude_source']}"
+
+    if data.get("category"):
+        object_type = self._tr(f"deep_sky.category.{data['category']}")
+        if data.get("object_type"):
+            object_type += f" ({data['object_type']})"
+    elif data.get("target_kind"):
+        object_type = self._tr(f"result.type.{data['target_kind']}")
+    elif data.get("object_type") in OBJECT_TYPE_CODES:
+        object_type = self._object_type_display(data["object_type"])
+    else:
+        object_type = data.get("object_type") or unknown
+    if data.get("spectral_type"):
+        object_type += f" ({data['spectral_type']})"
+
+    sources = {"sesame": "CDS Sesame", "imcce": "IMCCE / Miriade",
+               "local_solar": self._tr("result.source.local_solar")}
+    source = data.get("source_catalog") or sources.get(data.get("source"), data.get("source")) or unknown
+    if source.startswith("OpenNGC"):
+        source = "SIMBAD/CDS + OpenNGC" if "SIMBAD" in source else "OpenNGC"
+    elif source == "Featured":
+        source = self._tr("result.source.featured_doubles")
+    elif source in {"WDS Cache", "WDS bundled"}:
+        source = "WDS"
+    elif source == "Local" and data.get("target_kind") == "double_star":
+        source = self._tr("result.source.local_doubles")
+    if "BSC local" in source:
+        source = source.replace("BSC local", self._tr("result.source.bright_star_catalogue"))
+    return self._tr("result.target_information", magnitude=magnitude_text,
+                    object_type=object_type, source=source)
 
 
 def _apply_coordinate_result(self, result):
@@ -202,6 +314,7 @@ def _apply_coordinate_result(self, result):
     self._update_visibility_date_label()
     self.update_value(preserve_solar_target=preserve_solar_target)
     self._set_result_text(result_message, foreground=self._current_target_status_color())
+    _link_target_sources(self, dict(result, display_name=searched_name))
 
 
 def _start_coordinate_search(self, selected_type, object_name, fallback_result=None):
@@ -229,6 +342,12 @@ def _run_coordinate_search(self, generation, selected_type, object_name, fallbac
             result = resolve_solar_system_coordinates(selected_type, object_name)
         else:
             result = resolve_deep_sky_coordinates(object_name)
+            if fallback_result is not None:
+                for key in ("magnitude", "magnitude_band", "category", "object_type", "target_kind"):
+                    if key in fallback_result:
+                        result.setdefault(key, fallback_result[key])
+                if result.get("magnitude") is not None:
+                    result["magnitude_source"] = fallback_result.get("source_catalog", "")
         error_key = None
         error_detail = None
     except name_resolve.NameResolveError:

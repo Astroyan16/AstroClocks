@@ -3,6 +3,7 @@ import unittest
 
 from astroclocks.astronomy import (
     j2000_to_jnow_coordinates,
+    convert_star_catalog_j2000_to_jnow,
     jnow_to_j2000_coordinates,
     normalize_miriade_object_name,
     normalize_sesame_object_name,
@@ -11,6 +12,18 @@ from astroclocks.astronomy import (
 
 
 class CoordinateConversionTests(unittest.TestCase):
+    def test_catalog_conversion_matches_individual_coordinates_and_preserves_metadata(self):
+        stars = [("north", 18.615649, 38.783689, 0.03), ("south", 6.75248, -16.7161, -1.46)]
+        before = datetime.datetime.now(datetime.timezone.utc)
+        converted = convert_star_catalog_j2000_to_jnow(stars)
+        for source, actual in zip(stars, converted):
+            expected_ra, expected_dec = j2000_to_jnow_coordinates(source[1], source[2], now_utc=before)
+            self.assertEqual(actual[0], source[0])
+            self.assertEqual(actual[3], source[3])
+            self.assertAlmostEqual(actual[1], expected_ra, places=6)
+            self.assertAlmostEqual(actual[2], expected_dec, places=5)
+        self.assertEqual(convert_star_catalog_j2000_to_jnow([]), [])
+
     def test_j2000_jnow_roundtrip_keeps_coordinates_close(self):
         observation_time = datetime.datetime(2026, 4, 29, 12, tzinfo=datetime.timezone.utc)
         ra_hours = 18.615649

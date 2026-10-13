@@ -1,11 +1,11 @@
 """Star-search tab UI and search helpers for AstroClocks."""
 
-import threading
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
 
 from astroclocks import app_dialogs
+from astroclocks.search_worker import start_search
 from astroclocks.astronomy import convert_star_catalog_j2000_to_jnow
 from astroclocks.settings import (
     DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
@@ -705,7 +705,7 @@ def _populate_star_search_tree(self):
                 ),
                 self._format_deep_sky_ra(star),
                 self._format_deep_sky_dec(star),
-                star.get("source", ""),
+                star.get("source", "").replace("BSC local", self._tr("result.source.bright_star_catalogue")),
             ),
             tags=("odd" if index % 2 else "even",),
         )
@@ -737,11 +737,7 @@ def search_stars(self, allow_online=False):
     self.star_search_status_label.config(text=self._tr(status_key))
     self._update_star_search_buttons_state()
     search_context = self._double_search_context()
-    threading.Thread(
-        target=self._run_star_search,
-        args=(generation, filters, search_context, allow_online, offline_note),
-        daemon=True,
-    ).start()
+    start_search(self, "stars", generation, filters, search_context, allow_online, offline_note)
 
 def _run_star_search(self, generation, filters, search_context, allow_online=False, offline_note=None):
     try:
@@ -842,6 +838,7 @@ def set_selected_star_target(self):
         star["declination"],
         self._tr("star_search.target_set", name=star["name"]),
         display_name=star["name"],
+        target_information=dict(star, target_kind="star"),
     )
     self.notebook.select(self.main_tab)
 

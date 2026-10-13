@@ -213,6 +213,7 @@ class AstroClocksApp:
         self.mount_accent = "#b892ff"
         self.success = "#7bd88f"
         self.danger = "#ff5c5c"
+        self.warning = "#ff8a65"
         self.button_bg = "#22303a"
         self._apply_native_window_chrome(self.root)
         if self.loading_window is not None:
@@ -312,6 +313,7 @@ class AstroClocksApp:
         self.windowed_geometry = None
         self.windowed_state = "normal"
         self.labelframe_title_labels = []
+        self.pointing_no_target_labels = {}
         self.object_type_label_to_code = {}
         self.angle_labels = []
         self.clock_labels = []
@@ -346,6 +348,15 @@ class AstroClocksApp:
         self.double_apply_button = None
         self.double_search_button = None
         self.double_orbit_recompute_button = None
+        self.double_orbit_progress = None
+        self.double_orbit_recompute_pending = False
+        self.double_orbit_progress_running = False
+        self.double_orbit_progress_queue = queue.Queue()
+        self.double_orbit_progress_job = None
+        self.double_orbit_messages = queue.Queue()
+        self.double_orbit_job = None
+        self.double_orbit_closed = False
+        self.root.bind("<Destroy>", self._cancel_double_orbit_calculation, add="+")
         self.double_reset_button = None
         self.double_clear_cache_button = None
         self.double_advanced_button = None
@@ -601,7 +612,15 @@ class AstroClocksApp:
     def _configure_styles(self):
         style = ttk.Style()
         style.theme_use("default")
-
+        style.configure(
+            "Orbit.Horizontal.TProgressbar",
+            background=self.accent,
+            troughcolor=self.ebg,
+            bordercolor=self.card_edge,
+            lightcolor=self.accent,
+            darkcolor=self.accent,
+            thickness=6,
+        )
         self.root.option_add("*TCombobox*Listbox*Background", self.ebg)
         self.root.option_add("*TCombobox*Listbox*Foreground", self.text)
         self.root.option_add("*TCombobox*Listbox*selectBackground", self.accent)
@@ -977,15 +996,35 @@ class AstroClocksApp:
         header_actions = tk.Frame(self.header_frame, bg=self.gbg)
         header_actions.grid(column=1, row=0, rowspan=2, sticky="e")
 
+        connectivity_frame = tk.Frame(header_actions, bg=self.gbg)
+        connectivity_frame.grid(column=0, row=0, padx=(0, 14), sticky="e")
+        self.connectivity_icon = tk.Canvas(
+            connectivity_frame, width=20, height=20, bg=self.gbg,
+            highlightthickness=0, bd=0,
+        )
+        self.connectivity_icon.pack(side="left", padx=(0, 5))
+        self.connectivity_icon.create_line(
+            10, 7, 10, 11, 4, 11, 16, 11,
+            fill=self.muted, width=2, tags="network",
+        )
+        for x, y in ((7, 2), (1, 13), (13, 13)):
+            self.connectivity_icon.create_rectangle(
+                x, y, x + 6, y + 5,
+                outline=self.muted, width=1, tags="network",
+            )
+        for x in (4, 16):
+            self.connectivity_icon.create_line(
+                x, 11, x, 13, fill=self.muted, width=2, tags="network",
+            )
         self.connectivity_label = tk.Label(
-            header_actions,
+            connectivity_frame,
             text=self._tr("network.checking"),
             foreground=self.muted,
             background=self.gbg,
             font=Font(family="Segoe UI", size=10, weight="bold"),
             anchor="e",
         )
-        self.connectivity_label.grid(column=0, row=0, padx=(0, 14), sticky="e")
+        self.connectivity_label.pack(side="left")
 
         self.header_settings_button = tk.Button(
             header_actions,
@@ -2218,15 +2257,36 @@ class AstroClocksApp:
         shell.grid_columnconfigure(0, weight=1)
         shell.grid_rowconfigure(1, weight=1)
 
+        is_pointing_title = title_key in {"frame.hour_angle", "frame.declination"}
+        title_parent = shell
+        if is_pointing_title:
+            title_parent = tk.Frame(shell, background=self.card_bg)
+            title_parent.grid(column=0, row=0, padx=14, pady=(9, 3), sticky="ew")
+        title_text_values = (
+            {"suffix": ""} if is_pointing_title and not self.target_active else title_values
+        )
         title_label = tk.Label(
-            shell,
-            text=self._tr(title_key, **title_values).upper(),
+            title_parent,
+            text=self._tr(title_key, **title_text_values).upper(),
             foreground=self.muted,
             background=self.card_bg,
             font=Font(family="Segoe UI", size=10, weight="bold"),
             anchor="w",
         )
-        title_label.grid(column=0, row=0, padx=14, pady=(9, 3), sticky="ew")
+        if is_pointing_title:
+            title_label.pack(side="left")
+            no_target_label = tk.Label(
+                title_parent,
+                text=self._tr("frame.no_target_suffix").upper() if not self.target_active else "",
+                foreground=self.warning,
+                background=self.card_bg,
+                font=Font(family="Segoe UI", size=10, weight="bold"),
+                anchor="w",
+            )
+            no_target_label.pack(side="left")
+            self.pointing_no_target_labels[title_key] = no_target_label
+        else:
+            title_label.grid(column=0, row=0, padx=14, pady=(9, 3), sticky="ew")
         self.labelframe_title_labels.append((title_label, title_key, title_kwargs))
 
         body = tk.Frame(shell, background=self.card_bg)
@@ -2342,6 +2402,13 @@ class AstroClocksApp:
                 text=self._tr(text_key),
                 foreground=foreground,
             )
+            if getattr(self, "connectivity_icon", None) is not None:
+                self.connectivity_icon.itemconfigure("network", fill=foreground)
+                for item in self.connectivity_icon.find_withtag("network"):
+                    if self.connectivity_icon.type(item) == "rectangle":
+                        self.connectivity_icon.itemconfigure(
+                            item, fill=self.gbg, outline=foreground,
+                        )
 
         self._update_aladin_button_state()
         self._update_online_controls_state()
@@ -2361,12 +2428,16 @@ class AstroClocksApp:
         self._update_star_search_buttons_state()
 
     def _hour_angle_title_kwargs(self):
+        if not getattr(self, "target_active", True):
+            return {"suffix": self._tr("frame.no_target_suffix")}
         suffix = self._tr("frame.hour_angle_offset_suffix") if self.hour_angle_offset_enabled else ""
         if getattr(self, "pointing_refraction_applied", False):
             suffix += self._tr("frame.hour_angle_refraction_suffix")
         return {"suffix": suffix}
 
     def _declination_title_kwargs(self):
+        if not getattr(self, "target_active", True):
+            return {"suffix": self._tr("frame.no_target_suffix")}
         suffix = (
             self._tr("frame.declination_offset_suffix")
             if self.declination_offset_enabled
@@ -2377,14 +2448,22 @@ class AstroClocksApp:
         return {"suffix": suffix}
 
     def _refresh_pointing_coordinate_titles(self):
-        """Update only the titles whose qualifier depends on refraction."""
+        """Update pointing titles for target availability and refraction."""
         for title_label, title_key, title_kwargs in getattr(
             self, "labelframe_title_labels", ()
         ):
             if title_key not in {"frame.hour_angle", "frame.declination"}:
                 continue
             title_values = title_kwargs() if callable(title_kwargs) else title_kwargs
-            title_label.config(text=self._tr(title_key, **title_values).upper())
+            title_label.config(
+                text=self._tr(
+                    title_key, **(title_values if self.target_active else {"suffix": ""})
+                ).upper(),
+                foreground=self.muted,
+            )
+            self.pointing_no_target_labels[title_key].config(
+                text=self._tr("frame.no_target_suffix").upper() if not self.target_active else "",
+            )
 
     def _create_frames(self):
         self._create_header()
@@ -2859,7 +2938,7 @@ class AstroClocksApp:
     def _create_hour_angle_widgets(self):
         self.lbl_hour_angle = tk.Label(
             self.lf_ha,
-            text="06h 00m 00s",
+            text="--h --m --s",
             bg=self.ebg,
             fg=self.fg,
             font=Font(family="Consolas", size=self.angle_font_size, weight="bold"),
@@ -2871,12 +2950,7 @@ class AstroClocksApp:
 
         self.lbl_dec_angle = tk.Label(
             self.lf_dec,
-            text=compute_declination_display(
-                0,
-                0,
-                0,
-                apply_offset=self.declination_offset_enabled,
-            ),
+            text="--° --' --\"",
             bg=self.ebg,
             fg=self.fg,
             font=Font(family="Consolas", size=self.angle_font_size, weight="bold"),
@@ -3200,6 +3274,7 @@ class AstroClocksApp:
         label,
         solar_system_name=None,
         display_name=None,
+        target_information=None,
     ):
         self.target_active = True
         self.target_solar_system_name = solar_system_name
@@ -3209,17 +3284,21 @@ class AstroClocksApp:
         self._set_coordinate_fields(ra_hours, dec_degrees)
         j2000_ra_hours, j2000_dec_degrees = jnow_to_j2000_coordinates(ra_hours, dec_degrees)
         self.update_value(preserve_solar_target=solar_system_name is not None)
-        self._set_result_text(
-            self._tr(
-                "result.target_coordinates",
-                label=label,
-                ra=self._format_ra(j2000_ra_hours),
-                dec=self._format_dec(j2000_dec_degrees),
-                jnow_ra=self._format_ra(ra_hours),
-                jnow_dec=self._format_dec(dec_degrees),
-            ),
-            foreground=self._current_target_status_color(),
+        message = self._tr(
+            "result.target_coordinates",
+            label=label,
+            ra=self._format_ra(j2000_ra_hours),
+            dec=self._format_dec(j2000_dec_degrees),
+            jnow_ra=self._format_ra(ra_hours),
+            jnow_dec=self._format_dec(dec_degrees),
         )
+        if target_information is not None:
+            from astroclocks.app_object_search import _target_information_text
+            message += "\n" + _target_information_text(self, target_information)
+        self._set_result_text(message, foreground=self._current_target_status_color())
+        if target_information is not None:
+            from astroclocks.app_object_search import _link_target_sources
+            _link_target_sources(self, target_information)
 
     def _sanitize_coordinate_values(self):
         old_values = (
@@ -3387,8 +3466,10 @@ class AstroClocksApp:
                 delta_mm,
                 delta_ss,
                 apply_offset=self.declination_offset_enabled,
-            )
+            ) if self.target_active else "--° --' --\""
         )
+        if not self.target_active:
+            self.lbl_hour_angle.config(text="--h --m --s")
         self.visibility_cache_key = None
         self.sky_map_cache_key = None
         self._update_sky_map()
@@ -3708,14 +3789,14 @@ class AstroClocksApp:
         self.label_utc.config(text=state["utc"])
         self.label_gmst.config(text=state["gmst"])
         self.label_lst.config(text=state["lst"])
-        self.lbl_hour_angle.config(text=state["hour_angle"])
+        self.lbl_hour_angle.config(text=state["hour_angle"] if self.target_active else "--h --m --s")
         self.lbl_dec_angle.config(
             text=compute_declination_display(
                 delta_dd,
                 delta_mm,
                 delta_ss,
                 apply_offset=self.declination_offset_enabled,
-            )
+            ) if self.target_active else "--° --' --\""
         )
         try:
             self._update_sky_map(state)

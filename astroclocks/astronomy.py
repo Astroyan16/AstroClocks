@@ -1,5 +1,6 @@
 import datetime
 import json
+import math
 import unicodedata
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -107,9 +108,14 @@ def convert_star_catalog_j2000_to_jnow(stars):
         frame=fk5_j2000,
     ).transform_to(fk5_now)
 
+    # Extract entire arrays once. Indexing SkyCoord separately for every value
+    # recreates thousands of frame/representation objects and competes with Tk
+    # for the Python interpreter even when conversion runs in a worker thread.
+    ra_hours = catalog.ra.hour.tolist()
+    dec_degrees = catalog.dec.deg.tolist()
     return [
-        (star[0], catalog[index].ra.hour, catalog[index].dec.deg, star[3])
-        for index, star in enumerate(stars)
+        (star[0], ra, dec, star[3])
+        for star, ra, dec in zip(stars, ra_hours, dec_degrees)
     ]
 
 
@@ -137,8 +143,8 @@ def jnow_to_j2000_coordinates(ra_hours, dec_degrees, now_utc=None):
     return j2000.ra.hour, j2000.dec.deg
 
 
-def get_planet_coord(object_type, planet_name):
-    """Retrieve apparent coordinates of date from IMCCE Miriade."""
+def _get_planet_ephemeris(object_type, planet_name):
+    """Retrieve coordinates and photometry from the same IMCCE ephemeris."""
     wsdl_url = "https://ssp.imcce.fr/webservices/miriade/miriade.php?wsdl"
     client = zeep.Client(wsdl=wsdl_url)
 
@@ -166,9 +172,13 @@ def get_planet_coord(object_type, planet_name):
         raise RuntimeError("An error occurred while retrieving the ephemerides.")
 
     data = json.loads(result.result)
-    ra = data["data"][0]["RA"]
-    dec = data["data"][0]["DEC"]
-    return ra, dec
+    return data["data"][0]
+
+
+def get_planet_coord(object_type, planet_name):
+    """Retrieve apparent coordinates of date from IMCCE Miriade."""
+    ephemeris = _get_planet_ephemeris(object_type, planet_name)
+    return ephemeris["RA"], ephemeris["DEC"]
 
 
 def normalize_miriade_object_name(object_name):
@@ -214,7 +224,14 @@ def resolve_solar_system_coordinates(selected_type, object_name):
     }
 
     object_name = normalize_miriade_object_name(object_name)
-    coordinates = get_planet_coord(prefix_mapping[selected_type], object_name)
+    ephemeris = _get_planet_ephemeris(prefix_mapping[selected_type], object_name)
+    coordinates = ephemeris["RA"], ephemeris["DEC"]
+    try:
+        magnitude = float(ephemeris.get("VMag"))
+        if not math.isfinite(magnitude):
+            magnitude = None
+    except (TypeError, ValueError):
+        magnitude = None
     alpha_hh, alpha_mm, alpha_ss = coordinates[0][1:].split(":")
     delta_dd, delta_mm, delta_ss = coordinates[1].split(":")
     local_solar_names = {
@@ -236,6 +253,11 @@ def resolve_solar_system_coordinates(selected_type, object_name):
             f"Delta JNow : {coordinates[1]}"
         ),
         "source": "imcce",
+        "magnitude": magnitude,
+        "magnitude_band": "V",
+        "miriade_name": f"{prefix_mapping[selected_type]}:{object_name}",
+        "object_type": selected_type,
+        "target_kind": "star" if object_name == "Sun" else None,
         "display_name": object_name,
         "solar_system_name": object_name if object_name in local_solar_names else None,
         "source_ra": coordinates[0],
@@ -303,6 +325,8 @@ def resolve_local_solar_system_coordinates(object_name, now_utc=None, latitude=N
             f"Delta JNow : {dec_text}"
         ),
         "source": "local_solar",
+        "object_type": "Natural Satellite" if label == "Moon" else "Planet",
+        "target_kind": "star" if label == "Sun" else None,
         "display_name": label,
         "solar_system_name": label,
         "source_ra": ra_text,
@@ -332,6 +356,7 @@ def resolve_deep_sky_coordinates(object_name):
             f"Dec (Delta) : {delta2000}"
         ),
         "source": "sesame",
+        "display_name": object_name,
         "source_ra": alpha2000,
         "source_dec": delta2000,
         "alpha_hh": alpha_value[0:2],

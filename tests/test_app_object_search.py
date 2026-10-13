@@ -4,7 +4,11 @@ from astroclocks.app_object_search import (
     _apply_coordinate_result,
     _coordinate_result_message,
     _with_search_fallback,
+    _target_information_text,
 )
+from astroclocks.i18n import translate
+from astroclocks.local_object_catalog import resolve_local_object_coordinates
+from types import SimpleNamespace
 
 
 class _FakeEntry:
@@ -103,7 +107,10 @@ class ObjectSearchTargetModeTests(unittest.TestCase):
         app._tr = lambda key, **values: {
             "result.local_coordinates": "Local coordinates",
             "result.local_fallback_error": "Local fallback used",
-        }[key]
+            "result.info_unknown": "Not available",
+            "result.source.local_solar": "Astropy",
+            "result.target_information": "Magnitude: {magnitude}\nType: {object_type}\nData source: {source}",
+        }[key].format(**values)
         result = {
             "source": "local",
             "source_catalog": "Messier",
@@ -115,7 +122,39 @@ class ObjectSearchTargetModeTests(unittest.TestCase):
 
         message = _coordinate_result_message(app, result)
 
-        self.assertEqual(message, "Local coordinates\nLocal fallback used")
+        self.assertTrue(message.startswith("Local coordinates\nLocal fallback used\n"))
+        self.assertIn("Data source: Messier", message)
+
+    def test_local_star_and_galaxy_include_structured_photometry_and_type(self):
+        app = SimpleNamespace(_tr=lambda key, **kw: translate("fr", key, **kw))
+        star = resolve_local_object_coordinates("Sirius")
+        text = _target_information_text(app, star)
+        self.assertIn("Magnitude : -1.46 (V)", text)
+        self.assertIn("Type : Étoile", text)
+        self.assertIn("catalogue local étoiles", text)
+        galaxy = resolve_local_object_coordinates("M31")
+        text = _target_information_text(app, galaxy)
+        self.assertIsNotNone(galaxy["magnitude"])
+        self.assertIn("Galaxie", text)
+        self.assertIn("OpenNGC", text)
+
+    def test_binary_components_and_missing_data_are_explicit(self):
+        app = SimpleNamespace(_tr=lambda key, **kw: translate("en", key, **kw))
+        text = _target_information_text(app, dict(target_kind="double_star", mag_primary=0,
+                                                  mag_secondary=4.2, source="WDS"))
+        self.assertIn("0.00 / 4.20 (primary / secondary)", text)
+        self.assertIn("Type: Double star", text)
+        self.assertIn("Data source: WDS", text)
+        text = _target_information_text(app, dict(source="sesame"))
+        self.assertIn("Magnitude: Not available", text)
+        self.assertIn("CDS Sesame", text)
+
+    def test_coordinate_source_and_photometry_source_remain_distinct(self):
+        app = SimpleNamespace(_tr=lambda key, **kw: translate("fr", key, **kw))
+        text = _target_information_text(app, dict(source="sesame", magnitude=3.4,
+                                                 magnitude_band="V", magnitude_source="OpenNGC local"))
+        self.assertIn("3.40 (V) — OpenNGC local", text)
+        self.assertIn("Source des données : CDS Sesame", text)
 
 
 if __name__ == "__main__":

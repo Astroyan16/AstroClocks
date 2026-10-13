@@ -2,12 +2,14 @@
 
 import datetime
 import math
+import queue
 import threading
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
 
 from astroclocks import app_dialogs
+from astroclocks.orbit_worker import OrbitCalculationJob
 from astroclocks.astronomy import (
     compute_clock_state,
     compute_sun_altitudes,
@@ -267,6 +269,15 @@ def _create_double_star_widgets(self):
         anchor="nw",
     )
     self.double_status_label.grid(column=0, row=17, sticky="ew")
+    self.double_orbit_progress = ttk.Progressbar(
+        controls,
+        mode="determinate",
+        maximum=100,
+        style="Orbit.Horizontal.TProgressbar",
+        length=220,
+    )
+    self.double_orbit_progress.grid(column=0, row=18, pady=(8, 0), sticky="ew")
+    self.double_orbit_progress.grid_remove()
 
     results_frame = self._build_labelframe(
         "frame.double_stars",
@@ -389,6 +400,23 @@ def _create_double_star_widgets(self):
 
 def _update_double_search_buttons_state(self):
     remote_search_pending = bool(self.double_remote_search_pending)
+    progress = getattr(self, "double_orbit_progress", None)
+    if progress is not None:
+        running = bool(getattr(self, "double_orbit_progress_running", False))
+        recalculating = remote_search_pending and bool(
+            getattr(self, "double_orbit_recompute_pending", False)
+        )
+        if recalculating and not running:
+            progress.configure(value=0)
+            progress.grid()
+            self.double_orbit_progress_running = True
+            self._poll_double_orbit_progress()
+        elif running and not recalculating:
+            if self.double_orbit_progress_job is not None:
+                self.root.after_cancel(self.double_orbit_progress_job)
+                self.double_orbit_progress_job = None
+            progress.grid_remove()
+            self.double_orbit_progress_running = False
     online_available = self.network_online is not False
     self._set_button_enabled(self.double_apply_button, not remote_search_pending)
     self._set_button_enabled(
@@ -1068,13 +1096,18 @@ def _double_filter_separation(self, star):
     return star["separation"]
 
 
-def _filter_double_star_list(self, stars, filters, visibility_context=None):
+def _filter_double_star_list(self, stars, filters, visibility_context=None, progress_callback=None):
     if visibility_context is None:
         visibility_context = self._double_visibility_context()
 
     filtered = []
-    for star in self._double_stars_to_jnow(stars):
+    stars = self._double_stars_to_jnow(stars)
+    if progress_callback is not None:
+        progress_callback(0, len(stars))
+    for completed, star in enumerate(stars, 1):
         star.update(self._double_star_visibility_metrics(star, visibility_context))
+        if progress_callback is not None:
+            progress_callback(completed, len(stars))
         if not self._double_group_allowed(star, filters):
             continue
         if filters.get("exclude_polar_circle", False) and star["declination"] > 60:
@@ -1130,9 +1163,11 @@ def _double_offline_cache_note(self):
     return self._tr("double.offline_cached", count=cache_count)
 
 
-def _enrich_double_star_orbits(self, stars, orb6_index, orbit_index=None):
+def _enrich_double_star_orbits(self, stars, orb6_index, orbit_index=None, progress_callback=None):
     active_orbit_index = orbit_index if orbit_index is not None else self.double_orb6_orbit_index
     if not orb6_index and not active_orbit_index:
+        if progress_callback is not None:
+            progress_callback(len(stars), len(stars))
         return list(stars), 0
     try:
         return enrich_double_stars_with_orb6(
@@ -1140,8 +1175,11 @@ def _enrich_double_star_orbits(self, stars, orb6_index, orbit_index=None):
             orb6_index,
             datetime.datetime.now(datetime.timezone.utc),
             orbit_index=active_orbit_index,
+            progress_callback=progress_callback,
         )
     except Exception:
+        if progress_callback is not None:
+            progress_callback(len(stars), len(stars))
         return list(stars), 0
 
 
@@ -1435,20 +1473,95 @@ def _render_double_star_results(self, stars, total, source_key, note=None):
     )
 
 
+def _double_orbit_progress_callback(self, generation, phase):
+    """Report completed objects from the worker without calling Tk."""
+    last_percent = -1
+
+    def report(completed, total):
+        nonlocal last_percent
+        percent = int(100 * completed / total) if total else 100
+        if percent != last_percent:
+            last_percent = percent
+            self.double_orbit_progress_queue.put((generation, phase, completed, total))
+
+    return report
+
+
+def _poll_double_orbit_progress(self):
+    self.double_orbit_progress_job = None
+    self._poll_double_orbit_calculation()
+    latest = None
+    while True:
+        try:
+            update = self.double_orbit_progress_queue.get_nowait()
+        except queue.Empty:
+            break
+        if update[0] == self.double_search_generation:
+            latest = update
+    if not self.double_orbit_recompute_pending or not self.double_remote_search_pending:
+        return
+    if latest is not None:
+        _generation, phase, completed, total = latest
+        if phase == "preparing":
+            self.double_status_label.config(text=self._tr("double.preparing_orbit_calculation"))
+        else:
+            fraction = completed / total if total else 1
+            offset = 0 if phase == "orbits" else 50
+            self.double_orbit_progress.configure(value=offset + 50 * fraction)
+            self.double_status_label.config(text=self._tr(
+                f"double.progress.{phase}", completed=completed, total=total,
+            ))
+    self.double_orbit_progress_job = self.root.after(100, self._poll_double_orbit_progress)
+
+
+def _cancel_double_orbit_calculation(self, event=None):
+    if event is not None and event.widget is not self.root:
+        return
+    if event is not None:
+        self.double_orbit_closed = True
+    if self.double_orbit_job is not None:
+        self.double_orbit_job.cancel()
+        self.double_orbit_job = None
+
+
+def _poll_double_orbit_calculation(self):
+    """Receive ordinary Python messages; spawning and IPC stay off the Tk thread."""
+    while True:
+        try:
+            kind, generation, payload = self.double_orbit_messages.get_nowait()
+        except queue.Empty:
+            return
+        if generation != self.double_search_generation:
+            continue
+        if kind == "progress":
+            self.double_orbit_progress_queue.put(payload)
+        else:
+            if kind == "error":
+                payload = {
+                    "stars": [], "total": 0, "source_key": "double.source.local",
+                    "note": self._tr("double.orbit_worker_failed", error=payload),
+                }
+            self.double_orbit_job = None
+            self._apply_double_star_search_results(generation, payload)
+            return
+
+
 def search_double_stars(self, allow_online=False, refresh_orbits=False):
     filters = self._read_double_star_filters()
     if filters is None:
         return
     self._save_current_settings()
 
+    self._cancel_double_orbit_calculation()
     self.double_search_generation += 1
     generation = self.double_search_generation
     search_context = self._double_search_context()
     self.double_remote_search_pending = allow_online or refresh_orbits
+    self.double_orbit_recompute_pending = refresh_orbits
     if allow_online:
         status_key = "double.searching_online"
     elif refresh_orbits:
-        status_key = "double.recalculating_orbits"
+        status_key = "double.loading_orbit_data"
     else:
         status_key = "double.filtering"
     self.double_status_label.config(
@@ -1471,7 +1584,7 @@ def _run_double_star_search(
     refresh_orbits=False,
 ):
     try:
-        visibility_context = self._double_visibility_context(search_context)
+        visibility_context = None if refresh_orbits else self._double_visibility_context(search_context)
         notes = []
         offline_cache_note = self._double_offline_cache_note()
         if offline_cache_note:
@@ -1533,6 +1646,27 @@ def _run_double_star_search(
                 log_exception(LOGGER, "Double-star online search failed", exc)
                 notes.append(self._tr("double.online_error", error=str(exc)))
 
+        if refresh_orbits:
+            if generation != self.double_search_generation or self.double_orbit_closed:
+                return
+            request = {
+                "search_context": search_context, "language": self.language,
+                "catalog": local_catalog, "filters": filters,
+                "ephemeris_index": orb6_index, "orbit_index": orb6_orbit_index,
+                "notes": notes,
+                "result_metadata": {
+                    "total": len(local_catalog), "source_key": source_key,
+                    "wds_cached_stars": wds_cached_stars,
+                    "orb6_index": orb6_index, "orb6_orbit_index": orb6_orbit_index,
+                },
+            }
+            job = OrbitCalculationJob(generation, request)
+            self.double_orbit_job = job
+            if self.double_orbit_closed:
+                job.cancel()
+            self.double_orbit_messages.put(("progress", generation, (generation, "preparing", 0, 0)))
+            job.run(self.double_orbit_messages)
+            return
         local_source, _local_orb6_matches = self._enrich_double_star_orbits(
             local_catalog,
             orb6_index,
@@ -1589,6 +1723,7 @@ def _apply_double_star_search_results(self, generation, payload):
     if generation != self.double_search_generation:
         return
     self.double_remote_search_pending = False
+    self.double_orbit_recompute_pending = False
     self._update_double_search_buttons_state()
     if payload.get("wds_cached_stars") is not None:
         self.double_wds_cached_stars = payload["wds_cached_stars"]
@@ -1839,6 +1974,7 @@ def set_selected_double_star_target(self):
         declination,
         self._tr("double.target_set", name=star["name"]),
         display_name=star["name"],
+        target_information=dict(star, target_kind="double_star"),
     )
     self.notebook.select(self.main_tab)
 
@@ -2080,6 +2216,10 @@ def install_double_star_methods(app_class):
     app_class._on_double_tree_leave = _on_double_tree_leave
     app_class._render_double_star_results = _render_double_star_results
     app_class.search_double_stars = search_double_stars
+    app_class._double_orbit_progress_callback = _double_orbit_progress_callback
+    app_class._poll_double_orbit_progress = _poll_double_orbit_progress
+    app_class._poll_double_orbit_calculation = _poll_double_orbit_calculation
+    app_class._cancel_double_orbit_calculation = _cancel_double_orbit_calculation
     app_class._run_double_star_search = _run_double_star_search
     app_class._queue_double_star_search_results = _queue_double_star_search_results
     app_class._apply_double_star_search_results = _apply_double_star_search_results

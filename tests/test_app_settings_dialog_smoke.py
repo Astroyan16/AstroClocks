@@ -12,6 +12,45 @@ from astroclocks.sites import LOCATION_PRESETS, preset_label
 
 
 class SettingsDialogSmokeTests(unittest.TestCase):
+    def test_pointing_display_stays_empty_until_target_is_selected(self):
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with patch("astroclocks.app.load_app_settings", return_value=AppSettings()):
+                app = AstroClocksApp(root)
+                for language in ("fr", "en"):
+                    app.language = language
+                    app.update_value(activate_target=False)
+                    app.clocks()
+                    self.assertEqual(app.lbl_hour_angle.cget("text"), "--h --m --s")
+                    self.assertEqual(app.lbl_dec_angle.cget("text"), "--° --' --\"")
+                    for label, key, _kwargs in app.labelframe_title_labels:
+                        if key in ("frame.hour_angle", "frame.declination"):
+                            self.assertEqual(label.cget("foreground"), app.muted)
+                            self.assertEqual(label.cget("text"), app._tr(key, suffix="").upper())
+                            note = app.pointing_no_target_labels[key]
+                            self.assertEqual(note.cget("foreground"), app.warning)
+                            self.assertEqual(
+                                note.cget("text"), app._tr("frame.no_target_suffix").upper(),
+                            )
+                app._activate_target_from_controls()
+                app.clocks()
+                self.assertNotEqual(app.lbl_hour_angle.cget("text"), "--h --m --s")
+                self.assertNotEqual(app.lbl_dec_angle.cget("text"), "--° --' --\"")
+                for label, key, _kwargs in app.labelframe_title_labels:
+                    if key in ("frame.hour_angle", "frame.declination"):
+                        self.assertEqual(label.cget("foreground"), app.muted)
+                        self.assertEqual(app.pointing_no_target_labels[key].cget("text"), "")
+                        self.assertNotIn(
+                            app._tr("frame.no_target_suffix").upper(),
+                            label.cget("text"),
+                        )
+        finally:
+            for callback in root.tk.call("after", "info"):
+                root.after_cancel(callback)
+            root.destroy()
+            gc.collect()
+
     def test_settings_groups_and_altitude_without_refraction(self):
         try:
             root = tk.Tk()

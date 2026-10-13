@@ -688,11 +688,16 @@ def sample_orbit_points(orbit, start_year=None, count=720):
     ]
 
 
-def enrich_double_stars_with_orb6(stars, orb6_index, when=None, orbit_index=None):
+def enrich_double_stars_with_orb6(
+    stars, orb6_index, when=None, orbit_index=None, progress_callback=None,
+):
     """Return copies of stars enriched with current ORB6 theta/rho when available."""
     enriched = []
     matched = 0
-    for star in stars:
+    if progress_callback is not None:
+        stars = list(stars)
+        progress_callback(0, len(stars))
+    for completed, star in enumerate(stars, 1):
         enriched_star = dict(star)
         entry = _find_orb6_entry(enriched_star, orb6_index)
         orbit_entry = _find_orb6_entry(enriched_star, orbit_index)
@@ -713,4 +718,6 @@ def enrich_double_stars_with_orb6(stars, orb6_index, when=None, orbit_index=None
                 if catalog_value is not None and not enriched_star.get(catalog_key):
                     enriched_star[catalog_key] = catalog_value
         enriched.append(enriched_star)
+        if progress_callback is not None:
+            progress_callback(completed, len(stars))
     return enriched, matched

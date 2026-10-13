@@ -262,6 +262,8 @@ def resolve_deep_sky_object_photometry(
     resolved["magnitude"] = magnitude
     resolved["magnitude_band"] = band
     resolved["magnitude_flag"] = photometry_flags.get(band, "")
+    if sky_object.get("photometry_sources"):
+        resolved["magnitude_source"] = sky_object["photometry_sources"].get(band, "")
     return resolved
 
 
@@ -331,18 +333,27 @@ def _merge_deep_sky_entry(existing, new_object):
     merged["aliases"] = tuple(merged_aliases)
 
     photometry = _deep_sky_photometry(existing)
-    photometry.update(_deep_sky_photometry(new_object))
+    new_photometry = _deep_sky_photometry(new_object)
+    sources = {band: existing.get("photometry_sources", {}).get(band, existing.get("source", ""))
+               for band in photometry}
+    sources.update({band: new_object.get("photometry_sources", {}).get(band, new_object.get("source", ""))
+                    for band in new_photometry})
+    photometry.update(new_photometry)
     if photometry:
         merged["photometry"] = photometry
+        merged["photometry_sources"] = sources
     photometry_flags = _deep_sky_photometry_flags(existing)
+    for band in new_photometry:
+        photometry_flags.pop(band, None)
     photometry_flags.update(_deep_sky_photometry_flags(new_object))
-    if photometry_flags:
-        merged["photometry_flags"] = photometry_flags
+    merged["photometry_flags"] = photometry_flags
+    merged["magnitude_flag"] = photometry_flags.get(merged.get("magnitude_band"), "")
 
     if new_object.get("source") == "SIMBAD/CDS":
         merged["source_id"] = new_object.get("source_id", merged.get("source_id"))
         merged["object_type"] = new_object.get("object_type", merged.get("object_type"))
-        merged["morphology"] = new_object.get("morphology", merged.get("morphology"))
+        if new_object.get("morphology"):
+            merged["morphology"] = new_object["morphology"]
         merged["ra_hours"] = new_object.get("ra_hours", merged.get("ra_hours"))
         merged["declination"] = new_object.get("declination", merged.get("declination"))
     elif new_object.get("morphology"):
@@ -539,6 +550,8 @@ def _append_simbad_band_rows(
 ):
     for row in rows:
         name, ra_degrees, dec_degrees, object_type, morphology, magnitude = row[:6]
+        if ra_degrees is None or dec_degrees is None:
+            continue
         magnitude_flag = row[6] if len(row) > 6 else ""
         source_id = str(name)
         band = normalize_deep_sky_magnitude_band(band)
@@ -593,6 +606,8 @@ def _fetch_simbad_photometry_by_id(source_ids, timeout):
         batch_ids = source_ids[start : start + SIMBAD_PHOTOMETRY_BATCH_SIZE]
         payload = _fetch_simbad_json(_simbad_photometry_query(batch_ids), timeout)
         for row in payload.get("data", []):
+            if row[1] is None or row[2] is None:
+                continue
             source_id = str(row[0])
             photometry, photometry_flags = _simbad_photometry_from_row(row, band_order)
             photometry_by_id[source_id] = {
@@ -604,6 +619,44 @@ def _fetch_simbad_photometry_by_id(source_ids, timeout):
                 "photometry_flags": photometry_flags,
             }
     return photometry_by_id
+
+
+def fetch_simbad_deep_sky_details(objects, preferred_band="V", timeout=20):
+    """Enrich specific local objects independently of the discovery row limit."""
+    by_identifier = {}
+    for obj in objects:
+        for identifier in (obj["name"], *obj.get("aliases", ())):
+            if identifier:
+                by_identifier.setdefault(normalize_deep_sky_key(identifier), (identifier, obj))
+    entries = list(by_identifier.values())
+    columns, joins = _simbad_flux_columns_and_joins(app_settings.DEEP_SKY_MAGNITUDE_BANDS)
+    resolved = {}
+    for start in range(0, len(entries), SIMBAD_PHOTOMETRY_BATCH_SIZE):
+        identifiers = ", ".join(
+            f"'{_simbad_escape_literal(identifier)}'"
+            for identifier, _ in entries[start:start + SIMBAD_PHOTOMETRY_BATCH_SIZE]
+        )
+        query = (
+            "SELECT ident.id, basic.main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, "
+            f"{columns}\nFROM ident\nJOIN basic ON basic.oid = ident.oidref\n"
+            f"{joins}\nWHERE ident.id IN ({identifiers})"
+        )
+        for row in _fetch_simbad_json(query, timeout).get("data", []):
+            if row[2] is None or row[3] is None:
+                continue
+            match = by_identifier.get(normalize_deep_sky_key(row[0]))
+            if match is None:
+                continue
+            _, local = match
+            photometry, flags = _simbad_photometry_from_row(row[1:], app_settings.DEEP_SKY_MAGNITUDE_BANDS)
+            item = dict(name=str(row[1]), source_id=str(row[1]), source="SIMBAD/CDS",
+                        aliases=(local["name"], *local.get("aliases", ())),
+                        ra_hours=float(row[2]) / 15, declination=float(row[3]),
+                        category=local["category"], object_type=str(row[4]),
+                        morphology=str(row[5]).strip() if row[5] else "",
+                        photometry=photometry, photometry_flags=flags)
+            resolved[str(row[1])] = resolve_deep_sky_object_photometry(item, preferred_band)
+    return list(resolved.values())
 
 
 def fetch_simbad_deep_sky_objects(
@@ -625,7 +678,10 @@ def fetch_simbad_deep_sky_objects(
             row_limit,
         )
         payload = _fetch_simbad_json(query, timeout)
-        initial_rows = payload.get("data", [])
+        # SIMBAD photometry can refer to objects with no measured position.
+        # Such entries cannot be used for pointing or visibility calculations.
+        initial_rows = [row for row in payload.get("data", [])
+                        if row[1] is not None and row[2] is not None]
         photometry_by_id = _fetch_simbad_photometry_by_id(
             [str(row[0]) for row in initial_rows],
             timeout,

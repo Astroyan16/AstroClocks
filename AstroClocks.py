@@ -84,6 +84,9 @@ def create_loading_window():
 
 
 if __name__ == "__main__":
+    # Must run before creating the loading window in frozen Windows builds.
+    from multiprocessing import freeze_support
+    freeze_support()
     loading_root, loading_window, loading_status_var = create_loading_window()
     from astroclocks.app import main
 
