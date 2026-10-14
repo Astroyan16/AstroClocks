@@ -1,5 +1,37 @@
 # Changelog
 
+## AstroClocks v3.4.4 stable - 2026-10-14
+
+### Ajouté
+
+- Informations de cible : magnitude et bande photométrique, type d’objet, source des données et liens vers WDS, SIMBAD/CDS, CDS Sesame et les éphémérides IMCCE/Miriade.
+- Magnitude visuelle et distance à l’observateur récupérées dans la réponse IMCCE, sans requête supplémentaire.
+- Estimation locale de magnitude V et distance pour le Soleil, la Lune et les planètes prises en charge, utilisable hors ligne et explicitement indiquée comme estimée.
+- Barre de progression réelle du recalcul ORB6 dans la colonne des étoiles doubles.
+
+### Amélioré
+
+- Recalcul ORB6 et recherches d’étoiles/ciel profond isolés dans des processus pour préserver la fluidité des horloges et des changements d’onglet.
+- Extraction vectorisée des coordonnées des catalogues et démarrage des processus en arrière-plan.
+- Recherche rapide : espacement fixe des contrôles, espace disponible attribué aux résultats, sources de catalogues clarifiées.
+- Absence de cible clairement signalée en rouge orangé ; coordonnées vides sous la forme --h --m --s et --° --' --". Symbole réseau dans l’indicateur de connexion.
+- Enrichissement SIMBAD ciblé des objets OpenNGC correspondant aux filtres ; reprise des données disponibles et conservation de la provenance et du lien.
+- Manuel d’utilisation français mis à jour.
+
+### Corrigé
+
+- Résultats SIMBAD sans coordonnées écartés sans faire échouer toute la recherche.
+- Métadonnées de cible correctement transmises au clic sur la carte du ciel.
+- Source SIMBAD conservée dans l’affichage des objets enrichis, et indicateurs de qualité photométrique actualisés lors de la fusion.
+- Conversion inutile vers une année UTC future supprimée du modèle photométrique local, évitant l’avertissement ERFA au démarrage sur les installations anciennes.
+
+### Vérification
+
+- 240 tests unitaires et graphiques réussis.
+- Vérification des services en ligne et des liens de catalogues.
+- Build Windows et cohérence des artefacts validés ; manuel PDF de 14 pages actualisé et rendu contrôlé.
+- Exécutable packagé contrôlé : démarrage, recherches Étoiles/Ciel profond, recalcul ORB6, changements d’onglet et informations locales de la Lune.
+
 ## AstroClocks v3.4.3 stable - 2026-10-12
 
 ### Ajouté

@@ -11,7 +11,10 @@ TRANSLATIONS = {
     "en": {
         "deep_sky.online_enriched": "SIMBAD data retrieved for {count} local objects.",
         "deep_sky.enrichment_error": "SIMBAD enrichment unavailable: {error}",
-        "result.target_information": "Magnitude: {magnitude}\nType: {object_type}\nData source: {source}",
+        "result.target_information": "Magnitude: {magnitude}\nType: {object_type}{distance}\nData source: {source}",
+        "result.estimated": "estimated",
+        "result.distance_estimated": "Estimated distance to observer: {value} {unit}",
+        "result.unit.au": "AU",
         "result.info_unknown": "Not available",
         "result.info_components": " (primary / secondary)",
         "result.type.star": "Star",
@@ -619,7 +622,10 @@ TRANSLATIONS = {
     "fr": {
         "deep_sky.online_enriched": "Données SIMBAD récupérées pour {count} objets locaux.",
         "deep_sky.enrichment_error": "Enrichissement SIMBAD indisponible : {error}",
-        "result.target_information": "Magnitude : {magnitude}\nType : {object_type}\nSource des données : {source}",
+        "result.target_information": "Magnitude : {magnitude}\nType : {object_type}{distance}\nSource des données : {source}",
+        "result.estimated": "estimée",
+        "result.distance_estimated": "Distance estimée à l’observateur : {value} {unit}",
+        "result.unit.au": "UA",
         "result.info_unknown": "Non disponible",
         "result.info_components": " (primaire / secondaire)",
         "result.type.star": "Étoile",

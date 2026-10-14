@@ -621,6 +621,8 @@ def _collect_solar_system_objects(self, center_x, center_y, radius, lst_hours):
             "name": name,
             "label": label,
             "kind": "solar",
+            **{key: body.get(key) for key in ("magnitude", "magnitude_band", "magnitude_estimated",
+                                             "distance_au", "distance_km", "distance_estimated")},
             "hover_color": fill,
             "rgb": self._hex_to_rgb(fill),
             "x": x,
@@ -1070,6 +1072,8 @@ def _on_sky_click(self, event):
     if sky_object:
         if sky_object.get("kind") == "solar":
             information = dict(
+                **{key: sky_object.get(key) for key in ("magnitude", "magnitude_band", "magnitude_estimated",
+                                                        "distance_au", "distance_km", "distance_estimated")},
                 source="local_solar",
                 object_type="Natural Satellite" if sky_object["name"] == "Moon" else "Planet",
                 target_kind="star" if sky_object["name"] == "Sun" else None,

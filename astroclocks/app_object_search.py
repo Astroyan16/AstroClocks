@@ -254,6 +254,8 @@ def _target_information_text(self, data):
         magnitude_text = f"{float(magnitude):.2f}"
         if data.get("magnitude_band"):
             magnitude_text += f" ({data['magnitude_band']})"
+        if data.get("magnitude_estimated"):
+            magnitude_text += f" — {self._tr('result.estimated')}"
     else:
         magnitude_text = unknown
     if magnitude is not None and data.get("magnitude_source"):
@@ -285,8 +287,17 @@ def _target_information_text(self, data):
         source = self._tr("result.source.local_doubles")
     if "BSC local" in source:
         source = source.replace("BSC local", self._tr("result.source.bright_star_catalogue"))
+    distance = ""
+    if data.get("distance_au") is not None:
+        if data.get("distance_km") is not None:
+            value = f"{float(data['distance_km']):,.0f}".replace(",", " ")
+            unit = "km"
+        else:
+            value = f"{float(data['distance_au']):.3f}"
+            unit = self._tr("result.unit.au")
+        distance = "\n" + self._tr("result.distance_estimated", value=value, unit=unit)
     return self._tr("result.target_information", magnitude=magnitude_text,
-                    object_type=object_type, source=source)
+                    object_type=object_type, source=source, distance=distance)
 
 
 def _apply_coordinate_result(self, result):

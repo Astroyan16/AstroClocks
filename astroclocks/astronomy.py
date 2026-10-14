@@ -1,4 +1,5 @@
 import datetime
+import calendar
 import json
 import math
 import unicodedata
@@ -13,6 +14,7 @@ from astropy.coordinates import solar_system_ephemeris
 from astropy.time import Time
 
 from astroclocks.utils import separate_dms_coordinates
+from astroclocks.solar_photometry import local_solar_information
 
 
 def _format_timezone_offset(offset):
@@ -255,6 +257,8 @@ def resolve_solar_system_coordinates(selected_type, object_name):
         "source": "imcce",
         "magnitude": magnitude,
         "magnitude_band": "V",
+        "distance_au": ephemeris.get("Dobs"),
+        "distance_estimated": True,
         "miriade_name": f"{prefix_mapping[selected_type]}:{object_name}",
         "object_type": selected_type,
         "target_kind": "star" if object_name == "Sun" else None,
@@ -289,7 +293,8 @@ def resolve_local_solar_system_coordinates(object_name, now_utc=None, latitude=N
     if body_name is None:
         return None
 
-    observation_time = Time(_coerce_utc_datetime(now_utc), scale="utc")
+    utc_now = _coerce_utc_datetime(now_utc)
+    observation_time = Time(utc_now, scale="utc")
     location = None
     if latitude is not None and longitude is not None:
         location = EarthLocation.from_geodetic(
@@ -304,6 +309,11 @@ def resolve_local_solar_system_coordinates(object_name, now_utc=None, latitude=N
             location,
         )
         apparent = coordinates.transform_to(apparent_frame)
+
+    information = local_solar_information(
+        label, coordinates, coordinates if body_name == "sun" else get_sun(observation_time),
+        _photometry_decimal_year(utc_now),
+    )
 
     ra_text = str(apparent.ra.to_string(unit=u.hour, sep=":", precision=2, pad=True))
     dec_text = str(apparent.dec.to_string(unit=u.deg, sep=":", precision=1, alwayssign=True, pad=True))
@@ -325,6 +335,7 @@ def resolve_local_solar_system_coordinates(object_name, now_utc=None, latitude=N
             f"Delta JNow : {dec_text}"
         ),
         "source": "local_solar",
+        **information,
         "object_type": "Natural Satellite" if label == "Moon" else "Planet",
         "target_kind": "star" if label == "Sun" else None,
         "display_name": label,
@@ -385,6 +396,19 @@ def jnow_to_icrs_degrees(alpha_hh, alpha_mm, alpha_ss, delta_dd, delta_mm, delta
     return center.ra.deg, center.dec.deg
 
 
+def _photometry_decimal_year(utc_now):
+    """Calendar-year fraction for slow photometric trends, not time scales.
+
+    Astropy's UTC decimalyear constructs January 1 of the following year.
+    That can trigger ERFA's future leap-second warning on older installations,
+    even when the actual observation date is within their valid range.
+    Leap-second precision is unnecessary for these approximate brightness terms.
+    """
+    start = utc_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    days = 366 if calendar.isleap(utc_now.year) else 365
+    return utc_now.year + (utc_now-start).total_seconds()/(days*86400)
+
+
 def compute_solar_system_positions(latitude, longitude, now_utc=None):
     """Return apparent local Alt/Az and true-equator/equinox coordinates."""
     utc_now = _coerce_utc_datetime(now_utc)
@@ -408,9 +432,11 @@ def compute_solar_system_positions(latitude, longitude, now_utc=None):
         ("Neptune", "neptune"),
     )
     positions = []
+    sun_coordinates = get_sun(observation_time)
+    photometry_year = _photometry_decimal_year(utc_now)
     with solar_system_ephemeris.set("builtin"):
         for label, body_name in bodies:
-            coordinates = get_sun(observation_time) if body_name == "sun" else get_body(
+            coordinates = sun_coordinates if body_name == "sun" else get_body(
                 body_name,
                 observation_time,
                 location,
@@ -420,6 +446,7 @@ def compute_solar_system_positions(latitude, longitude, now_utc=None):
             positions.append(
                 {
                     "name": label,
+                    **local_solar_information(label, coordinates, sun_coordinates, photometry_year),
                     "ra_hours": apparent.ra.hour,
                     "declination": apparent.dec.deg,
                     "altitude": altaz.alt.deg,

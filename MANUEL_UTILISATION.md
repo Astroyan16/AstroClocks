@@ -1,8 +1,8 @@
-# Manuel d’utilisation — AstroClocks 3.4.3
+# Manuel d’utilisation — AstroClocks 3.4.4
 
-Version française • 12 octobre 2026 • Windows
+Version française • 14 octobre 2026 • Windows
 
-Ce manuel décrit l’utilisation de la version 3.4.3. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
+Ce manuel décrit l’utilisation de la version 3.4.4. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
 
 ## Sommaire
 
@@ -21,7 +21,7 @@ Ce manuel décrit l’utilisation de la version 3.4.3. Les noms des boutons sont
 
 ## 1. Installation et première utilisation
 
-Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.3.exe`.
+Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.4.exe`.
 
 Lancez l’installeur et suivez ses étapes. La création d’un raccourci sur le Bureau et le lancement au démarrage de Windows sont facultatifs. Une installation existante peut être mise à jour avec le nouvel installeur.
 
@@ -97,6 +97,10 @@ Dans **Trouver les coordonnées d’un objet**, choisissez le type d’objet, sa
 
 Lisez le statut de recherche : il indique notamment les erreurs de service ou l’utilisation de données locales. Les objets du système solaire ont une position qui évolue avec le temps.
 
+Le résultat présente la magnitude disponible, le type d’objet et la source des données. Les sources WDS, SIMBAD/CDS, CDS Sesame et IMCCE/Miriade sont cliquables : elles ouvrent le navigateur vers le catalogue, le formulaire ou les éphémérides de l’objet.
+
+Pour le système solaire, la distance estimée à l’observateur est affichée en kilomètres pour la Lune et en unités astronomiques (UA) pour les autres astres. IMCCE fournit la magnitude visuelle lorsqu’elle est disponible. Hors ligne, le modèle local propose une magnitude V explicitement marquée « estimée » pour le Soleil, la Lune et les planètes prises en charge. Cette estimation simplifie les effets physiques : elle ne modélise ni les éclipses ni l’extinction atmosphérique et peut être indisponible hors du domaine des formules.
+
 ### Saisie de coordonnées
 
 Les champs **Alpha ICRS/J2000 (h m s)** et **Delta ICRS/J2000 (d m s)** permettent de définir une cible manuellement. Renseignez les composantes, conservez le signe de la déclinaison et validez avec les boutons **Définir** correspondants. Vérifiez ensuite la cible et sa position sur la carte.
@@ -148,13 +152,15 @@ Les filtres portent notamment sur les magnitudes des composantes, la séparation
 
 Les résultats distinguent les mesures **WDS** des valeurs calculées **ORB6**, lorsqu’une orbite est disponible. La séparation ρ est exprimée en secondes d’arc et l’angle de position θ en degrés. **Obs2** désigne l’année de dernière observation du catalogue ; ce n’est pas la date du calcul ORB6.
 
-Vous pouvez consulter les notes WDS, recalculer les orbites disponibles et afficher leur représentation. Toutes les paires ne disposent pas d’une orbite calculable.
+Vous pouvez consulter les notes WDS, recalculer les orbites disponibles et afficher leur représentation. Toutes les paires ne disposent pas d’une orbite calculable. Une barre indique la progression réelle du recalcul. Les calculs des orbites et les recherches d’étoiles ou de ciel profond sont isolés pour conserver une interface réactive.
 
 ### Ciel profond
 
 Choisissez le type d’objet : galaxie, amas, nébuleuse ou autre catégorie proposée. Ajustez la bande de magnitude préférée, les limites de magnitude et les conditions de visibilité.
 
 **Alt max** et **Alt nuit** distinguent la hauteur maximale et la hauteur maximale nocturne. Les magnitudes de bandes différentes ne sont pas directement équivalentes. Certaines entrées sans magnitude exploitable peuvent être écartées ; le statut de recherche le signale.
+
+La recherche en ligne enrichit également les objets locaux correspondant aux filtres, sans dépendre uniquement des premiers résultats du serveur. Les valeurs SIMBAD disponibles sont reprises, et OpenNGC complète les informations absentes. La source conserve la mention SIMBAD et son lien.
 
 ### Étoiles
 
