@@ -11,7 +11,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from astroclocks.network import urlopen
 
 from astroclocks.version import INSTALLER_NAME_PREFIX, UPDATE_REPOSITORY
 

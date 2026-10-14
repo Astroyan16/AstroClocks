@@ -4,7 +4,7 @@ import json
 import re
 import unicodedata
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from astroclocks.network import urlopen
 
 from astroclocks.deep_sky_morphology import DEEP_SKY_MORPHOLOGY_BY_KEY
 from astroclocks.deep_sky_photometry import DEEP_SKY_PHOTOMETRY_BY_KEY

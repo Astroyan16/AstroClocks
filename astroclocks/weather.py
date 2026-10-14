@@ -10,7 +10,9 @@ import urllib.parse
 from json import JSONDecodeError
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from astroclocks.network import urlopen
 
 from astroclocks.secure_store import load_meteofrance_application_id
 

@@ -3,7 +3,7 @@
 import datetime
 import json
 import re
-from urllib.request import urlopen
+from astroclocks.network import urlopen
 
 from astroclocks import settings as app_settings
 

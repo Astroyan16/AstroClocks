@@ -4,7 +4,7 @@ import json
 import math
 import re
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from astroclocks.network import urlopen
 
 from astroclocks import settings as app_settings
 

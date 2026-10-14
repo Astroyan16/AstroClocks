@@ -1,5 +1,26 @@
 # Changelog
 
+## AstroClocks v3.4.5 stable - 2026-10-14
+
+### Corrigé
+
+- Validation HTTPS native Windows via `truststore` pour les recherches SIMBAD/CDS,
+  VizieR/WDS, ORB6, CDS Sesame, la météo et les mises à jour. Les certificats
+  intermédiaires manquants peuvent être récupérés par Windows, y compris dans
+  les processus de recherche. La vérification SSL reste active et aucun
+  certificat n'est installé par le logiciel.
+- Dépendance `truststore` incluse dans le build Windows.
+
+### Vérification
+
+- 244 tests réussis, dont validation obligatoire des certificats et des noms
+  de serveur, et propagation des erreurs SSL sans nouvelle tentative non vérifiée.
+- Accès HTTPS SIMBAD et VizieR vérifiés ; accès SIMBAD également vérifié dans
+  un processus séparé utilisant la validation native Windows.
+- Certificats autosignés et noms de serveur incorrects refusés en test réseau.
+- Exécutable et installateur Windows reconstruits ; présence du moteur
+  `truststore._windows` dans l'exécutable et cohérence de release vérifiées.
+
 ## AstroClocks v3.4.4 stable - 2026-10-14
 
 ### Ajouté

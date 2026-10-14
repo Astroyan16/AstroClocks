@@ -4,7 +4,7 @@ import json
 import math
 import unicodedata
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from astroclocks.network import urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import zeep

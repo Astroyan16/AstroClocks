@@ -66,6 +66,7 @@ Remove-GeneratedPath (Join-Path $ProjectRoot "output\$ExecutableStem")
     --collect-all "astroplan" `
     --collect-all "zeep" `
     --collect-all "tzdata" `
+    --collect-all "truststore" `
     ".\AstroClocks.py"
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
