@@ -1,8 +1,12 @@
+import io
+import sqlite3
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs
 
 from astroclocks.deep_sky_catalog import (
     _append_simbad_band_rows,
+    _fetch_simbad_json,
     _simbad_band_query,
     deep_sky_category_for_type,
     deep_sky_search_objects,
@@ -54,7 +58,7 @@ class DeepSkyCatalogTests(unittest.TestCase):
         queries = []
         def fake_fetch(query, _timeout):
             queries.append(query)
-            if "WHERE flux.filter = 'V'" in query:
+            if "WHERE flux.V BETWEEN" in query:
                 return {"data": [
                     ["No position", None, None, "G", None, 14.05, None],
                     ["No RA", None, 20, "G", None, 15, None],
@@ -371,7 +375,7 @@ class DeepSkyCatalogTests(unittest.TestCase):
 
         def fake_fetch(query, _timeout):
             queries.append(query)
-            if "WHERE flux.filter = 'V'" in query:
+            if "WHERE flux.V BETWEEN" in query:
                 return {
                     "data": [
                         ["M  31", 10.684708333333333, 41.26875, "AGN", "SA(s)b", 3.44, ""]
@@ -416,18 +420,18 @@ class DeepSkyCatalogTests(unittest.TestCase):
         self.assertEqual(objects[0]["photometry"]["B"], 4.36)
         self.assertEqual(objects[0]["magnitude_flag"], "")
         self.assertEqual(len(queries), 2)
-        self.assertIn("WHERE flux.filter = 'V'", queries[0])
-        self.assertIn("flux.flux BETWEEN -2 AND 8.5", queries[0])
-        self.assertNotIn("ORDER BY", queries[0])
+        self.assertIn("WHERE flux.V BETWEEN", queries[0])
+        self.assertIn("flux.V BETWEEN -2 AND 8.5", queries[0])
+        self.assertIn("ORDER BY mag ASC, main_id ASC", queries[0])
         self.assertIn("WHERE basic.main_id IN ('M  31')", queries[1])
         self.assertIn("flux_b.filter = 'B'", queries[1])
 
     def test_online_search_caches_multiple_bands_for_selected_objects(self):
         def fake_fetch(query, _timeout):
-            if "WHERE flux.filter = 'V'" in query:
+            if "WHERE flux.V BETWEEN" in query:
                 return {
                     "data": [
-                        ["M 101", 210.80242916666667, 54.34875, "GiP", "S_AB", 7.86, "E"]
+                        ["M 101", 210.80242916666667, 54.34875, "GiP", "S_AB", 7.86]
                     ]
                 }
             return {
@@ -495,6 +499,32 @@ class DeepSkyCatalogTests(unittest.TestCase):
         self.assertIn("'GiG'", query)
         self.assertIn("'GiC'", query)
         self.assertIn("'BiC'", query)
+
+    def test_grouped_photometry_query_filters_category_and_selected_band(self):
+        with sqlite3.connect(":memory:") as database:
+            database.execute("CREATE TABLE basic (oid, main_id, ra, dec, otype, morph_type)")
+            database.execute("CREATE TABLE allfluxes (oidref, V, B)")
+            database.executemany("INSERT INTO basic VALUES (?, ?, 15, 30, ?, '')", [
+                (1, "Visual galaxy", "G"), (2, "Blue galaxy", "GiP"),
+                (3, "Bright star", "*"), (4, "Too faint", "G"),
+            ])
+            database.executemany("INSERT INTO allfluxes VALUES (?, ?, ?)", [
+                (1, 12, 14), (2, 14, 12), (3, 1, 1), (4, 16, 16),
+            ])
+            for band, expected in (("V", "Visual galaxy"), ("B", "Blue galaxy")):
+                with self.subTest(band=band):
+                    query = _simbad_band_query("galaxy", -2, 13, band, 5000)
+                    query = query.replace("SELECT TOP 5000", "SELECT", 1)
+                    self.assertEqual([row[0] for row in database.execute(query)], [expected])
+
+    def test_simbad_transport_posts_long_enrichment_queries(self):
+        query = "SELECT " + "x" * 10000
+        with patch("astroclocks.deep_sky_catalog.urlopen",
+                   return_value=io.BytesIO(b'{"data": []}')) as open_url:
+            self.assertEqual(_fetch_simbad_json(query, 30), {"data": []})
+        self.assertNotIn("?", open_url.call_args.args[0])
+        self.assertEqual(parse_qs(open_url.call_args.kwargs["data"].decode())["query"], [query])
+        self.assertEqual(open_url.call_args.kwargs["timeout"], 30)
 
 
 if __name__ == "__main__":

@@ -387,7 +387,7 @@ class AstroClocksApp:
         self.deep_sky_status_label = None
         self.deep_sky_tree_separators = []
         self.deep_sky_tree_separator_refresh_pending = False
-        self.deep_sky_sort_column = "name"
+        self.deep_sky_sort_column = "magnitude"
         self.deep_sky_sort_reverse = False
         self.deep_sky_tab_initialized = False
         self.deep_sky_initial_load_started = False
@@ -407,7 +407,7 @@ class AstroClocksApp:
         self.star_search_status_label = None
         self.star_search_tree_separators = []
         self.star_search_tree_separator_refresh_pending = False
-        self.star_search_sort_column = "name"
+        self.star_search_sort_column = "magnitude"
         self.star_search_sort_reverse = False
         self.star_search_tab_initialized = False
         self.star_search_initial_load_started = False

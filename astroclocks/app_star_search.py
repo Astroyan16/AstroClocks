@@ -6,6 +6,7 @@ from tkinter.font import Font
 
 from astroclocks import app_dialogs
 from astroclocks.search_worker import start_search
+from astroclocks.simbad_paging import continuation, load_page_state, page_note, save_page_state
 from astroclocks.astronomy import convert_star_catalog_j2000_to_jnow
 from astroclocks.settings import (
     DEFAULT_STAR_SEARCH_EXCLUDE_POLAR_CIRCLE,
@@ -188,26 +189,32 @@ def _create_star_search_widgets(self):
     )
     self.star_search_online_button.grid(column=0, row=14, pady=(0, 6), sticky="ew")
 
+    self.star_search_more_button = self._build_button(
+        controls, self._tr("search.load_more"),
+        lambda: self.search_stars(allow_online=True, load_more=True),
+    )
+    self.star_search_more_button.grid(column=0, row=15, pady=(0, 6), sticky="ew")
+
     self.star_search_set_button = self._build_button(
         controls,
         self._tr("star_search.set_target"),
         self.set_selected_star_target,
     )
-    self.star_search_set_button.grid(column=0, row=15, pady=(0, 6), sticky="ew")
+    self.star_search_set_button.grid(column=0, row=16, pady=(0, 6), sticky="ew")
 
     self.star_search_clear_cache_button = self._build_button(
         controls,
         self._tr("button.clear_cache"),
         self.clear_star_search_cache,
     )
-    self.star_search_clear_cache_button.grid(column=0, row=16, pady=(0, 6), sticky="ew")
+    self.star_search_clear_cache_button.grid(column=0, row=17, pady=(0, 6), sticky="ew")
 
     self.star_search_reset_button = self._build_button(
         controls,
         self._tr("star_search.reset_filters"),
         self.reset_star_search_filters,
     )
-    self.star_search_reset_button.grid(column=0, row=17, pady=(0, 12), sticky="ew")
+    self.star_search_reset_button.grid(column=0, row=18, pady=(0, 12), sticky="ew")
 
     self.star_search_status_label = tk.Label(
         controls,
@@ -218,7 +225,7 @@ def _create_star_search_widgets(self):
         wraplength=220,
         anchor="nw",
     )
-    self.star_search_status_label.grid(column=0, row=18, sticky="ew")
+    self.star_search_status_label.grid(column=0, row=19, sticky="ew")
 
     results_frame = self._build_labelframe(
         "frame.star_search",
@@ -285,6 +292,11 @@ def _create_star_search_widgets(self):
 def _update_star_search_buttons_state(self):
     search_pending = bool(self.star_search_pending)
     online_available = self.network_online is not False
+    page_state = load_page_state("stars")
+    more_button = getattr(self, "star_search_more_button", None)
+    if more_button is not None:
+        self._set_button_enabled(more_button, not search_pending and online_available
+                                 and bool(page_state and page_state["has_more"]))
     self._set_button_enabled(self.star_search_apply_button, not search_pending)
     self._set_button_enabled(
         self.star_search_online_button,
@@ -719,7 +731,7 @@ def _render_star_search_results(self, stars, total, note=None):
         status = f"{status}\n{note}"
     self.star_search_status_label.config(text=status)
 
-def search_stars(self, allow_online=False):
+def search_stars(self, allow_online=False, load_more=False):
     filters = self._read_star_search_filters()
     if filters is None:
         return
@@ -737,7 +749,7 @@ def search_stars(self, allow_online=False):
     self.star_search_status_label.config(text=self._tr(status_key))
     self._update_star_search_buttons_state()
     search_context = self._double_search_context()
-    start_search(self, "stars", generation, filters, search_context, allow_online, offline_note)
+    start_search(self, "stars", generation, filters, search_context, allow_online, offline_note, load_more)
 
 def _run_star_search(self, generation, filters, search_context, allow_online=False, offline_note=None):
     try:
@@ -753,17 +765,23 @@ def _run_star_search(self, generation, filters, search_context, allow_online=Fal
         cached_stars = None
         if allow_online:
             try:
+                previous_page = continuation("stars", filters, getattr(self, "online_load_more", False))
                 remote_stars = fetch_simbad_stars(
                     filters["spectral_type"],
                     filters["min_magnitude"],
                     filters["max_magnitude"],
                     filters["magnitude_band"],
+                    after=previous_page["cursor"] if previous_page else None,
+                    paged=True,
                 )
+                merge_options = {"append": True} if previous_page else {}
                 cached_stars = merge_cached_simbad_stars(
                     remote_stars,
                     filters["spectral_type"],
                     filters["magnitude_band"],
+                    **merge_options,
                 )
+                save_page_state("stars", filters, remote_stars, previous_page)
                 catalog = self._star_search_catalog(
                     cached_stars,
                     spectral_type=filters["spectral_type"],
@@ -781,6 +799,9 @@ def _run_star_search(self, generation, filters, search_context, allow_online=Fal
             and star.get("magnitude_band") == filters["magnitude_band"]
         ]
         filtered = self._filter_star_search_list(catalog, filters, visibility_context)
+        paging_note = page_note(self, "stars", filters)
+        if paging_note:
+            notes.append(paging_note)
         self._queue_star_search_results(
             generation,
             {

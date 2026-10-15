@@ -1,5 +1,27 @@
 # Changelog
 
+## AstroClocks v3.4.7 stable - 2026-10-15
+
+- Étoiles et ciel profond : chargement SIMBAD par lots de 5 000 lignes, triés
+  par magnitude croissante puis identifiant ; bouton « Charger les 5 000 suivants ».
+- Reprise du dernier lot après redémarrage, sans perdre les objets déjà en cache ;
+  indication explicite des recherches partielles et complètes. Les égalités de
+  magnitude sont départagées dans SIMBAD sans dépendre des arrondis transmis.
+- Tri initial des tableaux Étoiles et Ciel profond par magnitude croissante.
+
+- Conversion J2000 vers JNow du catalogue ciel profond effectuée par lot ;
+  recherche SIMBAD et enrichissement local exécutés simultanément.
+
+- Recherche de galaxies SIMBAD accélérée par filtrage sur la photométrie regroupée,
+  puis récupération ciblée des magnitudes et indicateurs de qualité.
+- Requêtes ciel profond transmises en POST pour éviter les URL trop longues lors
+  de l’enrichissement ; délai par requête porté de 20 à 30 secondes.
+- Un dépassement du délai SIMBAD est signalé explicitement, avec conservation
+  des résultats locaux et en cache.
+
+- Vérification : 259 tests automatisés réussis ; deux lots réels de 5 000 lignes
+  SIMBAD chargés sans doublon entre les lots, et reprise depuis l’interface vérifiée.
+
 ## AstroClocks v3.4.6 stable - 2026-10-15
 
 ### Ajouté

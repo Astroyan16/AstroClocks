@@ -9,6 +9,9 @@ LANGUAGE_NAMES = dict(LANGUAGE_OPTIONS)
 
 TRANSLATIONS = {
     "en": {
+        "search.load_more": "Load next 5,000",
+        "search.page_partial": "{count} SIMBAD rows received; search incomplete. Load the next batch to continue.",
+        "search.page_complete": "SIMBAD search complete: {count} rows received.",
         "deep_sky.online_enriched": "SIMBAD data retrieved for {count} local objects.",
         "deep_sky.enrichment_error": "SIMBAD enrichment unavailable: {error}",
         "result.target_information": "Magnitude: {magnitude}\nType: {object_type}{distance}\nData source: {source}",
@@ -523,6 +526,7 @@ TRANSLATIONS = {
         "deep_sky.online_offline": "Online catalog unavailable: offline.",
         "deep_sky.offline_cached": "Using {count} cached SIMBAD entries while offline.",
         "deep_sky.online_error": "SIMBAD/CDS unavailable: {error}",
+        "deep_sky.online_timeout": "SIMBAD query timed out; local and cached results retained. Try again later.",
         "deep_sky.online_loaded": "{count} SIMBAD objects loaded.",
         "deep_sky.simbad_cache_updated": "{count} SIMBAD entries kept in the local cache.",
         "deep_sky.cache_cleared": "SIMBAD deep-sky cache cleared.",
@@ -620,6 +624,9 @@ TRANSLATIONS = {
         ),
     },
     "fr": {
+        "search.load_more": "Charger les 5 000 suivants",
+        "search.page_partial": "{count} lignes SIMBAD reçues ; recherche incomplète. Chargez le lot suivant pour continuer.",
+        "search.page_complete": "Recherche SIMBAD complète : {count} lignes reçues.",
         "deep_sky.online_enriched": "Données SIMBAD récupérées pour {count} objets locaux.",
         "deep_sky.enrichment_error": "Enrichissement SIMBAD indisponible : {error}",
         "result.target_information": "Magnitude : {magnitude}\nType : {object_type}{distance}\nSource des données : {source}",
@@ -1138,6 +1145,7 @@ TRANSLATIONS = {
         "deep_sky.online_offline": "Catalogue en ligne indisponible : hors-ligne.",
         "deep_sky.offline_cached": "Utilisation de {count} entrées SIMBAD en cache hors-ligne.",
         "deep_sky.online_error": "SIMBAD/CDS indisponible : {error}",
+        "deep_sky.online_timeout": "Délai de réponse de la requête SIMBAD dépassé ; résultats locaux et en cache conservés. Réessayez plus tard.",
         "deep_sky.online_loaded": "{count} objets SIMBAD chargés.",
         "deep_sky.simbad_cache_updated": "{count} entrées SIMBAD conservées dans le cache local.",
         "deep_sky.cache_cleared": "Cache SIMBAD ciel profond vidé.",

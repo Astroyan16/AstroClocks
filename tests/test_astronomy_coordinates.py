@@ -14,8 +14,8 @@ from astroclocks.astronomy import (
 class CoordinateConversionTests(unittest.TestCase):
     def test_catalog_conversion_matches_individual_coordinates_and_preserves_metadata(self):
         stars = [("north", 18.615649, 38.783689, 0.03), ("south", 6.75248, -16.7161, -1.46)]
-        before = datetime.datetime.now(datetime.timezone.utc)
-        converted = convert_star_catalog_j2000_to_jnow(stars)
+        before = datetime.datetime(2026, 10, 15, tzinfo=datetime.timezone.utc)
+        converted = convert_star_catalog_j2000_to_jnow(stars, now_utc=before)
         for source, actual in zip(stars, converted):
             expected_ra, expected_dec = j2000_to_jnow_coordinates(source[1], source[2], now_utc=before)
             self.assertEqual(actual[0], source[0])

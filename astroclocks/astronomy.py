@@ -96,12 +96,12 @@ def convert_j2000_to_now(coords):
     return jnow[0].to_string("hmsdms")
 
 
-def convert_star_catalog_j2000_to_jnow(stars):
+def convert_star_catalog_j2000_to_jnow(stars, now_utc=None):
     """Convert an FK5 J2000 star catalog to the current FK5 equinox."""
     if not stars:
         return []
 
-    date_time = Time(Time(datetime.datetime.utcnow(), scale="utc").jd, format="jd", scale="utc")
+    date_time = Time(_coerce_utc_datetime(now_utc), scale="utc")
     fk5_j2000 = FK5(equinox=Time("J2000"))
     fk5_now = FK5(equinox=date_time)
     catalog = SkyCoord(

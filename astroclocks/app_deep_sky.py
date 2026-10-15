@@ -1,13 +1,14 @@
 """Deep-sky tab UI and search helpers for AstroClocks."""
 
-import datetime
+from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
 
 from astroclocks import app_dialogs
 from astroclocks.search_worker import start_search
-from astroclocks.astronomy import j2000_to_jnow_coordinates
+from astroclocks.simbad_paging import continuation, load_page_state, page_note, save_page_state
+from astroclocks.astronomy import convert_star_catalog_j2000_to_jnow
 from astroclocks.deep_sky_catalog import (
     DEEP_SKY_CATEGORY_ORDER,
     clear_cached_simbad_deep_sky_objects,
@@ -231,26 +232,32 @@ def _create_deep_sky_widgets(self):
     )
     self.deep_sky_online_button.grid(column=0, row=14, pady=(0, 6), sticky="ew")
 
+    self.deep_sky_more_button = self._build_button(
+        controls, self._tr("search.load_more"),
+        lambda: self.search_deep_sky_objects(allow_online=True, load_more=True),
+    )
+    self.deep_sky_more_button.grid(column=0, row=15, pady=(0, 6), sticky="ew")
+
     self.deep_sky_set_button = self._build_button(
         controls,
         self._tr("deep_sky.set_target"),
         self.set_selected_deep_sky_target,
     )
-    self.deep_sky_set_button.grid(column=0, row=15, pady=(0, 6), sticky="ew")
+    self.deep_sky_set_button.grid(column=0, row=16, pady=(0, 6), sticky="ew")
 
     self.deep_sky_clear_cache_button = self._build_button(
         controls,
         self._tr("button.clear_cache"),
         self.clear_deep_sky_cache,
     )
-    self.deep_sky_clear_cache_button.grid(column=0, row=16, pady=(0, 6), sticky="ew")
+    self.deep_sky_clear_cache_button.grid(column=0, row=17, pady=(0, 6), sticky="ew")
 
     self.deep_sky_reset_button = self._build_button(
         controls,
         self._tr("deep_sky.reset_filters"),
         self.reset_deep_sky_filters,
     )
-    self.deep_sky_reset_button.grid(column=0, row=17, pady=(0, 12), sticky="ew")
+    self.deep_sky_reset_button.grid(column=0, row=18, pady=(0, 12), sticky="ew")
 
     self.deep_sky_status_label = tk.Label(
         controls,
@@ -261,7 +268,7 @@ def _create_deep_sky_widgets(self):
         wraplength=220,
         anchor="nw",
     )
-    self.deep_sky_status_label.grid(column=0, row=18, sticky="ew")
+    self.deep_sky_status_label.grid(column=0, row=19, sticky="ew")
 
     results_frame = self._build_labelframe(
         "frame.deep_sky",
@@ -375,6 +382,11 @@ def _create_deep_sky_widgets(self):
 def _update_deep_sky_search_buttons_state(self):
     search_pending = bool(self.deep_sky_search_pending)
     online_available = self.network_online is not False
+    page_state = load_page_state("deep_sky")
+    more_button = getattr(self, "deep_sky_more_button", None)
+    if more_button is not None:
+        self._set_button_enabled(more_button, not search_pending and online_available
+                                 and bool(page_state and page_state["has_more"]))
     self._set_button_enabled(self.deep_sky_apply_button, not search_pending)
     self._set_button_enabled(
         self.deep_sky_online_button,
@@ -712,22 +724,18 @@ def _deep_sky_visibility_context(self, search_context=None):
     return self._double_visibility_context(search_context)
 
 def _deep_sky_objects_to_jnow(self, sky_objects):
-    normalized = []
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    for sky_object in sky_objects:
-        item = dict(sky_object)
-        if item.get("coordinate_frame") == "jnow":
-            normalized.append(item)
-            continue
-        ra_hours, declination = j2000_to_jnow_coordinates(
-            item["ra_hours"],
-            item["declination"],
-            now_utc=now_utc,
-        )
-        item["ra_hours"] = ra_hours
-        item["declination"] = declination
+    normalized = [dict(sky_object) for sky_object in sky_objects]
+    catalog = [
+        (index, item["ra_hours"], item["declination"], item.get("magnitude"))
+        for index, item in enumerate(normalized)
+        if item.get("coordinate_frame") != "jnow"
+    ]
+    # Astropy can precess the entire catalogue in one transform. Per-object
+    # transforms dominate the time spent filtering thousands of galaxies.
+    for index, ra_hours, declination, _magnitude in convert_star_catalog_j2000_to_jnow(catalog):
+        item = normalized[index]
+        item["ra_hours"], item["declination"] = ra_hours, declination
         item["coordinate_frame"] = "jnow"
-        normalized.append(item)
     return normalized
 
 def _deep_sky_visibility_metrics(self, sky_object, visibility_context):
@@ -895,7 +903,7 @@ def _render_deep_sky_results(self, sky_objects, total, note=None):
         status = f"{status}\n{note}"
     self.deep_sky_status_label.config(text=status)
 
-def search_deep_sky_objects(self, allow_online=False):
+def search_deep_sky_objects(self, allow_online=False, load_more=False):
     filters = self._read_deep_sky_filters()
     if filters is None:
         return
@@ -913,7 +921,7 @@ def search_deep_sky_objects(self, allow_online=False):
     self.deep_sky_status_label.config(text=self._tr(status_key))
     self._update_deep_sky_search_buttons_state()
     search_context = self._double_search_context()
-    start_search(self, "deep_sky", generation, filters, search_context, allow_online, offline_note)
+    start_search(self, "deep_sky", generation, filters, search_context, allow_online, offline_note, load_more)
 
 def _run_deep_sky_search(
     self,
@@ -933,27 +941,41 @@ def _run_deep_sky_search(
         simbad_cached_objects = None
         if allow_online:
             try:
-                remote_objects = fetch_simbad_deep_sky_objects(
-                    filters["category"],
-                    filters["min_magnitude"],
-                    filters["max_magnitude"],
-                    filters["use_magnitude"],
-                    preferred_band=filters["magnitude_band"],
-                )
-                local_candidates = [obj for obj in self._filter_deep_sky_list(catalog, filters, visibility_context)
-                                    if str(obj.get("source", "")).startswith("OpenNGC")]
-                try:
-                    details = fetch_simbad_deep_sky_details(local_candidates, filters["magnitude_band"])
+                previous_page = continuation("deep_sky", filters, getattr(self, "online_load_more", False))
+                # Discovery and enrichment use independent catalogue snapshots.
+                # Overlap their work without increasing per-request limits.
+                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="SIMBAD-discovery") as executor:
+                    discovery = executor.submit(
+                        fetch_simbad_deep_sky_objects,
+                        filters["category"],
+                        filters["min_magnitude"],
+                        filters["max_magnitude"],
+                        filters["use_magnitude"],
+                        preferred_band=filters["magnitude_band"],
+                        after=previous_page["cursor"] if previous_page else None,
+                        paged=True,
+                    )
+                    local_candidates = [] if previous_page else [
+                        obj for obj in self._filter_deep_sky_list(catalog, filters, visibility_context)
+                        if str(obj.get("source", "")).startswith("OpenNGC")]
+                    details = None
+                    try:
+                        details = fetch_simbad_deep_sky_details(local_candidates, filters["magnitude_band"])
+                    except Exception as exc:
+                        log_exception(LOGGER, "SIMBAD local object enrichment failed", exc)
+                        notes.append(self._tr("deep_sky.enrichment_error", error=str(exc)))
+                    remote_page = discovery.result()
+                    remote_objects = remote_page
+                if details is not None:
                     remote_objects = merge_deep_sky_objects(remote_objects, details,
                                                           preferred_band=filters["magnitude_band"])
                     notes.append(self._tr("deep_sky.online_enriched", count=len(details)))
-                except Exception as exc:
-                    log_exception(LOGGER, "SIMBAD local object enrichment failed", exc)
-                    notes.append(self._tr("deep_sky.enrichment_error", error=str(exc)))
                 simbad_cached_objects = merge_cached_simbad_deep_sky_objects(
                     remote_objects,
                     filters["category"],
+                    **({"append": True} if previous_page else {}),
                 )
+                save_page_state("deep_sky", filters, remote_page, previous_page)
                 catalog = merge_deep_sky_objects(
                     deep_sky_search_objects(
                         preferred_band=filters["magnitude_band"]
@@ -968,6 +990,9 @@ def _run_deep_sky_search(
                         count=len(simbad_cached_objects),
                     )
                 )
+            except TimeoutError as exc:
+                log_exception(LOGGER, "Deep-sky SIMBAD query timed out", exc)
+                notes.append(self._tr("deep_sky.online_timeout"))
             except Exception as exc:
                 log_exception(LOGGER, "Deep-sky online search failed", exc)
                 notes.append(self._tr("deep_sky.online_error", error=str(exc)))
@@ -998,6 +1023,9 @@ def _run_deep_sky_search(
         )
         if note:
             notes.append(note)
+        paging_note = page_note(self, "deep_sky", filters)
+        if paging_note:
+            notes.append(paging_note)
         self._queue_deep_sky_search_results(
             generation,
             {

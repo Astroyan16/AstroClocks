@@ -29,7 +29,7 @@ def calculate_search(generation, request, messages):
         messages.put(("error", generation, str(exc)))
 
 
-def start_search(app, kind, generation, filters, search_context, allow_online, offline_note):
+def start_search(app, kind, generation, filters, search_context, allow_online, offline_note, load_more=False):
     """Called on Tk; pass only values and poll an ordinary thread queue."""
     if not hasattr(app, "search_calculation_jobs"):
         app.search_calculation_jobs = {}
@@ -50,6 +50,7 @@ def start_search(app, kind, generation, filters, search_context, allow_online, o
         "kind": kind, "filters": dict(filters), "search_context": dict(search_context),
         "allow_online": allow_online, "offline_note": offline_note,
         "snapshot": {
+            "online_load_more": load_more,
             "language": app.language, "network_online": app.network_online,
             "star_search_cached_stars": list(app.star_search_cached_stars) if kind == "stars" else [],
             "deep_sky_simbad_cached_objects": list(app.deep_sky_simbad_cached_objects) if kind == "deep_sky" else [],

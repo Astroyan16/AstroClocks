@@ -10,6 +10,7 @@ from astroclocks.deep_sky_morphology import DEEP_SKY_MORPHOLOGY_BY_KEY
 from astroclocks.deep_sky_photometry import DEEP_SKY_PHOTOMETRY_BY_KEY
 from astroclocks.local_deep_sky_catalog import DEEP_SKY_OBJECTS, OPENNGC_ATTRIBUTION
 from astroclocks import settings as app_settings
+from astroclocks.simbad_paging import SimbadPage, after_condition, clear_page_state, cursor_joins
 
 
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
@@ -17,6 +18,7 @@ SIMBAD_CACHE_FILENAME = "SIMBAD_deep_sky_cache.json"
 SIMBAD_CACHE_VERSION = 1
 SIMBAD_ROW_LIMIT = 5000
 SIMBAD_PHOTOMETRY_BATCH_SIZE = 200
+SIMBAD_QUERY_TIMEOUT = 30
 
 DEEP_SKY_CATEGORY_ORDER = (
     "planetary_nebula",
@@ -444,11 +446,11 @@ def save_cached_simbad_deep_sky_objects(objects):
         )
 
 
-def merge_cached_simbad_deep_sky_objects(new_objects, category):
+def merge_cached_simbad_deep_sky_objects(new_objects, category, append=False):
     existing = [
         sky_object
         for sky_object in load_cached_simbad_deep_sky_objects()
-        if sky_object.get("category") != category
+        if append or sky_object.get("category") != category
     ]
     merged = merge_deep_sky_objects(existing, new_objects)
     save_cached_simbad_deep_sky_objects(merged)
@@ -456,6 +458,7 @@ def merge_cached_simbad_deep_sky_objects(new_objects, category):
 
 
 def clear_cached_simbad_deep_sky_objects():
+    clear_page_state("deep_sky")
     try:
         _simbad_cache_file().unlink()
         return True
@@ -471,7 +474,7 @@ def _simbad_type_condition(category):
     return f"basic.otype IN ({values})"
 
 
-def _simbad_query(category, row_limit):
+def _simbad_query(category, row_limit, after=None):
     columns = (
         "basic.main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, "
         "v.flux AS v_mag, v.qual AS v_qual, b.flux AS b_mag, b.qual AS b_qual"
@@ -485,6 +488,8 @@ def _simbad_query(category, row_limit):
         "FROM basic\n"
         f"{joins}\n"
         f"WHERE {_simbad_type_condition(category)}\n"
+        "  AND basic.ra IS NOT NULL AND basic.dec IS NOT NULL\n"
+        f"{after_condition(None, after)}\n"
         "ORDER BY main_id ASC"
     )
 
@@ -502,16 +507,22 @@ def _simbad_flux_columns_and_joins(bands):
     return ", ".join(columns), "\n".join(joins)
 
 
-def _simbad_band_query(category, min_magnitude, max_magnitude, band, row_limit):
-    band = str(band).upper()
+def _simbad_band_query(category, min_magnitude, max_magnitude, band, row_limit, after=None):
+    band = normalize_deep_sky_magnitude_band(band)
+    # allfluxes exposes one magnitude column per band. Filtering this view
+    # avoids a slow scan/join of the individual flux measurements for galaxies.
+    # Quality flags are retrieved by the subsequent targeted photometry query.
     return (
         f"SELECT TOP {int(row_limit)} "
-        "basic.main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, flux.flux, flux.qual\n"
-        "FROM flux\n"
+        f"basic.main_id AS main_id, basic.ra, basic.dec, basic.otype, basic.morph_type, flux.{band} AS mag\n"
+        "FROM allfluxes AS flux\n"
         "JOIN basic ON basic.oid = flux.oidref\n"
-        f"WHERE flux.filter = '{band}'\n"
-        f"  AND flux.flux BETWEEN {float(min_magnitude):g} AND {float(max_magnitude):g}\n"
-        f"  AND {_simbad_type_condition(category)}"
+        f"{cursor_joins(band, after, grouped=True)}"
+        f"WHERE flux.{band} BETWEEN {float(min_magnitude):g} AND {float(max_magnitude):g}\n"
+        f"  AND {_simbad_type_condition(category)}\n"
+        "  AND basic.ra IS NOT NULL AND basic.dec IS NOT NULL"
+        f"{after_condition(f'flux.{band}', after, reference=f'page_flux.{band}')}\n"
+        "ORDER BY mag ASC, main_id ASC"
     )
 
 
@@ -537,8 +548,10 @@ def _simbad_photometry_query(source_ids):
 
 
 def _fetch_simbad_json(query, timeout):
-    request_url = f"{SIMBAD_TAP_URL}?{urlencode({'request': 'doQuery', 'lang': 'adql', 'format': 'json', 'query': query})}"
-    with urlopen(request_url, timeout=timeout) as response:
+    data = urlencode({
+        "request": "doQuery", "lang": "adql", "format": "json", "query": query,
+    }).encode("utf-8")
+    with urlopen(SIMBAD_TAP_URL, data=data, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
@@ -621,7 +634,7 @@ def _fetch_simbad_photometry_by_id(source_ids, timeout):
     return photometry_by_id
 
 
-def fetch_simbad_deep_sky_details(objects, preferred_band="V", timeout=20):
+def fetch_simbad_deep_sky_details(objects, preferred_band="V", timeout=SIMBAD_QUERY_TIMEOUT):
     """Enrich specific local objects independently of the discovery row limit."""
     by_identifier = {}
     for obj in objects:
@@ -666,7 +679,9 @@ def fetch_simbad_deep_sky_objects(
     use_magnitude=True,
     preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND,
     row_limit=SIMBAD_ROW_LIMIT,
-    timeout=20,
+    timeout=SIMBAD_QUERY_TIMEOUT,
+    after=None,
+    paged=False,
 ):
     preferred_band = normalize_deep_sky_magnitude_band(preferred_band)
     if use_magnitude:
@@ -675,12 +690,14 @@ def fetch_simbad_deep_sky_objects(
             min_magnitude,
             max_magnitude,
             preferred_band,
-            row_limit,
+            row_limit + 1 if paged else row_limit,
+            after=after,
         )
         payload = _fetch_simbad_json(query, timeout)
         # SIMBAD photometry can refer to objects with no measured position.
         # Such entries cannot be used for pointing or visibility calculations.
-        initial_rows = [row for row in payload.get("data", [])
+        all_rows = payload.get("data", [])
+        initial_rows = [row for row in all_rows[:row_limit]
                         if row[1] is not None and row[2] is not None]
         photometry_by_id = _fetch_simbad_photometry_by_id(
             [str(row[0]) for row in initial_rows],
@@ -735,11 +752,13 @@ def fetch_simbad_deep_sky_objects(
                 str(sky_object.get("name", "")).casefold(),
             )
         )
-        return objects[:row_limit]
+        result = objects[:row_limit]
+        return SimbadPage(result, all_rows, row_limit, magnitude_index=5) if paged else result
 
-    payload = _fetch_simbad_json(_simbad_query(category, row_limit), timeout)
+    payload = _fetch_simbad_json(_simbad_query(category, row_limit + 1 if paged else row_limit, after), timeout)
+    all_rows = payload.get("data", [])
     objects = []
-    for row in payload.get("data", []):
+    for row in all_rows[:row_limit]:
         name, ra_degrees, dec_degrees, object_type, morphology, v_mag, v_qual, b_mag, b_qual = row
         if ra_degrees is None or dec_degrees is None:
             continue
@@ -772,7 +791,7 @@ def fetch_simbad_deep_sky_objects(
                 "source_id": str(name),
             }
         )
-    return objects
+    return SimbadPage(objects, all_rows, row_limit) if paged else objects
 
 
 def deep_sky_search_objects(preferred_band=app_settings.DEFAULT_DEEP_SKY_MAGNITUDE_BAND):

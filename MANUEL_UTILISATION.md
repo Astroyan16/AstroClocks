@@ -1,8 +1,8 @@
-# Manuel d’utilisation — AstroClocks 3.4.6
+# Manuel d’utilisation — AstroClocks 3.4.7
 
 Version française • 15 octobre 2026 • Windows
 
-Ce manuel décrit l’utilisation de la version 3.4.6. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
+Ce manuel décrit l’utilisation de la version 3.4.7. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
 
 ## Sommaire
 
@@ -21,7 +21,7 @@ Ce manuel décrit l’utilisation de la version 3.4.6. Les noms des boutons sont
 
 ## 1. Installation et première utilisation
 
-Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.6.exe`.
+Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.7.exe`.
 
 Lancez l’installeur et suivez ses étapes. La création d’un raccourci sur le Bureau et le lancement au démarrage de Windows sont facultatifs. Une installation existante peut être mise à jour avec le nouvel installeur.
 
@@ -145,6 +145,10 @@ La procédure générale est la suivante :
 3. Utilisez **Recherche en ligne** pour compléter les données si nécessaire.
 4. Sélectionnez une ligne puis cliquez sur **Définir comme cible**.
 5. Vérifiez la position dans l’onglet principal et la courbe de visibilité.
+
+Dans **Étoiles** et **Ciel profond**, la recherche SIMBAD reçoit les objets par lots de 5 000 lignes, classées par magnitude croissante dans la bande choisie, puis par identifiant en cas d’égalité. Le statut indique si la recherche est incomplète ; utilisez **Charger les 5 000 suivants** pour poursuivre sans recommencer. Les filtres de visibilité s’appliquent ensuite : un lot peut donc ajouter moins de 5 000 objets affichés. Les objets locaux et les données déjà en cache restent également présents dans le tableau.
+
+Les lots reçus et leur point de reprise sont conservés après fermeture. Une nouvelle **Recherche en ligne** recommence au premier lot ; modifier le type d’objet, la bande ou les limites de magnitude invalide la reprise précédente. **Vider le cache** supprime aussi ce point de reprise. Pour les objets sans filtre de magnitude, notamment les nébuleuses obscures, les lots sont ordonnés par identifiant.
 
 ### Étoiles doubles
 

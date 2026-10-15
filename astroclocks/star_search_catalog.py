@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from astroclocks.network import urlopen
 
 from astroclocks import settings as app_settings
+from astroclocks.simbad_paging import SimbadPage, after_condition, clear_page_state, cursor_joins
 
 
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
@@ -440,13 +441,13 @@ def save_cached_simbad_stars(stars):
     return serializable
 
 
-def merge_cached_simbad_stars(new_stars, spectral_type, magnitude_band):
+def merge_cached_simbad_stars(new_stars, spectral_type, magnitude_band, append=False):
     spectral_type = normalize_star_spectral_type(spectral_type)
     magnitude_band = normalize_star_magnitude_band(magnitude_band)
     existing = [
         star
         for star in load_cached_simbad_stars()
-        if star.get("spectral_class") != spectral_type
+        if append or star.get("spectral_class") != spectral_type
     ]
     merged = merge_star_search_objects(
         existing,
@@ -457,6 +458,7 @@ def merge_cached_simbad_stars(new_stars, spectral_type, magnitude_band):
 
 
 def clear_cached_simbad_stars():
+    clear_page_state("stars")
     try:
         _star_cache_file().unlink()
         return True
@@ -506,7 +508,7 @@ def local_star_search_objects():
     return list(_LOCAL_STAR_SEARCH_OBJECTS)
 
 
-def _simbad_star_query(spectral_type, min_magnitude, max_magnitude, band, row_limit):
+def _simbad_star_query(spectral_type, min_magnitude, max_magnitude, band, row_limit, after=None):
     spectral_type = normalize_star_spectral_type(spectral_type)
     band = normalize_star_magnitude_band(band)
     patterns = [
@@ -543,14 +545,16 @@ def _simbad_star_query(spectral_type, min_magnitude, max_magnitude, band, row_li
         )
     return (
         f"SELECT TOP {int(row_limit)} "
-        "basic.main_id, basic.ra, basic.dec, basic.otype, basic.sp_type, flux.flux AS mag, flux.qual AS mag_qual\n"
+        "basic.main_id AS main_id, basic.ra, basic.dec, basic.otype, basic.sp_type, flux.flux AS mag, flux.qual AS mag_qual\n"
         "FROM basic\n"
         "JOIN flux ON basic.oid = flux.oidref\n"
+        f"{cursor_joins(band, after)}"
         f"WHERE flux.filter = '{band}'\n"
         f"  AND flux.flux BETWEEN {float(min_magnitude):g} AND {float(max_magnitude):g}\n"
         f"  AND ({spectral_condition})\n"
         "  AND basic.ra IS NOT NULL\n"
         "  AND basic.dec IS NOT NULL\n"
+        f"{after_condition('flux.flux', after, reference='page_flux.flux')}\n"
         "ORDER BY mag ASC, main_id ASC"
     )
 
@@ -641,6 +645,8 @@ def fetch_simbad_stars(
     magnitude_band=app_settings.DEFAULT_STAR_SEARCH_MAGNITUDE_BAND,
     row_limit=SIMBAD_STAR_ROW_LIMIT,
     timeout=20,
+    after=None,
+    paged=False,
 ):
     spectral_type = normalize_star_spectral_type(spectral_type)
     magnitude_band = normalize_star_magnitude_band(magnitude_band)
@@ -649,10 +655,12 @@ def fetch_simbad_stars(
         min_magnitude,
         max_magnitude,
         magnitude_band,
-        row_limit,
+        row_limit + 1 if paged else row_limit,
+        after=after,
     )
     payload = _fetch_simbad_json(query, timeout)
-    initial_rows = payload.get("data", [])
+    all_rows = payload.get("data", [])
+    initial_rows = all_rows[:row_limit]
     photometry_by_id = _fetch_simbad_star_photometry_by_id(
         [str(row[0]) for row in initial_rows],
         timeout,
@@ -708,4 +716,5 @@ def fetch_simbad_stars(
                 "source_id": str(name),
             }
         )
-    return merge_star_search_objects(stars, preferred_band=magnitude_band)
+    result = merge_star_search_objects(stars, preferred_band=magnitude_band)
+    return SimbadPage(result, all_rows, row_limit, magnitude_index=5) if paged else result
