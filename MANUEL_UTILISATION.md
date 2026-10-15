@@ -1,8 +1,8 @@
-# Manuel d’utilisation — AstroClocks 3.4.4
+# Manuel d’utilisation — AstroClocks 3.4.6
 
-Version française • 14 octobre 2026 • Windows
+Version française • 15 octobre 2026 • Windows
 
-Ce manuel décrit l’utilisation de la version 3.4.4. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
+Ce manuel décrit l’utilisation de la version 3.4.6. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
 
 ## Sommaire
 
@@ -21,7 +21,7 @@ Ce manuel décrit l’utilisation de la version 3.4.4. Les noms des boutons sont
 
 ## 1. Installation et première utilisation
 
-Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.4.exe`.
+Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.6.exe`.
 
 Lancez l’installeur et suivez ses étapes. La création d’un raccourci sur le Bureau et le lancement au démarrage de Windows sont facultatifs. Une installation existante peut être mise à jour avec le nouvel installeur.
 
@@ -165,6 +165,8 @@ La recherche en ligne enrichit également les objets locaux correspondant aux fi
 ### Étoiles
 
 Choisissez un type spectral, une bande de magnitude et une plage de magnitudes. Les conditions de hauteur et de visibilité permettent d’adapter la liste à votre séance.
+
+Les classes proposées sont O, B, A, F, G, K et M, ainsi que L/T/Y (classes L, T et Y regroupées), WR (Wolf-Rayet : WN, WC, WO et types apparentés), D (naines blanches), C (étoiles carbonées, y compris les anciennes classes R/N) et S (y compris MS et SC). Les sous-naines de préfixe sd, esd ou usd sont incluses dans leur classe spectrale respective : sdB dans B, sdO dans O, etc. Les spectres composites sont classés selon leur composante principale, placée en premier.
 
 Les recherches en ligne utilisent SIMBAD/CDS. Les données enrichies peuvent être conservées en cache puis réutilisées hors ligne. Les commandes de vidage de cache suppriment ces données réutilisables.
 

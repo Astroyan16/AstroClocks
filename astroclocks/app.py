@@ -702,7 +702,10 @@ class AstroClocksApp:
             background=[("selected", self.accent)],
             foreground=[("selected", self.ebg)],
         )
-        for scrollbar_style in ("Dark.Vertical.TScrollbar", "Dark.Horizontal.TScrollbar"):
+        # Combobox popdowns create their own scrollbar with the default style.
+        for scrollbar_style in (
+            "Vertical.TScrollbar", "Dark.Vertical.TScrollbar", "Dark.Horizontal.TScrollbar",
+        ):
             style.configure(
                 scrollbar_style,
                 background=self.button_bg,

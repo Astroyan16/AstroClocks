@@ -3,6 +3,7 @@
 import json
 import math
 import re
+from functools import lru_cache
 from urllib.parse import urlencode
 from astroclocks.network import urlopen
 
@@ -16,24 +17,66 @@ SIMBAD_STAR_ROW_LIMIT = 5000
 SIMBAD_STAR_PHOTOMETRY_BATCH_SIZE = 200
 _LOCAL_STAR_SEARCH_OBJECTS = None
 
+# Prefixes are shared by the local classifier and the SIMBAD query. Order
+# matters: MS belongs to S, and must be recognized before the M sequence.
+_STAR_SPECTRAL_PREFIXES = (
+    ("WR", ("WN", "WC", "WO", "WR", "[WN", "[WC", "[WO", "[WR")),
+    ("D", ("DA", "DB", "DC", "DO", "DQ", "DZ", "DX")),
+    ("S", ("S", "MS")),
+    ("C", ("C", "R", "N")),
+    ("L/T/Y", ("L", "T", "Y")),
+    *((category, (category,)) for category in "OBAFGKM"),
+)
+
+
+@lru_cache(maxsize=None)
+def _star_spectral_patterns(category):
+    prefixes = next(
+        prefixes for name, prefixes in _STAR_SPECTRAL_PREFIXES if name == category
+    )
+    if category in ("S", "L/T/Y"):
+        # A bare S% also selects supernova spectra (SN...), while L% selects
+        # LBV. Require a spectral subtype or a recognized uncertainty suffix.
+        if category == "S":
+            prefixes = ("S", "MS", "SC")
+        return tuple(
+            pattern for prefix in prefixes
+            for pattern in (prefix, prefix + "?%", prefix + ":%",
+                            *(f"{prefix}{digit}%" for digit in range(10)),
+                            *((prefix + "e%", prefix + "wk%") if category == "S" else ()))
+        )
+    patterns = tuple(prefix + "%" for prefix in prefixes)
+    if category == "D":
+        patterns += ("D", "D?%", "D:%", *(f"D{digit}%" for digit in range(10)))
+    return patterns
+
+
+@lru_cache(maxsize=None)
+def _star_spectral_matcher(category):
+    if category == "L/T/Y":
+        return re.compile("(L|T|Y)([0-9?:].*)?")
+    if category == "S":
+        return re.compile("(S|MS|SC)([0-9?:].*|E.*|WK.*)?")
+    return re.compile("(?:" + "|".join(
+        re.escape(pattern.upper()).replace("%", ".*")
+        for pattern in _star_spectral_patterns(category)
+    ) + ")")
+
 
 def star_spectral_class(spectral_type, default=""):
     normalized = str(spectral_type or "").strip().upper()
     if normalized in app_settings.STAR_SEARCH_SPECTRAL_TYPES:
         return normalized
-    if normalized.startswith("SD") and len(normalized) > 2:
-        normalized = normalized[2:]
-    elif (
+    normalized = re.sub(r"^(?:USD|ESD|SD)", "", normalized)
+    if (
         normalized.startswith("G")
         and len(normalized) > 1
-        and normalized[1] in app_settings.STAR_SEARCH_SPECTRAL_TYPES
+        and normalized[1] in "OBAFGKMLTY"
     ):
         normalized = normalized[1:]
-    elif normalized.startswith("D") and len(normalized) > 1:
-        return default
-    for character in normalized:
-        if character in app_settings.STAR_SEARCH_SPECTRAL_TYPES:
-            return character
+    for category, _prefixes in _STAR_SPECTRAL_PREFIXES:
+        if _star_spectral_matcher(category).fullmatch(normalized):
+            return category
     return default
 
 
@@ -171,8 +214,7 @@ def _normalize_star_record(star, default_source="SIMBAD/CDS"):
     normalized["photometry_flags"] = photometry_flags
     normalized["spectral_type"] = str(normalized.get("spectral_type", "")).strip()
     normalized["spectral_class"] = star_spectral_class(
-        normalized.get("spectral_class")
-        or normalized["spectral_type"],
+        normalized["spectral_type"] or normalized.get("spectral_class"),
     )
     normalized["source"] = str(normalized.get("source") or default_source)
     normalized["source_id"] = str(normalized.get("source_id") or normalized["name"])
@@ -467,6 +509,38 @@ def local_star_search_objects():
 def _simbad_star_query(spectral_type, min_magnitude, max_magnitude, band, row_limit):
     spectral_type = normalize_star_spectral_type(spectral_type)
     band = normalize_star_magnitude_band(band)
+    patterns = [
+        f"{modifier}{pattern}"
+        for modifier in ("", "sd", "esd", "usd", "SD", "ESD", "USD")
+        for pattern in _star_spectral_patterns(spectral_type)
+    ]
+    spectral_condition = " OR ".join(
+        f"basic.sp_type LIKE '{pattern}'" for pattern in patterns
+    )
+    if spectral_type in ("S", "L/T/Y"):
+        # Keep prefix LIKE predicates so SIMBAD can narrow the candidate set
+        # before applying its regexp function. Expanding every subtype digit
+        # into OR clauses makes the flux join exceed the search timeout.
+        prefixes = ("S", "MS", "SC") if spectral_type == "S" else ("L", "T", "Y")
+        coarse_condition = " OR ".join(
+            f"basic.sp_type LIKE '{modifier}{prefix}%'"
+            for modifier in ("", "sd", "esd", "usd", "SD", "ESD", "USD")
+            for prefix in prefixes
+        )
+        pattern = (
+            "(?i)^(sd|esd|usd)?" + _star_spectral_matcher(spectral_type).pattern + "$"
+        )
+        spectral_condition = (
+            f"({coarse_condition}) AND 1 = regexp(basic.sp_type, '{pattern}')"
+        )
+    if spectral_type == "M":
+        spectral_condition = (
+            f"({spectral_condition})"
+            + "".join(
+                f" AND basic.sp_type NOT LIKE '{modifier}MS%'"
+                for modifier in ("", "sd", "esd", "usd", "SD", "ESD", "USD")
+            )
+        )
     return (
         f"SELECT TOP {int(row_limit)} "
         "basic.main_id, basic.ra, basic.dec, basic.otype, basic.sp_type, flux.flux AS mag, flux.qual AS mag_qual\n"
@@ -474,7 +548,7 @@ def _simbad_star_query(spectral_type, min_magnitude, max_magnitude, band, row_li
         "JOIN flux ON basic.oid = flux.oidref\n"
         f"WHERE flux.filter = '{band}'\n"
         f"  AND flux.flux BETWEEN {float(min_magnitude):g} AND {float(max_magnitude):g}\n"
-        f"  AND basic.sp_type LIKE '{spectral_type}%'\n"
+        f"  AND ({spectral_condition})\n"
         "  AND basic.ra IS NOT NULL\n"
         "  AND basic.dec IS NOT NULL\n"
         "ORDER BY mag ASC, main_id ASC"
@@ -516,8 +590,11 @@ def _simbad_star_photometry_query(source_ids):
 
 
 def _fetch_simbad_json(query, timeout):
-    request_url = f"{SIMBAD_TAP_URL}?{urlencode({'request': 'doQuery', 'lang': 'adql', 'format': 'json', 'query': query})}"
-    with urlopen(request_url, timeout=timeout) as response:
+    # Combined spectral families can exceed the server's URL length limit.
+    data = urlencode({
+        "request": "doQuery", "lang": "adql", "format": "json", "query": query,
+    }).encode("utf-8")
+    with urlopen(SIMBAD_TAP_URL, data=data, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 

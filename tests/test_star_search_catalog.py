@@ -1,10 +1,17 @@
 import datetime
+import io
+import re
+import sqlite3
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs
 
 from astroclocks.app import AstroClocksApp
 from astroclocks.settings import AppSettings, normalize_settings
 from astroclocks.star_search_catalog import (
+    _normalize_cached_star,
+    _fetch_simbad_json,
+    _simbad_star_query,
     fetch_simbad_stars,
     local_star_search_objects,
     merge_star_search_objects,
@@ -21,7 +28,7 @@ class StarSearchCatalogTests(unittest.TestCase):
         self.assertEqual(normalize_star_magnitude_band("x"), "V")
         self.assertEqual(star_spectral_class("gG9"), "G")
         self.assertEqual(star_spectral_class("sdF8"), "F")
-        self.assertEqual(star_spectral_class("DA4"), "")
+        self.assertEqual(star_spectral_class("DA4"), "D")
         settings = normalize_settings(
             AppSettings(
                 star_search_spectral_type="x",
@@ -64,8 +71,100 @@ class StarSearchCatalogTests(unittest.TestCase):
         self.assertEqual(stars[0]["magnitude_flag"], "E")
         self.assertIn("flux.filter = 'V'", queries[0])
         self.assertIn("basic.sp_type LIKE 'G%'", queries[0])
+        self.assertIn("basic.sp_type LIKE 'sdG%'", queries[0])
         self.assertIn("ORDER BY mag ASC, main_id ASC", queries[0])
         self.assertIn("LEFT JOIN flux AS flux_0", queries[1])
+
+    def test_extended_spectral_families_and_subdwarfs(self):
+        examples = {
+            "WN6(h)-s": "WR", "WC8+O7.5III": "WR", "WO2": "WR",
+            "[WC10]": "WR", "DA2.9": "D", "DBAZ3": "D", "DQ6": "D",
+            "D3": "D", "C-N5": "C", "C-R3": "C", "N5": "C", "R2": "C",
+            "S6-9/1-2e": "S", "MS5": "S", "SC7": "S",
+            "L5": "L/T/Y", "T8": "L/T/Y", "Y2": "L/T/Y", "sdO6": "O",
+            "sdB": "B", "esdM5": "M", "usdL3": "L/T/Y",
+            "M3III+S": "M", "G2V+DA": "G",
+        }
+        for value, expected in examples.items():
+            with self.subTest(value=value):
+                self.assertEqual(star_spectral_class(value), expected)
+                self.assertEqual(normalize_star_spectral_type(value), expected)
+        for category in ("WR", "D", "C", "S", "L/T/Y"):
+            with self.subTest(category=category):
+                settings = normalize_settings(AppSettings(star_search_spectral_type=category))
+                self.assertEqual(settings.star_search_spectral_type, category)
+        for value in ("unknown", "SNIa-norm", "LBV", "Transient"):
+            self.assertEqual(star_spectral_class(value), "")
+
+    def test_simbad_extended_families_use_matching_prefixes(self):
+        expected_patterns = {
+            "WR": ("WN%", "WC%", "WO%", "[WC%"), "D": ("DA%", "DB%", "DQ%", "D3%"),
+            "C": ("C%", "R%", "N%"), "S": ("S%", "MS%", "SC%"),
+            "L/T/Y": ("L%", "T%", "Y%", "sdL%", "sdT%", "sdY%"),
+            "B": ("B%", "sdB%"),
+            "O": ("O%", "SDO%"),
+        }
+        for category, patterns in expected_patterns.items():
+            query = _simbad_star_query(category, -2, 12, "V", 100)
+            with self.subTest(category=category):
+                for pattern in patterns:
+                    self.assertIn(f"basic.sp_type LIKE '{pattern}'", query)
+                self.assertIn("flux.flux BETWEEN -2 AND 12", query)
+        self.assertIn("AND basic.sp_type NOT LIKE 'MS%'",
+                      _simbad_star_query("M", -2, 12, "V", 100))
+
+    def test_query_selects_families_without_supernovae_or_lbv(self):
+        examples = (
+            ("WN6+O5", "WR"), ("[WC10]", "WR"), ("DA2.9", "D"),
+            ("C-N5", "C"), ("S6e", "S"), ("MS5", "S"), ("SC7", "S"),
+            ("M3III", "M"), ("sdM5", "M"), ("sdB2", "B"),
+            ("L5", "L/T/Y"), ("T8", "L/T/Y"), ("sdY2", "L/T/Y"),
+            ("L?", "L/T/Y"), ("Swk", "S"),
+            ("SNIa-norm", ""), ("LBV", ""),
+        )
+        with sqlite3.connect(":memory:") as database:
+            database.create_function(
+                "regexp", 2, lambda value, pattern: int(re.search(pattern, value or "") is not None)
+            )
+            database.execute("CREATE TABLE basic (oid, main_id, ra, dec, otype, sp_type)")
+            database.execute("CREATE TABLE flux (oidref, filter, flux, qual)")
+            for index, (spectral, _category) in enumerate(examples):
+                database.execute("INSERT INTO basic VALUES (?, ?, 15, 30, '*', ?)",
+                                 (index, spectral, spectral))
+                database.execute("INSERT INTO flux VALUES (?, 'V', 8, 'C')", (index,))
+            for category in ("WR", "D", "C", "S", "M", "B", "L/T/Y"):
+                query = _simbad_star_query(category, -2, 12, "V", 100)
+                query = query.replace("SELECT TOP 100", "SELECT", 1)
+                names = {row[0] for row in database.execute(query)}
+                with self.subTest(category=category):
+                    self.assertEqual(names, {s for s, c in examples if c == category})
+
+    def test_combined_family_queries_keep_compact_indexable_prefix_filters(self):
+        for category in ("S", "L/T/Y"):
+            with self.subTest(category=category):
+                query = _simbad_star_query(category, -2, 18, "V", 5000)
+                self.assertLessEqual(query.count(" LIKE "), 21)
+                self.assertIn("1 = regexp(basic.sp_type,", query)
+                self.assertLess(len(query), 2000)
+                self.assertNotIn("\\", query)
+
+    def test_cache_reclassifies_previously_misidentified_spectra(self):
+        star = _normalize_cached_star({
+            "name": "WR example", "ra_hours": 1, "declination": 2,
+            "spectral_type": "WC8+O7", "spectral_class": "O",
+            "magnitude": 8, "magnitude_band": "V",
+        })
+        self.assertEqual(star["spectral_class"], "WR")
+
+    def test_long_spectral_queries_use_post(self):
+        query = _simbad_star_query("L/T/Y", -2, 12, "V", 100)
+        with patch("astroclocks.star_search_catalog.urlopen",
+                   return_value=io.BytesIO(b'{"data": []}')) as open_url:
+            self.assertEqual(_fetch_simbad_json(query, 20), {"data": []})
+        self.assertNotIn("?", open_url.call_args.args[0])
+        form = parse_qs(open_url.call_args.kwargs["data"].decode("utf-8"))
+        self.assertEqual(form["query"], [query])
+        self.assertEqual(open_url.call_args.kwargs["timeout"], 20)
 
     def test_local_star_search_uses_enriched_sky_catalog(self):
         stars = local_star_search_objects()

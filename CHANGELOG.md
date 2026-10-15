@@ -1,5 +1,33 @@
 # Changelog
 
+## AstroClocks v3.4.6 stable - 2026-10-15
+
+### Ajouté
+
+- Recherche d’étoiles : ajout des catégories WR, D, C, S et L/T/Y ; inclusion
+  des sous-naines sd/esd/usd dans leur classe respective en ligne et hors ligne.
+- Classement spectral fondé sur le préfixe principal, avec prise en charge
+  des types MS/SC, R/N et des spectres composites ; reclassement des données
+  du cache existant à partir de leur type spectral.
+
+### Corrigé
+
+- Requêtes SIMBAD S et L/T/Y accélérées par présélection des préfixes et
+  validation spectrale compacte, pour éviter les dépassements du délai de réponse.
+- Requêtes SIMBAD transmises en POST pour prendre en charge les filtres longs.
+- Barre de défilement des listes déroulantes harmonisée avec le thème sombre,
+  y compris au survol et au clic.
+
+### Vérification
+
+- 250 tests automatisés réussis.
+- Recherches SIMBAD S et L/T/Y vérifiées en ligne, en bandes V et K.
+- Exécutable Windows contrôlé : démarrage, carte du ciel, catalogue d’étoiles,
+  nouvelles catégories, barre de défilement sombre et fenêtre À propos 3.4.6.
+- Exécutable et installateur Windows reconstruits ; cohérence de version et
+  présence du moteur HTTPS natif Windows vérifiées.
+- Manuel français PDF 3.4.6 régénéré et mise en page contrôlée.
+
 ## AstroClocks v3.4.5 stable - 2026-10-14
 
 ### Corrigé

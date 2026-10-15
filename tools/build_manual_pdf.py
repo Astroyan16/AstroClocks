@@ -21,7 +21,7 @@ from reportlab.platypus.tableofcontents import TableOfContents
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "output/pdf/Manuel_AstroClocks_3.4.4_FR.pdf"
+OUTPUT = ROOT / "output/pdf/Manuel_AstroClocks_3.4.6_FR.pdf"
 NAVY = colors.HexColor("#152B3C")
 BLUE = colors.HexColor("#176482")
 GOLD = colors.HexColor("#C19030")
@@ -68,7 +68,7 @@ def decorate(canvas, doc):
         canvas.drawString(48, HEIGHT - 32, "ASTROCLOCKS")
         canvas.setFont("Manual", 8)
         canvas.setFillColor(MUTED)
-        canvas.drawRightString(WIDTH - 48, HEIGHT - 32, "Manuel d’utilisation | 3.4.4")
+        canvas.drawRightString(WIDTH - 48, HEIGHT - 32, "Manuel d’utilisation | 3.4.6")
         canvas.setStrokeColor(colors.HexColor("#DDE6EC"))
         canvas.line(48, HEIGHT - 42, WIDTH - 48, HEIGHT - 42)
         canvas.line(48, 40, WIDTH - 48, 40)
@@ -109,7 +109,7 @@ def build():
                           spaceAfter=12)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     doc = ManualDoc(str(OUTPUT), pagesize=A4, leftMargin=48, rightMargin=48,
-                    topMargin=62, bottomMargin=58, title="AstroClocks 3.4.4 - Manuel d’utilisation",
+                    topMargin=62, bottomMargin=58, title="AstroClocks 3.4.6 - Manuel d’utilisation",
                     author="AstroClocks", subject="Guide utilisateur français avec ASCOM en dernière partie")
     frame = Frame(48, 58, WIDTH - 96, HEIGHT - 120, leftPadding=0, rightPadding=0,
                   topPadding=0, bottomPadding=0)
@@ -119,7 +119,7 @@ def build():
         textColor=NAVY, leftIndent=24)),
         Spacer(1, 14), Paragraph("Manuel d’utilisation", ParagraphStyle(
             "CoverTitle", parent=body, fontSize=23, leading=30, leftIndent=24)),
-        Spacer(1, 20), Paragraph("Version 3.4.4 • Windows • Français", ParagraphStyle(
+        Spacer(1, 20), Paragraph("Version 3.4.6 • Windows • Français", ParagraphStyle(
             "CoverVersion", parent=body, fontSize=12, leading=18, leftIndent=24,
             textColor=BLUE)),
         Spacer(1, 70), Paragraph("Préparer une observation<br/>Lire les coordonnées de pointage<br/>"
@@ -127,7 +127,7 @@ def build():
                 "CoverTopics", parent=body, fontSize=14, leading=25)),
         Spacer(1, 30), Paragraph("Les fonctions optionnelles de connexion et de commande ASCOM "
             "sont regroupées en dernière partie.", body), Spacer(1, 18),
-        Paragraph("Édition du 14 octobre 2026", body), PageBreak(),
+        Paragraph("Édition du 15 octobre 2026", body), PageBreak(),
         Paragraph("Sommaire", chapter), Paragraph(
             "Cliquez sur un titre pour accéder à la section. Les signets du lecteur PDF "
             "permettent également de naviguer entre les chapitres.", body), Spacer(1, 15)]
@@ -137,6 +137,7 @@ def build():
     story.extend([toc])
     lines = (ROOT / "MANUEL_UTILISATION.md").read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("## 1."))
+    regular_body, regular_subhead, regular_bullet = body, subhead, bullet
     i = start
     while i < len(lines):
         line = lines[i]
@@ -144,8 +145,10 @@ def build():
             i += 1
             continue
         if line.startswith("## "):
-            if line.startswith("## 12."):
+            if line.startswith(("## 6.", "## 12.")):
                 body, subhead, bullet = compact_body, compact_subhead, compact_bullet
+            else:
+                body, subhead, bullet = regular_body, regular_subhead, regular_bullet
             story.append(PageBreak())
             p = Paragraph(inline(line[3:]), chapter)
             p.chapter_key = "chapter-" + line[3:].split(".")[0]
