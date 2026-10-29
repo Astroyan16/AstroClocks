@@ -19,7 +19,7 @@ from astroclocks.secure_store import load_meteofrance_application_id
 
 METAR_STATIONS_CACHE_URL = "https://aviationweather.gov/data/cache/stations.cache.json.gz"
 METAR_DATA_URL = "https://aviationweather.gov/api/data/metar"
-METEOFRANCE_DPOBS_BASE_URL = "https://public-api.meteofrance.fr/public/DPObs"
+METEOFRANCE_DPOBS_BASE_URL = "https://public-api.meteofrance.fr/public/DPObs/v2"
 METEOFRANCE_DPOBS_API_URL = f"{METEOFRANCE_DPOBS_BASE_URL}/station/infrahoraire-6m"
 METEOFRANCE_STATIONS_URL = f"{METEOFRANCE_DPOBS_BASE_URL}/liste-stations"
 METEOFRANCE_DPCLIM_BASE_URL = "https://public-api.meteofrance.fr/public/DPClim/v1"

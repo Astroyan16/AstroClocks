@@ -2,6 +2,8 @@
 
 ## AstroClocks v3.4.8 stable - 2026-10-29
 
+- Requêtes d’observation et contrôle de disponibilité Météo-France explicitement
+  migrés vers DPObs V2, en prévision de l’arrêt de la V1.
 - Configuration Météo-France rangée dans « Stations météo → Météo-France
   (facultatif) », accessible sans activer la réfraction, avec lien vers le portail
   de l’API d’observation.

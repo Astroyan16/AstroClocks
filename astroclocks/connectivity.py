@@ -16,7 +16,7 @@ SERVICES = {
     "imcce": ("IMCCE / Miriade", ("https://ssp.imcce.fr/",)),
     "metar": ("METAR", ("https://aviationweather.gov/",)),
     # The API root closes connections; probe the endpoint used for station lookup.
-    "meteofrance": ("Météo-France API", ("https://public-api.meteofrance.fr/public/DPObs/liste-stations?format=csv",)),
+    "meteofrance": ("Météo-France API", ("https://public-api.meteofrance.fr/public/DPObs/v2/liste-stations?format=csv",)),
     "updates": ("GitHub", ("https://api.github.com/",)),
 }
 INTERNET_URLS = ("https://www.microsoft.com/", "https://www.cloudflare.com/")

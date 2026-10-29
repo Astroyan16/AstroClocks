@@ -174,9 +174,11 @@ class WeatherTests(unittest.TestCase):
         )
 
         with patch("astroclocks.weather.load_meteofrance_application_id", return_value="api-key"):
-            with patch("astroclocks.weather._read_text_request", return_value=csv_text):
+            with patch("astroclocks.weather._read_text_request", return_value=csv_text) as read_text:
                 stations = weather.load_meteofrance_stations()
 
+        self.assertEqual(read_text.call_args.args[0].full_url,
+                         "https://public-api.meteofrance.fr/public/DPObs/v2/liste-stations?format=csv")
         self.assertEqual([station["station_id"] for station in stations], ["75114001", "78621002"])
         self.assertEqual(stations[0]["station_name"], "PARIS-MONTSOURIS PARC")
         self.assertAlmostEqual(stations[1]["longitude"], 2.0093)
@@ -248,9 +250,11 @@ class WeatherTests(unittest.TestCase):
         }
 
         with patch("astroclocks.weather.load_meteofrance_application_id", return_value="api-key"):
-            with patch("astroclocks.weather._read_json_request", return_value=payload):
+            with patch("astroclocks.weather._read_json_request", return_value=payload) as read_json:
                 result = weather.fetch_meteofrance_pressure_for_station(station)
 
+        self.assertEqual(read_json.call_args.args[0].full_url,
+                         "https://public-api.meteofrance.fr/public/DPObs/v2/station/infrahoraire-6m?id_station=75114001&format=json")
         self.assertEqual(result["source"], "METEOFRANCE")
         self.assertEqual(result["station_id"], "75114001")
         self.assertAlmostEqual(result["pressure_hpa"], 1014.3)

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
-from astroclocks.connectivity import check_services, probe_service, probe_url, service_online
+from astroclocks.connectivity import SERVICES, check_services, probe_service, probe_url, service_online
 
 
 class ServiceProbeTests(unittest.TestCase):
@@ -27,13 +27,13 @@ class ServiceProbeTests(unittest.TestCase):
         probe.assert_called_once_with(("metar-url",))
 
     def test_configured_optional_api_is_probed(self):
-        with patch("astroclocks.connectivity.SERVICES", {"meteofrance": ("MF", ("mf-url",))}), patch(
+        with patch("astroclocks.connectivity.SERVICES", {"meteofrance": SERVICES["meteofrance"]}), patch(
             "astroclocks.connectivity.probe_service", return_value=(False, "HTTP 503", True)
         ) as probe:
             online, results = check_services()
         self.assertTrue(online)
         self.assertFalse(results["meteofrance"][0])
-        probe.assert_called_once_with(("mf-url",))
+        probe.assert_called_once_with(("https://public-api.meteofrance.fr/public/DPObs/v2/liste-stations?format=csv",))
 
     def test_tls_failure_is_unavailable_without_unverified_retry(self):
         with patch("astroclocks.connectivity.urlopen", side_effect=ssl.SSLCertVerificationError("invalid")) as open_url:
