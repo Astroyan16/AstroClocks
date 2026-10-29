@@ -71,6 +71,7 @@ from astroclocks.weather import (
 
 REFRACTION_STATION_CACHE_SECONDS = 600
 REFRACTION_STATION_RESULT_LIMIT = 5
+METEOFRANCE_OBSERVATION_PORTAL_URL = "https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesObservation"
 
 
 def _apply_app_icon(window, default=False):
@@ -785,8 +786,10 @@ def open_meteofrance_api_dialog(app, parent=None):
     body.grid(column=0, row=0, sticky="nsew")
     body.grid_columnconfigure(0, weight=1)
 
+    introduction = tk.Frame(body, bg=app.gbg)
+    introduction.grid(column=0, row=0, sticky="ew")
     tk.Label(
-        body,
+        introduction,
         text=app._tr("settings.meteofrance_api_help"),
         bg=app.gbg,
         fg=app.text,
@@ -795,6 +798,10 @@ def open_meteofrance_api_dialog(app, parent=None):
         wraplength=520,
         anchor="w",
     ).grid(column=0, row=0, sticky="ew")
+    app._build_button(
+        introduction, app._tr("settings.meteofrance_api_portal"),
+        lambda: webbrowser.open_new_tab(METEOFRANCE_OBSERVATION_PORTAL_URL),
+    ).grid(column=0, row=1, pady=(8, 0), sticky="w")
 
     key_var = tk.StringVar(value="")
     try:
@@ -1612,16 +1619,19 @@ def open_settings_dialog(app):
         wraplength=420,
     )
     refraction_weather_status.grid(column=0, row=4, columnspan=2, pady=(5, 0), sticky="ew")
+    weather_api_section = build_section(
+        weather_section, 5, app._tr("settings.meteofrance_optional"), collapsible=True
+    )
     tk.Label(
-        atmosphere_advanced, text=app._tr("settings.weather_optional_help"),
+        weather_api_section, text=app._tr("settings.weather_optional_help"),
         bg=app.gbg, fg=app.muted, justify="left", wraplength=620,
         font=Font(family="Segoe UI", size=9),
-    ).grid(column=0, row=2, columnspan=2, pady=(8, 0), sticky="w")
+    ).grid(column=0, row=0, columnspan=2, pady=(8, 0), sticky="w")
     refraction_api_button = app._build_button(
-        atmosphere_advanced, app._tr("settings.meteofrance_api_configure"),
+        weather_api_section, app._tr("settings.meteofrance_api_configure"),
         lambda: open_meteofrance_api_dialog(app, parent=dialog),
     )
-    refraction_api_button.grid(column=0, row=3, columnspan=2, pady=(5, 0), sticky="w")
+    refraction_api_button.grid(column=0, row=1, columnspan=2, pady=(5, 0), sticky="w")
     refraction_activity = {"busy": False}
 
     def sync_refraction_parameter_state(_event=None):
@@ -1667,9 +1677,6 @@ def open_settings_dialog(app):
         has_stations = bool(refraction_station_choices)
         refraction_refresh_button.config(
             state=tk.NORMAL if controls_enabled and has_stations else tk.DISABLED
-        )
-        refraction_api_button.config(
-            state=tk.NORMAL if refraction_enabled else tk.DISABLED
         )
         refraction_station_combo.config(
             state="readonly" if controls_enabled and has_stations else "disabled"

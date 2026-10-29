@@ -2,6 +2,9 @@
 
 ## AstroClocks v3.4.8 stable - 2026-10-29
 
+- Configuration Météo-France rangée dans « Stations météo → Météo-France
+  (facultatif) », accessible sans activer la réfraction, avec lien vers le portail
+  de l’API d’observation.
 - Installeur Windows corrigé : inclusion du fichier de politique TLS requis
   par le Python de compilation, pour rétablir les connexions HTTPS de l’exécutable.
 - Configuration Météo-France facultative dans les réglages météo avancés ;

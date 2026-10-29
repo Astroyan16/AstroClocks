@@ -221,13 +221,13 @@ La température et l’humidité sont récupérées lorsqu’elles sont disponib
 
 ### Configurer Météo-France
 
-Les rapports METAR sont utilisés par défaut, sans clé API. Météo-France est un complément facultatif pour inclure davantage de stations. Dans **Paramètres → Réfraction et météo → Paramètres avancés**, cliquez sur **Configurer l’API Météo-France**, collez votre clé API autorisée pour **DPObs**, puis utilisez **Tester** et **Enregistrer**.
+Météo-France est facultatif ; METAR fonctionne sans clé. Ouvrez **Paramètres → Réfraction et météo → Stations météo → Météo-France (facultatif)** puis **Configurer l’API Météo-France**. Cliquez sur **Ouvrir le portail de l’API d’observation** pour [configurer votre accès](https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesObservation). Collez votre clé **DPObs**, puis utilisez **Tester** et **Enregistrer**.
 
 Sans clé, Météo-France apparaît comme **Non configuré** dans la liste des services en ligne ; aucun contrôle de ce service ni aucune alerte orange ne sont déclenchés.
 
 Une clé pour les seules données climatologiques ne donne pas accès aux observations actuelles de DPObs. Le test distingue ce cas. Le dialogue permet aussi de supprimer la clé enregistrée.
 
-La clé est stockée chiffrée pour l’utilisateur Windows courant. Sur un autre PC ou avec un autre compte, configurez-la à nouveau. Ne l’insérez pas dans un fichier destiné à être partagé avec votre manuel ou vos captures.
+La clé est chiffrée pour l’utilisateur Windows courant. Reconfigurez-la sur un autre PC ou compte et ne la partagez pas dans un document ou une capture.
 
 ### Horodatage et cache
 

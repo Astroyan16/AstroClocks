@@ -214,6 +214,8 @@ TRANSLATIONS = {
         ),
         "settings.refraction_weather_error": "Weather lookup failed: {error}",
         "settings.meteofrance_api_title": "Météo-France API key",
+        "settings.meteofrance_optional": "Météo-France (optional)",
+        "settings.meteofrance_api_portal": "Open the observation API portal",
         "settings.meteofrance_api_help": (
             "Optional: METAR already works without a key. "
             "Paste the API key/token from your Météo-France API subscription. "
@@ -842,6 +844,8 @@ TRANSLATIONS = {
         ),
         "settings.refraction_weather_error": "Récupération météo impossible : {error}",
         "settings.meteofrance_api_title": "Clé API Météo-France",
+        "settings.meteofrance_optional": "Météo-France (facultatif)",
+        "settings.meteofrance_api_portal": "Ouvrir le portail de l’API d’observation",
         "settings.meteofrance_api_help": (
             "Facultatif : METAR fonctionne déjà sans clé. "
             "Collez la clé API / le token de votre abonnement API Météo-France. "
