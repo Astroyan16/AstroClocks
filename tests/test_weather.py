@@ -2,11 +2,20 @@ import datetime
 import unittest
 import datetime
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
+from io import BytesIO
 
 from astroclocks import weather
 
 
 class WeatherTests(unittest.TestCase):
+    def test_optional_meteofrance_without_key_does_not_contact_server(self):
+        with patch.object(weather, "load_meteofrance_application_id", return_value=""), patch.object(
+            weather, "urlopen"
+        ) as open_url:
+            self.assertEqual(weather.nearest_meteofrance_stations(48.8, 2.2), [])
+        open_url.assert_not_called()
+
     def setUp(self):
         weather._METEOFRANCE_STATIONS_CACHE.clear()
         weather._METEOFRANCE_STATIONS_CACHE.update(
@@ -286,6 +295,36 @@ class WeatherTests(unittest.TestCase):
 
         self.assertEqual(headers["apikey"], "api-key")
         self.assertEqual(headers["accept"], "application/json")
+
+    def test_api_test_missing_token_does_not_contact_server(self):
+        with patch.object(weather, "load_meteofrance_application_id", return_value=""), patch.object(weather, "urlopen") as open_url:
+            result = weather.test_meteofrance_api_key()
+        self.assertEqual(result["status"], "missing_token")
+        open_url.assert_not_called()
+
+    def test_api_test_transport_failure_does_not_reject_token(self):
+        for error in (URLError("DNS failure"), TimeoutError("timeout")):
+            with self.subTest(error=error), patch.object(weather, "urlopen", side_effect=error) as open_url:
+                result = weather.test_meteofrance_api_key(api_key="test-token")
+            self.assertEqual(result["status"], "connection_unavailable")
+            self.assertFalse(result["observations_available"])
+            open_url.assert_called_once()
+
+    def test_api_test_http_failures_are_distinct_from_transport_failures(self):
+        for code, status in ((401, "access_denied"), (403, "access_denied"), (503, "service_unavailable"), (404, "response_error")):
+            def fail_request(*args, **kwargs):
+                raise HTTPError("https://example.org", code, "failure", {}, BytesIO(b"failure"))
+
+            with self.subTest(code=code), patch.object(weather, "urlopen", side_effect=fail_request):
+                result = weather.test_meteofrance_api_key(api_key="test-token")
+            self.assertEqual(result["status"], status)
+            self.assertIn(str(code), result["observation_error"])
+
+    def test_api_test_success_and_empty_response(self):
+        for stations, status in (([{"station_id": "123"}], "ok"), ([], "empty_response")):
+            with self.subTest(status=status), patch.object(weather, "load_meteofrance_stations", return_value=stations), patch.object(weather, "_read_json_request", side_effect=ValueError("bad response")):
+                result = weather.test_meteofrance_api_key(api_key="test-token")
+            self.assertEqual(result["status"], status)
 
     def test_meteofrance_api_key_test_reports_climatology_only_key(self):
         with patch(

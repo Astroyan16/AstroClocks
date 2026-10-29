@@ -46,6 +46,14 @@ TRANSLATIONS = {
         "network.checking": "Checking connection",
         "network.connected": "Connected",
         "network.offline": "Offline",
+        "network.partial": "Internet · {count} unavailable",
+        "network.partial_one": "Internet · 1 unavailable",
+        "network.services": "Online services",
+        "network.reachable": "Reachable",
+        "network.unavailable": "Unavailable",
+        "network.not_configured": "Not configured",
+        "network.close": "Close",
+        "network.explanation": "HTTPS reachability is checked independently every 30 seconds. Reachable does not guarantee valid API credentials or a successful query. Click the connection indicator to open this list.",
         "settings.instrument": "Circle graduations (T1m)",
         "settings.hour_angle_offset": "T1m hour angle (+6h East circle)",
         "settings.declination_offset": "T1m declination (+90°)",
@@ -181,6 +189,7 @@ TRANSLATIONS = {
         "settings.refraction_find_stations": "Find nearby weather stations with pressure",
         "settings.refraction_fetch_weather": "Fetch selected station data",
         "settings.meteofrance_api_configure": "Configure Météo-France API",
+        "settings.weather_optional_help": "METAR works without an API key. You can optionally add a Météo-France key to include more observation stations.",
         "settings.refraction_station_option": (
             "{source} {station} - {name} ({distance} km, {pressure} hPa, {time})"
         ),
@@ -206,6 +215,7 @@ TRANSLATIONS = {
         "settings.refraction_weather_error": "Weather lookup failed: {error}",
         "settings.meteofrance_api_title": "Météo-France API key",
         "settings.meteofrance_api_help": (
+            "Optional: METAR already works without a key. "
             "Paste the API key/token from your Météo-France API subscription. "
             "AstroClocks stores it encrypted for this Windows user and uses it to "
             "load current Météo-France observation stations and measurements when "
@@ -217,7 +227,10 @@ TRANSLATIONS = {
         "settings.meteofrance_api_saved": "API key saved.",
         "settings.meteofrance_api_testing": "Testing the Météo-France API key...",
         "settings.meteofrance_api_test_error": "Météo-France API test failed: {error}",
-        "settings.meteofrance_api_test_empty": "The key works, but no station list was returned.",
+        "settings.meteofrance_api_test_empty": "No observation stations were returned; API access could not be confirmed.",
+        "settings.meteofrance_api_test_connection_unavailable": "Unable to connect to Météo-France (network, DNS, TLS or timeout). The token could not be checked.",
+        "settings.meteofrance_api_test_service_unavailable": "The Météo-France server is temporarily unavailable (HTTP 5xx). The token could not be checked.",
+        "settings.meteofrance_api_test_access_denied": "Météo-France refused access (HTTP 401/403): check the token, its expiry and observation subscription permissions.",
         "settings.meteofrance_api_test_ok": "API key OK: {count} stations loaded.",
         "settings.meteofrance_api_test_climatology_only": (
             "API key valid for climatological data ({count} stations in Paris), "
@@ -444,8 +457,8 @@ TRANSLATIONS = {
         "double.orbit_worker_failed": "ORB6 calculation interrupted: {error}",
         "double.progress.orbits": "ORB6: {completed} / {total} objects processed",
         "double.progress.visibility": "Visibility: {completed} / {total} objects processed",
-        "double.online_offline": "Online catalog unavailable: offline.",
-        "double.offline_cached": "Using {count} cached WDS entries while offline.",
+        "double.online_offline": "Online catalog service currently unavailable.",
+        "double.offline_cached": "Using {count} cached WDS entries; online service unavailable.",
         "double.online_error": "WDS/VizieR unavailable: {error}",
         "double.online_loaded": "{count} WDS entries loaded.",
         "double.wds_cache_updated": "{count} WDS entries kept in the local cache.",
@@ -524,7 +537,7 @@ TRANSLATIONS = {
         "deep_sky.filtering": "Applying deep-sky filters...",
         "deep_sky.searching_online": "Searching SIMBAD/CDS...",
         "deep_sky.online_offline": "Online catalog unavailable: offline.",
-        "deep_sky.offline_cached": "Using {count} cached SIMBAD entries while offline.",
+        "deep_sky.offline_cached": "Using {count} cached SIMBAD entries; online service unavailable.",
         "deep_sky.online_error": "SIMBAD/CDS unavailable: {error}",
         "deep_sky.online_timeout": "SIMBAD query timed out; local and cached results retained. Try again later.",
         "deep_sky.online_loaded": "{count} SIMBAD objects loaded.",
@@ -565,7 +578,7 @@ TRANSLATIONS = {
         "star_search.filtering": "Applying star filters...",
         "star_search.searching_online": "Searching SIMBAD/CDS stars...",
         "star_search.online_offline": "Online catalog unavailable: offline.",
-        "star_search.offline_cached": "Using {count} cached SIMBAD stars while offline.",
+        "star_search.offline_cached": "Using {count} cached SIMBAD stars; online service unavailable.",
         "star_search.online_error": "SIMBAD/CDS unavailable: {error}",
         "star_search.online_loaded": "{count} SIMBAD stars loaded.",
         "star_search.cache_updated": "{count} SIMBAD stars kept in the local cache.",
@@ -587,7 +600,7 @@ TRANSLATIONS = {
             "{label}\nRA ICRS/J2000: {ra}\nDec ICRS/J2000: {dec}\n"
             "RA JNow: {jnow_ra}\nDec JNow: {jnow_dec}"
         ),
-        "result.aladin_offline": "Interactive sky view unavailable: offline.",
+        "result.aladin_offline": "Aladin service currently unavailable.",
         "result.aladin_unavailable": "Interactive sky view unavailable. Check internet connection.",
         "result.aladin_opened": (
             "Opened interactive sky view (ICRS): RA {ra_deg:.6f}\N{DEGREE SIGN} "
@@ -601,10 +614,10 @@ TRANSLATIONS = {
         ),
         "result.searching": "Searching {object_name}...",
         "result.search_error": "Coordinate search unavailable: {error}",
-        "result.online_search_offline": "This search requires an internet connection and is unavailable offline.",
+        "result.online_search_offline": "The online service required for this search is currently unavailable.",
         "result.local_object_not_found_offline": (
             "Object not found in the local catalog.\n"
-            "Offline search includes the bundled star catalog and local Messier/NGC/IC entries."
+            "The online name resolver is unavailable. Local search includes the bundled stars and Messier/NGC/IC entries."
         ),
         "result.imcce_coordinates": (
             "Apparent JNow coordinates from IMCCE:\nAlpha JNow: {ra}\nDelta JNow: {dec}"
@@ -661,6 +674,14 @@ TRANSLATIONS = {
         "network.checking": "Vérification connexion",
         "network.connected": "Connecté",
         "network.offline": "Hors-ligne",
+        "network.partial": "Internet · {count} indisponibles",
+        "network.partial_one": "Internet · 1 indisponible",
+        "network.services": "Services en ligne",
+        "network.reachable": "Joignable",
+        "network.unavailable": "Indisponible",
+        "network.not_configured": "Non configuré",
+        "network.close": "Fermer",
+        "network.explanation": "L’accès HTTPS est vérifié séparément toutes les 30 secondes. Un service joignable ne garantit ni la validité des identifiants API ni le succès d’une requête. Cliquez sur l’indicateur de connexion pour consulter cette liste.",
         "settings.instrument": "Graduation des cercles (T1m)",
         "settings.hour_angle_offset": "Angle horaire T1m (+6h cercle Est)",
         "settings.declination_offset": "Déclinaison T1m (+90°)",
@@ -796,6 +817,7 @@ TRANSLATIONS = {
         "settings.refraction_find_stations": "Trouver les stations météo proches avec pression",
         "settings.refraction_fetch_weather": "Récupérer les données de la station",
         "settings.meteofrance_api_configure": "Configurer l'API Météo-France",
+        "settings.weather_optional_help": "METAR fonctionne sans clé API. Vous pouvez ajouter une clé Météo-France pour inclure davantage de stations d'observation.",
         "settings.refraction_station_option": (
             "{source} {station} - {name} ({distance} km, {pressure} hPa, {time})"
         ),
@@ -821,6 +843,7 @@ TRANSLATIONS = {
         "settings.refraction_weather_error": "Récupération météo impossible : {error}",
         "settings.meteofrance_api_title": "Clé API Météo-France",
         "settings.meteofrance_api_help": (
+            "Facultatif : METAR fonctionne déjà sans clé. "
             "Collez la clé API / le token de votre abonnement API Météo-France. "
             "AstroClocks l'enregistre chiffré pour cet utilisateur Windows et l'utilise "
             "pour charger les stations et mesures d'observation Météo-France actuelles "
@@ -832,7 +855,10 @@ TRANSLATIONS = {
         "settings.meteofrance_api_saved": "Clé API enregistrée.",
         "settings.meteofrance_api_testing": "Test de la clé API Météo-France...",
         "settings.meteofrance_api_test_error": "Échec du test de l'API Météo-France : {error}",
-        "settings.meteofrance_api_test_empty": "La clé fonctionne, mais aucune liste de stations n'a été renvoyée.",
+        "settings.meteofrance_api_test_empty": "Aucune station d'observation renvoyée ; l'accès à l'API n'a pas pu être confirmé.",
+        "settings.meteofrance_api_test_connection_unavailable": "Connexion à Météo-France impossible (réseau, DNS, TLS ou délai dépassé). Le token n'a pas pu être vérifié.",
+        "settings.meteofrance_api_test_service_unavailable": "Le serveur Météo-France est temporairement indisponible (HTTP 5xx). Le token n'a pas pu être vérifié.",
+        "settings.meteofrance_api_test_access_denied": "Accès refusé par Météo-France (HTTP 401/403) : vérifiez le token, son expiration et les droits de l'abonnement aux observations.",
         "settings.meteofrance_api_test_ok": "Clé API valide : {count} stations chargées.",
         "settings.meteofrance_api_test_climatology_only": (
             "Clé API valide pour les données climatologiques ({count} stations à Paris), "
@@ -1063,8 +1089,8 @@ TRANSLATIONS = {
         "double.orbit_worker_failed": "Calcul ORB6 interrompu : {error}",
         "double.progress.orbits": "ORB6 : {completed} / {total} objets traités",
         "double.progress.visibility": "Visibilité : {completed} / {total} objets traités",
-        "double.online_offline": "Catalogue en ligne indisponible : hors-ligne.",
-        "double.offline_cached": "Utilisation de {count} entrées WDS en cache hors-ligne.",
+        "double.online_offline": "Service du catalogue en ligne actuellement indisponible.",
+        "double.offline_cached": "Utilisation de {count} entrées WDS en cache ; service en ligne indisponible.",
         "double.online_error": "WDS/VizieR indisponible : {error}",
         "double.online_loaded": "{count} entrées WDS chargées.",
         "double.wds_cache_updated": "{count} entrées WDS gardées dans le cache local.",
@@ -1143,7 +1169,7 @@ TRANSLATIONS = {
         "deep_sky.filtering": "Application des filtres ciel profond...",
         "deep_sky.searching_online": "Recherche SIMBAD/CDS...",
         "deep_sky.online_offline": "Catalogue en ligne indisponible : hors-ligne.",
-        "deep_sky.offline_cached": "Utilisation de {count} entrées SIMBAD en cache hors-ligne.",
+        "deep_sky.offline_cached": "Utilisation de {count} entrées SIMBAD en cache ; service en ligne indisponible.",
         "deep_sky.online_error": "SIMBAD/CDS indisponible : {error}",
         "deep_sky.online_timeout": "Délai de réponse de la requête SIMBAD dépassé ; résultats locaux et en cache conservés. Réessayez plus tard.",
         "deep_sky.online_loaded": "{count} objets SIMBAD chargés.",
@@ -1184,7 +1210,7 @@ TRANSLATIONS = {
         "star_search.filtering": "Application des filtres étoiles...",
         "star_search.searching_online": "Recherche étoiles SIMBAD/CDS...",
         "star_search.online_offline": "Catalogue en ligne indisponible : hors-ligne.",
-        "star_search.offline_cached": "Utilisation de {count} étoiles SIMBAD en cache hors-ligne.",
+        "star_search.offline_cached": "Utilisation de {count} étoiles SIMBAD en cache ; service en ligne indisponible.",
         "star_search.online_error": "SIMBAD/CDS indisponible : {error}",
         "star_search.online_loaded": "{count} étoiles SIMBAD chargées.",
         "star_search.cache_updated": "{count} étoiles SIMBAD conservées dans le cache local.",
@@ -1206,7 +1232,7 @@ TRANSLATIONS = {
             "{label}\nRA ICRS/J2000 : {ra}\nDéc ICRS/J2000 : {dec}\n"
             "RA JNow : {jnow_ra}\nDéc JNow : {jnow_dec}"
         ),
-        "result.aladin_offline": "Vue du ciel interactive indisponible : hors-ligne.",
+        "result.aladin_offline": "Service Aladin actuellement indisponible.",
         "result.aladin_unavailable": "Vue du ciel interactive indisponible. Vérifiez la connexion internet.",
         "result.aladin_opened": (
             "Vue du ciel interactive ouverte (ICRS) : RA {ra_deg:.6f}\N{DEGREE SIGN} "
@@ -1221,11 +1247,11 @@ TRANSLATIONS = {
         "result.searching": "Recherche de {object_name}...",
         "result.search_error": "Recherche de coordonnées indisponible : {error}",
         "result.online_search_offline": (
-            "Cette recherche nécessite une connexion internet et n'est pas disponible hors-ligne."
+            "Le service en ligne nécessaire à cette recherche est actuellement indisponible."
         ),
         "result.local_object_not_found_offline": (
             "Objet introuvable dans le catalogue local.\n"
-            "La recherche hors-ligne inclut le catalogue d'étoiles embarqué et les entrées locales Messier/NGC/IC."
+            "Le service de résolution de noms est indisponible. La recherche locale inclut les étoiles embarquées et les entrées Messier/NGC/IC."
         ),
         "result.imcce_coordinates": (
             "Coordonnées apparentes JNow depuis IMCCE :\nAlpha JNow : {ra}\nDelta JNow : {dec}"

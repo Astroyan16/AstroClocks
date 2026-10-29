@@ -1,5 +1,24 @@
 # Changelog
 
+## AstroClocks v3.4.8 stable - 2026-10-29
+
+- Configuration Météo-France facultative dans les réglages météo avancés ;
+  sans clé, statut « Non configuré » sans alerte réseau. Suppression de l’ancien OAuth.
+- Suppression de la source météo SYNOP et de son contrôle de disponibilité.
+- Détection HTTPS indépendante des services en ligne (Aladin,
+  SIMBAD, Sesame, VizieR/WDS, ORB6, IMCCE, météo et GitHub).
+- Une panne de service ne désactive que les fonctions qui en dépendent ;
+  WDS et ORB6 sont indépendants, ainsi que Sesame et l’IMCCE.
+- La surveillance ignore le service d’images HiPS, inutilisé par l’interface.
+- Indicateur Internet distinct, signalement des indisponibilités partielles
+  en orange clair, absence de connexion en rouge et fenêtre de détail
+  accessible en cliquant sur l’indicateur.
+- Vérifications en parallèle toutes les 30 secondes, délai de 4 secondes
+  et confirmation des échecs sur deux cycles après le démarrage ; premier
+  résultat appliqué immédiatement au lancement. Validation TLS conservée.
+- Contrôle Météo-France sur le service de stations pour éviter les faux
+  statuts indisponibles causés par la racine de l’API.
+
 ## AstroClocks v3.4.7 stable - 2026-10-15
 
 - Étoiles et ciel profond : chargement SIMBAD par lots de 5 000 lignes, triés

@@ -1,7 +1,7 @@
 import tkinter as tk
 import queue
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from astroclocks.app import AstroClocksApp
 
@@ -17,6 +17,12 @@ class _ButtonProbe:
 
 
 class OnlineControlsStateTests(unittest.TestCase):
+    def setUp(self):
+        for module in ("app_deep_sky", "app_star_search"):
+            patcher = patch(f"astroclocks.{module}.load_page_state", return_value=None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_orbit_progress_runs_once_and_stops_when_results_arrive(self):
         app = self._make_app()
         app.double_orbit_progress = Mock()
@@ -131,6 +137,25 @@ class OnlineControlsStateTests(unittest.TestCase):
         app.star_search_reset_button = _ButtonProbe()
         app.star_search_clear_cache_button = _ButtonProbe()
         return app
+
+    def test_simbad_failure_leaves_wds_orbits_and_aladin_available(self):
+        app = self._make_app()
+        app.service_status = {"simbad": False, "vizier": True, "orb6": True, "aladin": True}
+        app.aladin_button = _ButtonProbe()
+        app._update_online_controls_state()
+        app._update_aladin_button_state()
+        self.assertEqual(app.deep_sky_online_button.state, tk.DISABLED)
+        self.assertEqual(app.star_search_online_button.state, tk.DISABLED)
+        self.assertEqual(app.double_search_button.state, tk.NORMAL)
+        self.assertEqual(app.double_orbit_recompute_button.state, tk.NORMAL)
+        self.assertEqual(app.aladin_button.state, tk.NORMAL)
+
+    def test_wds_failure_does_not_disable_orbit_refresh(self):
+        app = self._make_app()
+        app.service_status = {"vizier": False, "orb6": True}
+        app._update_double_search_buttons_state()
+        self.assertEqual(app.double_search_button.state, tk.DISABLED)
+        self.assertEqual(app.double_orbit_recompute_button.state, tk.NORMAL)
 
     def test_double_online_buttons_are_disabled_offline(self):
         app = self._make_app()

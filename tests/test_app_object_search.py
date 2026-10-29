@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import Mock, patch
 
 from astroclocks.app_object_search import (
+    search_coordinates,
     _apply_coordinate_result,
     _coordinate_result_message,
     _with_search_fallback,
@@ -47,6 +49,34 @@ class ObjectSearchTargetModeTests(unittest.TestCase):
             lambda result: f"{result.get('source')}|{result.get('source_ra')}|{result.get('source_dec')}"
         )
         return app
+
+    def test_imcce_search_still_runs_when_cds_is_down(self):
+        app = self._app_stub()
+        app.service_status = {"imcce": True, "sesame": False, "simbad": False}
+        app.network_online = True
+        app.search_entry = _FakeEntry("Ceres")
+        app.coordinate_search_pending = False
+        app._selected_object_type_code = lambda: "Asteroid"
+        app._active_site_coordinates = lambda: (48.8, 2.2)
+        app._start_coordinate_search = Mock()
+        with patch("astroclocks.app_object_search.resolve_local_solar_system_coordinates", return_value=None):
+            search_coordinates(app)
+        app._start_coordinate_search.assert_called_once_with("Asteroid", "Ceres", fallback_result=None)
+
+    def test_sesame_search_still_runs_when_imcce_is_down(self):
+        app = self._app_stub()
+        app.service_status = {"imcce": False, "sesame": True}
+        app.network_online = True
+        app.search_entry = _FakeEntry("unknown distant star")
+        app.coordinate_search_pending = False
+        app._selected_object_type_code = lambda: "Star, Deep Sky Object"
+        app._active_site_coordinates = lambda: (48.8, 2.2)
+        app._start_coordinate_search = Mock()
+        with patch("astroclocks.app_object_search.resolve_local_solar_system_coordinates", return_value=None), patch(
+            "astroclocks.app_object_search.resolve_local_object_coordinates", return_value=None
+        ):
+            search_coordinates(app)
+        app._start_coordinate_search.assert_called_once_with("Star, Deep Sky Object", "unknown distant star", fallback_result=None)
 
     def test_with_search_fallback_marks_copy_without_mutating_original(self):
         original = {"source": "local", "source_ra": "12:34:56"}

@@ -851,6 +851,9 @@ def open_meteofrance_api_dialog(app, parent=None):
             set_status(app._tr("settings.meteofrance_api_save_error", error=exc), app.danger)
             return False
         key_var.set("")
+        app.service_status["meteofrance"] = None
+        app.service_failures["meteofrance"] = 0
+        app._refresh_connectivity_display()
         set_status(app._tr("settings.meteofrance_api_saved"), app.success)
         return True
 
@@ -876,6 +879,19 @@ def open_meteofrance_api_dialog(app, parent=None):
                     return
                 if not result:
                     set_status(app._tr("settings.meteofrance_api_test_empty"), app.danger)
+                    return
+                status = result.get("status")
+                if status == "missing_token":
+                    set_status(app._tr("settings.meteofrance_api_missing"), app.danger)
+                    return
+                if status in ("connection_unavailable", "service_unavailable", "access_denied"):
+                    set_status(app._tr("settings.meteofrance_api_test_" + status), app.danger)
+                    return
+                if status == "response_error":
+                    set_status(app._tr(
+                        "settings.meteofrance_api_test_error",
+                        error=result.get("observation_error") or result.get("climatology_error") or "—",
+                    ), app.danger)
                     return
                 if result.get("observations_available"):
                     set_status(
@@ -917,6 +933,9 @@ def open_meteofrance_api_dialog(app, parent=None):
             set_status(app._tr("settings.meteofrance_api_save_error", error=exc), app.danger)
             return
         set_status(app._tr("settings.meteofrance_api_deleted"), app.success)
+        app.service_status["meteofrance"] = None
+        app.service_failures["meteofrance"] = 0
+        app._refresh_connectivity_display()
 
     actions = tk.Frame(body, bg=app.gbg)
     actions.grid(column=0, row=3, sticky="e")
@@ -1560,12 +1579,6 @@ def open_settings_dialog(app):
         lambda: None,
     )
     refraction_refresh_button.grid(column=1, row=0, padx=(8, 0), sticky="w")
-    refraction_api_button = app._build_button(
-        refraction_station_actions,
-        app._tr("settings.meteofrance_api_configure"),
-        lambda: open_meteofrance_api_dialog(app, parent=dialog),
-    )
-    refraction_api_button.grid(column=2, row=0, padx=(8, 0), sticky="w")
     refraction_station_combo = ttk.Combobox(
         weather_section,
         textvariable=refraction_station_var,
@@ -1599,6 +1612,16 @@ def open_settings_dialog(app):
         wraplength=420,
     )
     refraction_weather_status.grid(column=0, row=4, columnspan=2, pady=(5, 0), sticky="ew")
+    tk.Label(
+        atmosphere_advanced, text=app._tr("settings.weather_optional_help"),
+        bg=app.gbg, fg=app.muted, justify="left", wraplength=620,
+        font=Font(family="Segoe UI", size=9),
+    ).grid(column=0, row=2, columnspan=2, pady=(8, 0), sticky="w")
+    refraction_api_button = app._build_button(
+        atmosphere_advanced, app._tr("settings.meteofrance_api_configure"),
+        lambda: open_meteofrance_api_dialog(app, parent=dialog),
+    )
+    refraction_api_button.grid(column=0, row=3, columnspan=2, pady=(5, 0), sticky="w")
     refraction_activity = {"busy": False}
 
     def sync_refraction_parameter_state(_event=None):

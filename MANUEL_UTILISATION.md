@@ -1,8 +1,8 @@
-# Manuel d’utilisation — AstroClocks 3.4.7
+# Manuel d’utilisation — AstroClocks 3.4.8
 
-Version française • 15 octobre 2026 • Windows
+Version française • 29 octobre 2026 • Windows
 
-Ce manuel décrit l’utilisation de la version 3.4.7. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
+Ce manuel décrit l’utilisation de la version 3.4.8. Les noms des boutons sont ceux de l’interface française. AstroClocks permet de préparer une observation, de suivre une cible et de commander une monture compatible ASCOM.
 
 ## Sommaire
 
@@ -21,7 +21,7 @@ Ce manuel décrit l’utilisation de la version 3.4.7. Les noms des boutons sont
 
 ## 1. Installation et première utilisation
 
-Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.7.exe`.
+Téléchargez l’installeur Windows depuis les [releases officielles](https://github.com/Astroyan16/AstroClocks/releases). Pour cette version, le fichier se nomme `Install_AstroClocks3.4.8.exe`.
 
 Lancez l’installeur et suivez ses étapes. La création d’un raccourci sur le Bureau et le lancement au démarrage de Windows sont facultatifs. Une installation existante peut être mise à jour avec le nouvel installeur.
 
@@ -221,7 +221,9 @@ La température et l’humidité sont récupérées lorsqu’elles sont disponib
 
 ### Configurer Météo-France
 
-Les rapports METAR peuvent être utilisés sans clé Météo-France. Pour accéder aux observations Météo-France, cliquez sur **Configurer l’API Météo-France**, collez votre clé API autorisée pour **DPObs**, puis utilisez **Tester** et **Enregistrer**.
+Les rapports METAR sont utilisés par défaut, sans clé API. Météo-France est un complément facultatif pour inclure davantage de stations. Dans **Paramètres → Réfraction et météo → Paramètres avancés**, cliquez sur **Configurer l’API Météo-France**, collez votre clé API autorisée pour **DPObs**, puis utilisez **Tester** et **Enregistrer**.
+
+Sans clé, Météo-France apparaît comme **Non configuré** dans la liste des services en ligne ; aucun contrôle de ce service ni aucune alerte orange ne sont déclenchés.
 
 Une clé pour les seules données climatologiques ne donne pas accès aux observations actuelles de DPObs. Le test distingue ce cas. Le dialogue permet aussi de supprimer la clé enregistrée.
 
@@ -240,6 +242,8 @@ Ces caches et les limites de recherche réduisent les appels API. Pour votre abo
 La fenêtre **À propos** permet de vérifier les mises à jour GitHub et d’obtenir l’installeur correspondant. Une vérification automatique silencieuse est aussi effectuée au démarrage.
 
 Sans Internet, les calculs locaux et les données déjà disponibles restent utilisables. Les recherches en ligne, Aladin, la récupération météo et les mises à jour dépendent du réseau. Les boutons et statuts indiquent les fonctions indisponibles ou l’utilisation du cache.
+
+L’indicateur réseau est vert lorsque les services surveillés sont joignables, orange clair lorsque certains sont indisponibles et rouge lorsqu’aucune connexion Internet n’est détectée. Cliquez dessus pour consulter le détail par service. Le premier résultat est affiché dès la fin du contrôle au démarrage ; les vérifications suivantes sont effectuées toutes les 30 secondes et les pannes sont confirmées sur deux cycles. Le contrôle HTTPS ne valide pas les droits d’accès d’une clé API.
 
 Les réglages sont conservés pour votre compte Windows dans `%APPDATA%\AstroClocks\AstroClocks.ini`.
 

@@ -1,5 +1,7 @@
 """Star-search tab UI and search helpers for AstroClocks."""
 
+from astroclocks.connectivity import service_online
+
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
@@ -291,7 +293,7 @@ def _create_star_search_widgets(self):
 
 def _update_star_search_buttons_state(self):
     search_pending = bool(self.star_search_pending)
-    online_available = self.network_online is not False
+    online_available = service_online(self, "simbad") is not False
     page_state = load_page_state("stars")
     more_button = getattr(self, "star_search_more_button", None)
     if more_button is not None:
@@ -601,7 +603,7 @@ def _star_search_catalog(self, cached_stars=None, spectral_type=None, magnitude_
 
 
 def _star_search_offline_cache_note(self):
-    if self.network_online is not False:
+    if service_online(self, "simbad") is not False:
         return None
     cache_count = len(self.star_search_cached_stars or [])
     if cache_count <= 0:
@@ -740,7 +742,7 @@ def search_stars(self, allow_online=False, load_more=False):
     self.star_search_generation += 1
     generation = self.star_search_generation
     self.star_search_pending = True
-    if allow_online and self.network_online is False:
+    if allow_online and service_online(self, "simbad") is False:
         allow_online = False
         offline_note = self._tr("star_search.online_offline")
     else:

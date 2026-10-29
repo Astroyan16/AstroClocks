@@ -1,6 +1,6 @@
 # AstroClocks
 
-AstroClocks v3.4.7 est une application d'aide a l'observation astronomique
+AstroClocks v3.4.8 est une application d'aide a l'observation astronomique
 pour Windows. Elle affiche en temps reel l'heure civile, l'UTC, les temps
 sideraux, les coordonnees JNow/J2000, l'angle horaire, une carte du ciel
 locale, ainsi que plusieurs outils de recherche et de preparation
@@ -34,7 +34,7 @@ d'observations.
 ## Installation
 
 Le [manuel d’utilisation en français](MANUEL_UTILISATION.md) décrit la prise en main,
-les recherches, le pointage ASCOM, la réfraction et les données météo pour la version 3.4.7.
+les recherches, le pointage ASCOM, la réfraction et les données météo pour la version 3.4.8.
 Une version PDF est également disponible dans les assets de la release.
 
 Depuis ce dossier, creez un environnement Python puis installez les
@@ -123,3 +123,15 @@ La procedure de publication stable est documentee dans
 
 AstroClocks est distribue sous la licence `GNU GPL v3.0 only`.
 Le texte complet est disponible dans [LICENSE](LICENSE).
+
+### Disponibilité des services en ligne
+
+Cliquez sur l’indicateur de connexion pour consulter l’accès HTTPS de chaque
+service. Les contrôles sont indépendants et renouvelés toutes les 30 secondes.
+Une panne de SIMBAD ne bloque donc ni l’IMCCE, ni Aladin, ni WDS. Les fonctions
+locales restent utilisables. « Joignable » confirme l’accès HTTPS, sans garantir
+la validité d’une clé API ou le succès d’une requête particulière.
+
+La météo utilise METAR sans clé API. Météo-France est un complément facultatif,
+configurable dans les réglages météo avancés. Sans clé, ce service apparaît
+« Non configuré » et ne déclenche aucune alerte orange de l’indicateur réseau.

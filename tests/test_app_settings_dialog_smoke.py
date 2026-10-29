@@ -151,11 +151,18 @@ class SettingsDialogSmokeTests(unittest.TestCase):
                         content = next(child for child in disclosure.master.winfo_children()
                                        if isinstance(child, tk.Frame))
                         self.assertFalse(content.winfo_ismapped())
+                        if tab == tabs[2]:
+                            api_button = next(widget for widget in walk(content)
+                                              if isinstance(widget, tk.Button)
+                                              and widget.cget("text") == app._tr("settings.meteofrance_api_configure"))
+                            self.assertFalse(api_button.winfo_ismapped())
                         disclosure.invoke()
                         root.update_idletasks()
                         self.assertEqual(disclosure.cget("text"), title)
                         self.assertNotEqual(disclosure.cget("image"), closed_image)
                         self.assertTrue(content.winfo_ismapped())
+                        if tab == tabs[2]:
+                            self.assertTrue(api_button.winfo_ismapped())
                         self.assertLessEqual(dialog.winfo_reqheight(), root.winfo_screenheight())
                         disclosure.invoke()
                         root.update_idletasks()

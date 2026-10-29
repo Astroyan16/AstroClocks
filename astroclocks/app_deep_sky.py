@@ -1,5 +1,7 @@
 """Deep-sky tab UI and search helpers for AstroClocks."""
 
+from astroclocks.connectivity import service_online
+
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import ttk
@@ -381,7 +383,7 @@ def _create_deep_sky_widgets(self):
 
 def _update_deep_sky_search_buttons_state(self):
     search_pending = bool(self.deep_sky_search_pending)
-    online_available = self.network_online is not False
+    online_available = service_online(self, "simbad") is not False
     page_state = load_page_state("deep_sky")
     more_button = getattr(self, "deep_sky_more_button", None)
     if more_button is not None:
@@ -795,7 +797,7 @@ def _deep_sky_catalog(self, preferred_band=None):
 
 
 def _deep_sky_offline_cache_note(self):
-    if self.network_online is not False:
+    if service_online(self, "simbad") is not False:
         return None
     cache_count = len(self.deep_sky_simbad_cached_objects or [])
     if cache_count <= 0:
@@ -912,7 +914,7 @@ def search_deep_sky_objects(self, allow_online=False, load_more=False):
     self.deep_sky_search_generation += 1
     generation = self.deep_sky_search_generation
     self.deep_sky_search_pending = True
-    if allow_online and self.network_online is False:
+    if allow_online and service_online(self, "simbad") is False:
         allow_online = False
         offline_note = self._tr("deep_sky.online_offline")
     else:

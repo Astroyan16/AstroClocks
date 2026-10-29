@@ -3,6 +3,8 @@
 import datetime
 import math
 import queue
+from astroclocks.connectivity import service_online
+
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -417,7 +419,7 @@ def _update_double_search_buttons_state(self):
                 self.double_orbit_progress_job = None
             progress.grid_remove()
             self.double_orbit_progress_running = False
-    online_available = self.network_online is not False
+    online_available = service_online(self, "vizier") is not False
     self._set_button_enabled(self.double_apply_button, not remote_search_pending)
     self._set_button_enabled(
         self.double_search_button,
@@ -425,7 +427,7 @@ def _update_double_search_buttons_state(self):
     )
     self._set_button_enabled(
         self.double_orbit_recompute_button,
-        (not remote_search_pending) and online_available,
+        (not remote_search_pending) and service_online(self, "orb6") is not False,
     )
     self._set_button_enabled(self.double_reset_button, not remote_search_pending)
     self._set_button_enabled(self.double_clear_cache_button, not remote_search_pending)
@@ -1155,7 +1157,7 @@ def _double_local_catalog(self):
 
 
 def _double_offline_cache_note(self):
-    if self.network_online is not False:
+    if service_online(self, "vizier") is not False:
         return None
     cache_count = len(self.double_wds_cached_stars or [])
     if cache_count <= 0:
@@ -1618,7 +1620,7 @@ def _run_double_star_search(
         source_key = "double.source.wds" if self.double_wds_cached_stars else "double.source.local"
         wds_cached_stars = None
 
-        if allow_online and self.network_online is False:
+        if allow_online and service_online(self, "vizier") is False:
             notes.insert(0, self._tr("double.online_offline"))
         elif allow_online:
             try:

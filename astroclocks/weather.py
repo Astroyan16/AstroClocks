@@ -19,7 +19,6 @@ from astroclocks.secure_store import load_meteofrance_application_id
 
 METAR_STATIONS_CACHE_URL = "https://aviationweather.gov/data/cache/stations.cache.json.gz"
 METAR_DATA_URL = "https://aviationweather.gov/api/data/metar"
-METEOFRANCE_TOKEN_URL = "https://portail-api.meteofrance.fr/token"
 METEOFRANCE_DPOBS_BASE_URL = "https://public-api.meteofrance.fr/public/DPObs"
 METEOFRANCE_DPOBS_API_URL = f"{METEOFRANCE_DPOBS_BASE_URL}/station/infrahoraire-6m"
 METEOFRANCE_STATIONS_URL = f"{METEOFRANCE_DPOBS_BASE_URL}/liste-stations"
@@ -27,16 +26,11 @@ METEOFRANCE_DPCLIM_BASE_URL = "https://public-api.meteofrance.fr/public/DPClim/v
 METEOFRANCE_DPCLIM_STATIONS_URL = (
     f"{METEOFRANCE_DPCLIM_BASE_URL}/liste-stations/infrahoraire-6m"
 )
-SYNOP_STATIONS_URL = "https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/OBS/SYNOP/postes_synop.geojson"
-SYNOP_YEAR_URL_TEMPLATE = (
-    "https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/OBS/SYNOP/synop_{year}.csv.gz"
-)
 WEATHER_USER_AGENT = "AstroClocks weather lookup"
 MAX_WEATHER_OBSERVATION_AGE_HOURS = 6
 METEOFRANCE_STATIONS_CACHE_SECONDS = 3600
 METEOFRANCE_OBSERVATION_CACHE_SECONDS = 300
 METEOFRANCE_MAX_OBSERVATION_LOOKUPS_PER_SEARCH = 20
-_METEOFRANCE_ACCESS_TOKEN = {"value": None, "expires_at": None}
 _METEOFRANCE_STATIONS_CACHE = {"value": None, "expires_at": None, "credential": None}
 _METEOFRANCE_OBSERVATION_CACHE = {}
 
@@ -75,17 +69,6 @@ def _read_json_url(url, timeout=15):
     if url.endswith(".gz"):
         payload = gzip.decompress(payload)
     return json.loads(payload.decode("utf-8"))
-
-
-def _read_text_url(url, timeout=15):
-    request = Request(url, headers={"User-Agent": WEATHER_USER_AGENT})
-    with urlopen(request, timeout=timeout) as response:
-        payload = response.read()
-    if not payload:
-        return ""
-    if url.endswith(".gz"):
-        payload = gzip.decompress(payload)
-    return payload.decode("utf-8")
 
 
 def _read_json_request(request, timeout=15):
@@ -134,29 +117,6 @@ def load_metar_stations(timeout=20):
     ]
 
 
-def load_synop_stations(timeout=20):
-    """Return Météo-France SYNOP stations."""
-    payload = _read_json_url(SYNOP_STATIONS_URL, timeout=timeout)
-    stations = []
-    for feature in payload.get("features", []):
-        properties = feature.get("properties") or {}
-        geometry = feature.get("geometry") or {}
-        coordinates = geometry.get("coordinates") or []
-        if len(coordinates) < 2 or not properties.get("Id"):
-            continue
-        stations.append(
-            {
-                "station_id": str(properties["Id"]),
-                "station_name": properties.get("Nom") or str(properties["Id"]),
-                "latitude": float(coordinates[1]),
-                "longitude": float(coordinates[0]),
-                "elevation_m": properties.get("Altitude"),
-                "source": "SYNOP",
-            }
-        )
-    return stations
-
-
 def nearest_metar_stations(latitude, longitude, limit=12, max_distance_km=150, timeout=20):
     """Return the nearest METAR stations around a site."""
     candidates = []
@@ -166,22 +126,6 @@ def nearest_metar_stations(latitude, longitude, limit=12, max_distance_km=150, t
             longitude,
             station["lat"],
             station["lon"],
-        )
-        if distance_km <= max_distance_km:
-            candidates.append((distance_km, station))
-    candidates.sort(key=lambda item: item[0])
-    return candidates[:limit]
-
-
-def nearest_synop_stations(latitude, longitude, limit=12, max_distance_km=150, timeout=20):
-    """Return the nearest Météo-France SYNOP stations around a site."""
-    candidates = []
-    for station in load_synop_stations(timeout=timeout):
-        distance_km = _haversine_km(
-            latitude,
-            longitude,
-            station["latitude"],
-            station["longitude"],
         )
         if distance_km <= max_distance_km:
             candidates.append((distance_km, station))
@@ -496,38 +440,6 @@ def _row_time_value(row):
     return ""
 
 
-def _exchange_meteofrance_application_id(application_id, timeout=12):
-    """Return an OAuth access token for legacy Météo-France Application IDs."""
-    credential = str(application_id or "").strip()
-    if not credential:
-        return ""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    cached_value = _METEOFRANCE_ACCESS_TOKEN.get("value")
-    expires_at = _METEOFRANCE_ACCESS_TOKEN.get("expires_at")
-    if cached_value and expires_at and now < expires_at:
-        return cached_value
-    body = urlencode({"grant_type": "client_credentials"}).encode("ascii")
-    request = Request(
-        METEOFRANCE_TOKEN_URL,
-        data=body,
-        headers={
-            "Authorization": f"Basic {credential}",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": WEATHER_USER_AGENT,
-        },
-        method="POST",
-    )
-    payload = _read_json_request(request, timeout=timeout)
-    token = (payload or {}).get("access_token", "")
-    if token:
-        expires_in = int((payload or {}).get("expires_in", 3600))
-        _METEOFRANCE_ACCESS_TOKEN["value"] = token
-        _METEOFRANCE_ACCESS_TOKEN["expires_at"] = now + datetime.timedelta(
-            seconds=max(60, expires_in - 60)
-        )
-    return token
-
-
 def _get_meteofrance_api_key(api_key=None):
     return str(api_key or load_meteofrance_application_id() or "").strip()
 
@@ -543,11 +455,24 @@ def _meteofrance_authorization_headers(api_key=None):
     }
 
 
+def _meteofrance_test_error_status(error):
+    """Keep transport failures separate from HTTP and data errors."""
+    http_error = error if isinstance(error, HTTPError) else error.__cause__
+    if isinstance(http_error, HTTPError):
+        if http_error.code in (401, 403):
+            return "access_denied"
+        return "service_unavailable" if http_error.code >= 500 else "response_error"
+    if isinstance(error, OSError):
+        return "connection_unavailable"
+    return "response_error"
+
+
 def test_meteofrance_api_key(timeout=12, api_key=None):
     """Return available Météo-France capabilities for the configured API key."""
     headers = _meteofrance_authorization_headers(api_key=api_key)
     if not headers:
         return {
+            "status": "missing_token",
             "observations_available": False,
             "climatology_available": False,
             "station_count": 0,
@@ -556,6 +481,7 @@ def test_meteofrance_api_key(timeout=12, api_key=None):
         }
 
     result = {
+        "status": "empty_response",
         "observations_available": False,
         "climatology_available": False,
         "station_count": 0,
@@ -567,11 +493,15 @@ def test_meteofrance_api_key(timeout=12, api_key=None):
         stations = load_meteofrance_stations(timeout=timeout, application_id=api_key)
     except (HTTPError, JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
         result["observation_error"] = str(exc)
+        result["status"] = _meteofrance_test_error_status(exc)
+        if result["status"] in ("connection_unavailable", "service_unavailable"):
+            return result
     else:
         result["observations_available"] = bool(stations)
         result["station_count"] = len(stations)
 
     if result["observations_available"]:
+        result["status"] = "ok"
         return result
 
     query = urlencode({"id-departement": "75"})
@@ -586,6 +516,7 @@ def test_meteofrance_api_key(timeout=12, api_key=None):
     else:
         if isinstance(stations, list):
             result["climatology_available"] = True
+            result["status"] = "climatology_only"
             result["station_count"] = len(stations)
         else:
             result["climatology_error"] = "Unexpected DPClim station list response."
@@ -695,89 +626,9 @@ def fetch_meteofrance_pressure_for_station(station, timeout=12, application_id=N
     return _format_meteofrance_station_result(station, observation)
 
 
-def fetch_synop_pressure_for_station(station, timeout=60, year=None):
-    """Return recent Météo-France SYNOP sea-level pressure for one station option."""
-    year = year or datetime.datetime.now(datetime.timezone.utc).year
-    url = SYNOP_YEAR_URL_TEMPLATE.format(year=year)
-    text = _read_text_url(url, timeout=timeout)
-    return _synop_pressure_for_station_from_text(station, text)
-
-
-def _synop_pressure_for_station_from_text(station, text):
-    latest = None
-    latest_time = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-    for row in csv.DictReader(io.StringIO(text), delimiter=";"):
-        if row.get("geo_id_wmo") != station["station_id"]:
-            continue
-        if not row.get("pmer"):
-            continue
-        validity_time = _parse_iso_datetime(row.get("validity_time"))
-        if validity_time >= latest_time:
-            latest = row
-            latest_time = validity_time
-    if latest is None:
-        return None
-    pressure_hpa = float(latest["pmer"]) / 100.0
-    temperature_c = None
-    if latest.get("t"):
-        temperature_c = float(latest["t"]) - 273.15
-    return {
-        "source": "SYNOP",
-        "station_id": station["station_id"],
-        "station_name": station.get("station_name") or latest.get("name") or station["station_id"],
-        "distance_km": station["distance_km"],
-        "pressure_hpa": pressure_hpa,
-        "temperature_c": temperature_c,
-        "humidity_percent": _observation_humidity_percent(latest),
-        "report_time": latest.get("validity_time"),
-    }
-
-
-def synop_pressures_for_stations(stations, timeout=60, year=None):
-    """Return recent SYNOP pressures for several station options with one CSV download."""
-    year = year or datetime.datetime.now(datetime.timezone.utc).year
-    url = SYNOP_YEAR_URL_TEMPLATE.format(year=year)
-    text = _read_text_url(url, timeout=timeout)
-    station_lookup = {station["station_id"]: station for station in stations}
-    latest_rows = {}
-    latest_times = {}
-    for row in csv.DictReader(io.StringIO(text), delimiter=";"):
-        station_id = row.get("geo_id_wmo")
-        if station_id not in station_lookup or not row.get("pmer"):
-            continue
-        validity_time = _parse_iso_datetime(row.get("validity_time"))
-        if validity_time >= latest_times.get(
-            station_id,
-            datetime.datetime.min.replace(tzinfo=datetime.timezone.utc),
-        ):
-            latest_rows[station_id] = row
-            latest_times[station_id] = validity_time
-
-    results = {}
-    for station_id, row in latest_rows.items():
-        station = station_lookup[station_id]
-        pressure_hpa = float(row["pmer"]) / 100.0
-        temperature_c = None
-        if row.get("t"):
-            temperature_c = float(row["t"]) - 273.15
-        results[station_id] = {
-            "source": "SYNOP",
-            "station_id": station_id,
-            "station_name": station.get("station_name") or row.get("name") or station_id,
-            "distance_km": station["distance_km"],
-            "pressure_hpa": pressure_hpa,
-            "temperature_c": temperature_c,
-            "humidity_percent": _observation_humidity_percent(row),
-            "report_time": row.get("validity_time"),
-        }
-    return results
-
-
 def fetch_pressure_for_station(station):
     if station.get("source") == "METEOFRANCE":
         return fetch_meteofrance_pressure_for_station(station)
-    if station.get("source") == "SYNOP":
-        return fetch_synop_pressure_for_station(station)
     return fetch_metar_pressure_for_station(station)
 
 

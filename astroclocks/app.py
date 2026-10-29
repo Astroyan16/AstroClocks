@@ -2,7 +2,6 @@ import datetime
 import math
 import os
 import queue
-import socket
 import tempfile
 import threading
 import tkinter as tk
@@ -44,6 +43,7 @@ from astroclocks.astronomy import (
 )
 from astroclocks.double_star_catalog import load_cached_wds_double_stars
 from astroclocks.deep_sky_catalog import load_cached_simbad_deep_sky_objects
+from astroclocks.connectivity import CHECK_INTERVAL_MS, SERVICES, check_services, service_configured, service_online
 from astroclocks.i18n import translate
 from astroclocks.orbit_catalog import load_cached_orb6_ephemerides, load_cached_orb6_orbits
 from astroclocks.runtime_logging import (
@@ -213,7 +213,7 @@ class AstroClocksApp:
         self.mount_accent = "#b892ff"
         self.success = "#7bd88f"
         self.danger = "#ff5c5c"
-        self.warning = "#ff8a65"
+        self.warning = "#ffb74d"
         self.button_bg = "#22303a"
         self._apply_native_window_chrome(self.root)
         if self.loading_window is not None:
@@ -256,6 +256,11 @@ class AstroClocksApp:
         self.aladin_button = None
         self.connectivity_label = None
         self.network_online = None
+        self.service_status = {key: None for key in SERVICES}
+        self.service_failures = {key: 0 for key in SERVICES}
+        self.service_details = {}
+        self.connectivity_dialog = None
+        self.connectivity_rows = {}
         self.connectivity_check_pending = False
         self.connectivity_consecutive_failures = 0
         self.connectivity_result_queue = queue.Queue()
@@ -1028,6 +1033,12 @@ class AstroClocksApp:
             anchor="e",
         )
         self.connectivity_label.pack(side="left")
+        self.connectivity_label.config(cursor="hand2", takefocus=True)
+        self.connectivity_label.bind("<Button-1>", lambda _event: self._show_connectivity_dialog())
+        self.connectivity_label.bind("<Return>", lambda _event: self._show_connectivity_dialog())
+        self.connectivity_label.bind("<space>", lambda _event: self._show_connectivity_dialog())
+        self.connectivity_icon.config(cursor="hand2")
+        self.connectivity_icon.bind("<Button-1>", lambda _event: self._show_connectivity_dialog())
 
         self.header_settings_button = tk.Button(
             header_actions,
@@ -2347,7 +2358,7 @@ class AstroClocksApp:
             cursor="hand2",
         )
 
-    def _schedule_connectivity_check(self, delay_ms=1000):
+    def _schedule_connectivity_check(self, delay_ms=CHECK_INTERVAL_MS):
         self.root.after(delay_ms, self._start_connectivity_check)
 
     def _start_connectivity_check(self):
@@ -2360,14 +2371,7 @@ class AstroClocksApp:
         threading.Thread(target=self._run_connectivity_check, daemon=True).start()
 
     def _run_connectivity_check(self):
-        is_online = False
-        try:
-            with socket.create_connection(("aladin.cds.unistra.fr", 443), timeout=0.8):
-                is_online = True
-        except Exception:
-            is_online = False
-
-        self.connectivity_result_queue.put(is_online)
+        self.connectivity_result_queue.put(check_services())
 
     def _poll_connectivity_result(self):
         try:
@@ -2381,47 +2385,105 @@ class AstroClocksApp:
 
     def _apply_connectivity_result(self, is_online):
         self.connectivity_check_pending = False
+        if isinstance(is_online, tuple):
+            is_online, results = is_online
+            for name, result in results.items():
+                available, detail = result[:2]
+                self.service_details[name] = detail
+                if available is None:
+                    self.service_status[name] = None
+                    self.service_failures[name] = 0
+                    continue
+                self.service_failures[name] = 0 if available else self.service_failures[name] + 1
+                if (available or self.service_status[name] is None
+                        or self.service_failures[name] >= CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD):
+                    self.service_status[name] = available
 
         if is_online:
             self.connectivity_consecutive_failures = 0
             effective_online = True
         else:
             self.connectivity_consecutive_failures += 1
-            if self.connectivity_consecutive_failures >= CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD:
+            if (self.network_online is None
+                    or self.connectivity_consecutive_failures >= CONNECTIVITY_OFFLINE_FAILURE_THRESHOLD):
                 effective_online = False
             else:
                 effective_online = self.network_online
 
         self.network_online = effective_online
 
-        if self.connectivity_label is not None:
-            if effective_online is None:
-                text_key = "network.checking"
-                foreground = self.muted
-            else:
-                text_key = "network.connected" if effective_online else "network.offline"
-                foreground = self.success if effective_online else self.danger
-            self.connectivity_label.config(
-                text=self._tr(text_key),
-                foreground=foreground,
-            )
-            if getattr(self, "connectivity_icon", None) is not None:
-                self.connectivity_icon.itemconfigure("network", fill=foreground)
-                for item in self.connectivity_icon.find_withtag("network"):
-                    if self.connectivity_icon.type(item) == "rectangle":
-                        self.connectivity_icon.itemconfigure(
-                            item, fill=self.gbg, outline=foreground,
-                        )
-
+        self._refresh_connectivity_display()
         self._update_aladin_button_state()
         self._update_online_controls_state()
         self._schedule_connectivity_check()
+
+    def _refresh_connectivity_display(self):
+        effective_online = self.network_online
+        if effective_online is None:
+            text_key = "network.checking"
+            foreground = self.muted
+        else:
+            text_key = "network.connected" if effective_online else "network.offline"
+            foreground = self.success if effective_online else self.danger
+        unavailable = [key for key, value in getattr(self, "service_status", {}).items()
+                       if value is False and service_configured(key)]
+        text = self._tr(text_key)
+        if effective_online and unavailable:
+            text = self._tr("network.partial_one" if len(unavailable) == 1 else "network.partial", count=len(unavailable))
+            foreground = self.warning
+        if self.connectivity_label is not None:
+            self.connectivity_label.config(
+                text=text,
+                foreground=foreground,
+            )
+        if getattr(self, "connectivity_icon", None) is not None:
+            self.connectivity_icon.itemconfigure("network", fill=foreground)
+            for item in self.connectivity_icon.find_withtag("network"):
+                if self.connectivity_icon.type(item) == "rectangle":
+                    self.connectivity_icon.itemconfigure(
+                        item, fill=self.gbg, outline=foreground,
+                    )
+
+        dialog = getattr(self, "connectivity_dialog", None)
+        if dialog is not None and dialog.winfo_exists():
+            for name, label in self.connectivity_rows.items():
+                state = service_online(self, name)
+                key = "network.reachable" if state is True else "network.unavailable" if state is False else "network.checking"
+                color = self.success if state is True else self.danger if state is False else self.muted
+                if not service_configured(name):
+                    key = "network.not_configured"
+                    color = self.muted
+                label.config(text=self._tr(key), foreground=color)
+
+    def _show_connectivity_dialog(self):
+        if self.connectivity_dialog is not None and self.connectivity_dialog.winfo_exists():
+            self.connectivity_dialog.lift()
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title(self._tr("network.services"))
+        dialog.configure(bg=self.gbg)
+        dialog.transient(self.root)
+        self.connectivity_dialog = dialog
+        self.connectivity_rows = {}
+        tk.Label(dialog, text=self._tr("network.explanation"), bg=self.gbg, fg=self.text,
+                 wraplength=540, justify="left").grid(row=0, column=0, columnspan=2, padx=18, pady=14)
+        for row, (name, (title, _urls)) in enumerate(SERVICES.items(), 1):
+            tk.Label(dialog, text=title, bg=self.gbg, fg=self.text).grid(row=row, column=0, sticky="w", padx=18, pady=3)
+            label = tk.Label(dialog, bg=self.gbg)
+            label.grid(row=row, column=1, sticky="w", padx=18)
+            self.connectivity_rows[name] = label
+        self._refresh_connectivity_display()
+        self._build_button(dialog, self._tr("network.close"), dialog.destroy).grid(
+            row=len(SERVICES) + 1, column=0, columnspan=2, pady=14)
+        self._center_dialog_on_root(dialog)
+        self._reveal_dialog(dialog, focus=True)
 
     def _update_aladin_button_state(self):
         if self.aladin_button is None:
             return
 
-        self._set_button_enabled(self.aladin_button, self.network_online is not False)
+        self._set_button_enabled(self.aladin_button, service_online(self, "aladin") is not False)
 
     def _update_online_controls_state(self):
         if self.combo_box is not None:
@@ -3418,7 +3480,7 @@ class AstroClocksApp:
 """
 
     def show_sky_view(self):
-        if self.network_online is False:
+        if service_online(self, "aladin") is False:
             self._set_result_text(self._tr("result.aladin_offline"), foreground=self.danger)
             return
 
@@ -3534,12 +3596,7 @@ class AstroClocksApp:
         self.about_button.config(text=self._tr("button.about"))
         self.fullscreen_button.config(text=self._tr("button.fullscreen"))
         self.quit_button.config(text=self._tr("button.quit"))
-        if self.connectivity_label is not None:
-            if self.network_online is None:
-                self.connectivity_label.config(text=self._tr("network.checking"))
-            else:
-                text_key = "network.connected" if self.network_online else "network.offline"
-                self.connectivity_label.config(text=self._tr(text_key))
+        self._refresh_connectivity_display()
         self._update_search_button_state()
         self.alpha_set_button.config(text=self._tr("button.set"))
         self.delta_set_button.config(text=self._tr("button.set"))

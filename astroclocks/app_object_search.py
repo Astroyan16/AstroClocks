@@ -1,5 +1,7 @@
 """Object-search UI and coordinate-resolution helpers for AstroClocks."""
 
+from astroclocks.connectivity import service_online
+
 import threading
 import webbrowser
 from urllib.parse import urlencode
@@ -47,7 +49,7 @@ def _set_object_type_values(self, selected_code=None):
         selected_code = self._selected_object_type_code()
     available_codes = (
         (*LOCAL_SOLAR_SYSTEM_OBJECT_TYPE_CODES, *OFFLINE_OBJECT_TYPE_CODES)
-        if self.network_online is False
+        if service_online(self, "imcce") is False
         else OBJECT_TYPE_CODES
     )
     if selected_code not in available_codes:
@@ -460,7 +462,7 @@ def search_coordinates(self):
             latitude=active_latitude,
             longitude=active_longitude,
         )
-        if self.network_online is False:
+        if service_online(self, "imcce") is False:
             if local_solar_result is not None:
                 self._apply_coordinate_result(local_solar_result)
             else:
@@ -475,7 +477,7 @@ def search_coordinates(self):
         longitude=active_longitude,
     )
     if local_solar_result is not None:
-        if self.network_online is False:
+        if service_online(self, "imcce") is False:
             self._apply_coordinate_result(local_solar_result)
         else:
             self._start_coordinate_search(
@@ -488,7 +490,7 @@ def search_coordinates(self):
     if object_name.lower() in solar_system:
         self._set_result_text(
             self._tr("result.online_search_offline")
-            if self.network_online is False
+            if service_online(self, "imcce") is False
             else self._tr("result.object_type_error"),
             foreground=self.danger,
         )
@@ -503,7 +505,7 @@ def search_coordinates(self):
         return
 
     local_result = resolve_local_object_coordinates(object_name)
-    if self.network_online is False:
+    if service_online(self, "sesame") is False:
         if local_result is not None:
             self._apply_coordinate_result(local_result)
         else:
