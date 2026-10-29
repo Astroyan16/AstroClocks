@@ -106,6 +106,19 @@ foreach ($path in $expectedPaths) {
     }
 }
 
+$SslPolicyFile = (& $Python -c "from pathlib import Path; import ssl; print(Path(ssl.__file__).with_name('codex-rejected-cas.pem'), end='')").Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect the Python TLS policy resource"
+}
+if (Test-Path -LiteralPath $SslPolicyFile) {
+    $PackagedSslPolicy = Join-Path $ProjectRoot "output\$ExecutableStem\_internal\codex-rejected-cas.pem"
+    if (-not (Test-Path -LiteralPath $PackagedSslPolicy)) {
+        $failures.Add("Missing Python TLS policy resource: $PackagedSslPolicy")
+    } elseif ((Get-FileHash -LiteralPath $SslPolicyFile).Hash -ne (Get-FileHash -LiteralPath $PackagedSslPolicy).Hash) {
+        $failures.Add("Packaged Python TLS policy resource differs from the build runtime.")
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "AstroClocks release verification failed:" -ForegroundColor Red
     foreach ($failure in $failures) {

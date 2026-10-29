@@ -39,6 +39,17 @@ if (-not $ExecutableStem) {
 $ExecutableName = "$ExecutableStem.exe"
 $InstallerName = "Install_AstroClocks$Version.exe"
 
+# Some Python distributions load a TLS policy file beside ssl.py whenever
+# an SSLContext is created. Preserve it beside frozen ssl.py as well.
+$SslPolicyFile = (& $Python -c "from pathlib import Path; import ssl; print(Path(ssl.__file__).with_name('codex-rejected-cas.pem'), end='')").Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect the Python TLS policy resource"
+}
+$SslPolicyArgs = @()
+if (Test-Path -LiteralPath $SslPolicyFile) {
+    $SslPolicyArgs = @("--add-data", "$SslPolicyFile;.")
+}
+
 & $Python -m pip install -e ".[build]"
 if ($LASTEXITCODE -ne 0) {
     throw "Dependency installation failed with exit code $LASTEXITCODE"
@@ -67,6 +78,7 @@ Remove-GeneratedPath (Join-Path $ProjectRoot "output\$ExecutableStem")
     --collect-all "zeep" `
     --collect-all "tzdata" `
     --collect-all "truststore" `
+    @SslPolicyArgs `
     ".\AstroClocks.py"
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
